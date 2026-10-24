@@ -116,7 +116,8 @@ test('extra tombstone feeds: a record that left the query (locked) leaves a clos
   const locked = { id: 'p1', updatedAt: T0 + H, locked: true };
   srv.del('items', 'p1');
   const entry = leaveEntry('item', locked, T0 + H);
-  assert.deepEqual(entry, { id: 'item:p1', kind: 'item', data: { id: 'p1', updatedAt: T0 + H }, deletedAt: T0 + H });
+  // 0.4.0: deletedAt is max(at, updatedAt + 1), always after the version it removes (0.3.0 gave at itself)
+  assert.deepEqual(entry, { id: 'item:p1', kind: 'item', data: { id: 'p1', updatedAt: T0 + H }, deletedAt: T0 + H + 1 });
   srv.set('leaves', entry);
   now = T0 + 2 * H;
   off = hub.watch(S, 'items', l => { last = l.map(d => d.id).sort(); });

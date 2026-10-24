@@ -2,9 +2,11 @@
 // its own SDK module (the modular API: collection, doc, query, where, onSnapshot, getDocFromServer, runTransaction),
 // so this file works with whichever SDK build and version the app loads.
 //
-// createFirestoreBackend({ sdk, path, field = 'updatedAt', time = 'ms', stamp, canonical, where, merge, mark, stampMode, serverField, onSnapshotMeta, onRead })
+// createFirestoreBackend({ sdk, path, field = 'updatedAt', time = 'ms', stamp, canonical, where, merge, mark, stampMode, serverField, onCommit, onSnapshotMeta, onRead })
 //   sdk: async () => ({ db, F }), F the SDK's functions. path(scope, coll) -> the collection's path segments
-//   (e.g. ['accounts', scope, coll]). stamp(doc, coll) -> the doc as written (default: updatedAt = Date.now()).
+//   (e.g. ['accounts', scope, coll]). stamp(doc, coll) -> the doc as written (default: updatedAt = max(now, the
+//   server copy's updatedAt + 1), taken inside the commit transaction, so a stamp only ever moves forward even when
+//   the writer's clock is behind the last writer's).
 //   canonical(coll, value) -> the form compared for conflicts (default: as stored). onSnapshotMeta(coll, meta): every
 //   snapshot's { fromCache, hasPendingWrites } (for the watchdog). onRead(coll, kind, n): documents read ('billed' /
 //   'served'), for read counts in tests.
@@ -19,22 +21,31 @@
 //   serverTimestamp(), in the same transaction, beside the usual stamp; reads give it as ms (null while this
 //   device's own write is not on the server yet), a query on it compares server Timestamps, and the conflict check
 //   leaves it out (only the content and the usual stamp count). Rules can then require serverAt == request.time.
-// -> { listen, fetchOne, commit, stamp, stampFields }
+//   onCommit({ scope, coll, before, after, at, fields }) -> [{ path, data, merge } | { path, delete: true }]: more
+//   writes in the same transaction as a record's write (e.g. a leave entry with a lock, so no device ever sees one
+//   without the other). before: the server's copy (null: none); after: what is written (null: a delete); at: its
+//   stamp; fields: the stamp fields for those writes (stampFields). path: the document's path segments. Not called
+//   when nothing is written (the server already has this content).
+// -> { listen, fetchOne, commit, stamp, stampFields, clearCache }
 //   commit(scope, coll, record, base, { key, ops }): a transaction that writes record (record._deleted: deletes it)
 //   only when the server's copy still matches base; throws { code: 'write-conflict', remote } otherwise (conflict.js).
 //   In a merge collection it writes the merge of the server's copy with this change instead, and throws
 //   { code: 'not-found' } when the record was deleted elsewhere since base (never brought back). The write queue's
 //   backend(owner, kind, record, base, extra) maps kind to coll and calls commit(owner, coll, record, base, extra).
-//   stamp() -> the stamp value for now (for an app's own writes outside the queue, so every write is stamped alike).
-//   stampFields() -> Promise of the fields to add to such a write: { [field]: stamp() } and, in server mode,
+//   stamp(prev) -> the stamp value for now (for an app's own writes outside the queue, so every write is stamped
+//   alike); with prev (the record's stamp before this write), max(now, prev + 1).
+//   stampFields(prev) -> Promise of the fields to add to such a write: { [field]: stamp(prev) } and, in server mode,
 //   { [serverField]: serverTimestamp() } (bin entries and leave entries too).
+//   clearCache() -> terminates the SDK and clears its offline cache (sign-out on a shared device); the SDK instance
+//   can't be used afterwards, so the app reloads (or builds a new one) before reading again.
 import { checkWrite, mergeFields, recordSignature } from './conflict.js';
 
 const plain = v => JSON.parse(JSON.stringify(v));
 
-const MARKS = 20;   // save keys kept on a merged record (mark)
+const MARKS = 20;
+const timeOf = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;   // save keys kept on a merged record (mark)
 
-export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', onSnapshotMeta = () => {}, onRead = () => {} }) {
+export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', onCommit = null, onSnapshotMeta = () => {}, onRead = () => {} }) {
   if (typeof sdk !== 'function' || typeof path !== 'function') throw new Error('createFirestoreBackend needs sdk and path');
   if (time !== 'ms' && time !== 'iso') throw new Error("createFirestoreBackend: time is 'ms' or 'iso'");
   if (stampMode !== 'client' && stampMode !== 'server') throw new Error("createFirestoreBackend: stampMode is 'client' or 'server'");
@@ -49,7 +60,19 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   const canonical = (coll, v) => canonOf(coll, unstampServer(v));
   const withServer = (F, doc) => server ? { ...doc, [serverField]: F.serverTimestamp() } : doc;
   const at = ms => time === 'iso' ? new Date(ms).toISOString() : ms;
-  const stampDoc = stamp || (doc => ({ ...doc, [stampField]: at(Date.now()) }));
+  const next = prev => at(Math.max(Date.now(), timeOf(prev) + 1));
+  const stampDoc = stamp || (doc => ({ ...doc, [stampField]: next() }));
+  // the default stamp again, now that the server's copy is known (an app's own stamp function is left as it is)
+  const forward = (doc, current) => stamp ? doc : { ...doc, [stampField]: next(current && current[stampField]) };
+  // the app's extra writes for this commit, in the same transaction
+  const extra = (F, db, tx, ctx) => {
+    if (!onCommit) return;
+    const at = ctx.after ? ctx.after[stampField] : next(ctx.before && ctx.before[stampField]);
+    for (const w of onCommit({ ...ctx, at, fields: withServer(F, { [stampField]: at }) }) || []) {
+      const ref = F.doc(db, ...w.path.map(String));
+      if (w.delete) tx.delete(ref); else if (w.merge) tx.set(ref, w.data, { merge: true }); else tx.set(ref, w.data);
+    }
+  };
   const colRef = (db, F, scope, coll) => F.collection(db, ...path(scope, coll));
   const filters = (F, scope, coll) => (where(scope, coll) || []).map(w => F.where(...w));
   const mergeOf = coll => Object.hasOwn(merge || {}, coll) && merge[coll] ? (merge[coll] === true ? mergeFields : merge[coll]) : null;
@@ -93,15 +116,17 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     const merging = mergeOf(coll);
     if (merging) return commitMerged(scope, coll, record, base, merging, key, ops);
     const deleted = record && record._deleted === true;
-    const doc = deleted ? { id: String(record.id), _deleted: true } : unstampServer(plain(stampDoc(plain(record), coll)));
+    const stamped = deleted ? { id: String(record.id), _deleted: true } : unstampServer(plain(stampDoc(plain(record), coll)));
     const canon = v => v ? canonical(coll, v) : null;
     const { db, F } = await sdk();
-    const ref = F.doc(colRef(db, F, scope, coll), String(doc.id));
+    const ref = F.doc(colRef(db, F, scope, coll), String(stamped.id));
     return F.runTransaction(db, async tx => {
       const snap = await tx.get(ref);
       const current = snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
+      const doc = deleted ? stamped : forward(stamped, current);
       if (!checkWrite(canon(current), deleted ? null : canon(doc), canon(base))) return current || doc;
       if (deleted) tx.delete(ref); else tx.set(ref, withServer(F, doc));
+      extra(F, db, tx, { scope, coll, before: current, after: deleted ? null : doc });
       return doc;
     });
   }
@@ -115,21 +140,28 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return F.runTransaction(db, async tx => {
       const snap = await tx.get(ref);
       const current = snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
-      if (deleted) { if (current) tx.delete(ref); return { id, _deleted: true }; }
+      if (deleted) { if (current) { tx.delete(ref); extra(F, db, tx, { scope, coll, before: current, after: null }); } return { id, _deleted: true }; }
       if (mark && key && Array.isArray(current?.[mark]) && current[mark].includes(key)) return current;   // applied already
       if (base && !current) { const e = new Error('This record was deleted elsewhere; your version is kept'); e.code = 'not-found'; throw e; }
-      const next = unstampServer(plain(stampDoc(plain({ ...merging(current ? plain(current) : null, plain(record), base ? plain(base) : null, ops), id }), coll)));
-      if (mark) { if (key) next[mark] = [...(Array.isArray(current?.[mark]) ? current[mark] : []), key].slice(-MARKS); else if (current?.[mark]) next[mark] = current[mark]; }
-      if (current && recordSignature(bare(current)) === recordSignature(bare(next))) return current;   // nothing changed
-      tx.set(ref, withServer(F, next));
-      return next;
+      const merged = forward(unstampServer(plain(stampDoc(plain({ ...merging(current ? plain(current) : null, plain(record), base ? plain(base) : null, ops), id }), coll))), current);
+      if (mark) { if (key) merged[mark] = [...(Array.isArray(current?.[mark]) ? current[mark] : []), key].slice(-MARKS); else if (current?.[mark]) merged[mark] = current[mark]; }
+      if (current && recordSignature(bare(current)) === recordSignature(bare(merged))) return current;   // nothing changed
+      tx.set(ref, withServer(F, merged));
+      extra(F, db, tx, { scope, coll, before: current, after: merged });
+      return merged;
     });
   }
 
-  async function stampFields() {
+  async function stampFields(prev) {
     const { F } = server ? await sdk() : {};
-    return withServer(F, { [stampField]: at(Date.now()) });
+    return withServer(F, { [stampField]: next(prev) });
   }
 
-  return { listen, fetchOne, commit, stamp: () => at(Date.now()), stampFields };
+  async function clearCache() {
+    const { db, F } = await sdk();
+    await F.terminate(db);
+    await F.clearIndexedDbPersistence(db);
+  }
+
+  return { listen, fetchOne, commit, stamp: prev => next(prev), stampFields, clearCache };
 }

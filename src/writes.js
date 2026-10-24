@@ -3,11 +3,13 @@
 // expires and never blocks a later save made on the version shown; another window on the device sharing the outbox
 // is taken into account before anything is sent again.
 //
-// createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels })
+// createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels, otherPending })
 //   store: the outbox ({ put, list, get, remove, forget }). backend(owner, kind, record, base) -> result; throws
 //   { code: 'write-conflict', remote } (conflict.js checkWrite), a transient error ('unavailable',
-//   'deadline-exceeded': stays pending, retried with backoff) or any other error (failed). sendTimeout: a backend call
-//   that doesn't settle in this time counts as transient, so one stuck call never holds a record's saves for good.
+//   'deadline-exceeded', 'aborted': stays pending, retried with backoff) or any other error (failed). sendTimeout: a
+//   backend call that doesn't settle in this time counts as transient, so one stuck call never holds a record's saves
+//   for good. otherPending: async () -> truthy while writes sent another way (not through this queue) are not on the
+//   server yet; it keeps the sign-out check (flush) shut, as does a throw (can't tell).
 // save(kind, owner, record, base, { ops }): ops (optional) describe the change for a backend that applies changes by
 //   field (a last-write-wins collection: increments, keyed updates). They are stored with the save and handed on as
 //   backend(owner, kind, record, base, { key, ops: [ops, …] }), key the save's own id (a backend can use it to apply
@@ -18,10 +20,11 @@ const keyOf = job => job.kind + ':' + job.record.id;
 const same = (a, b) => recordSignature(a) === recordSignature(b);
 const terminal = new Set(['synced', 'archived']);
 const KEEP = 100;   // finished saves kept in the device history (the app's history view)
-// the network dropped mid-save (Firestore: 'unavailable', 'deadline-exceeded'): the job stays pending and tries again
-const transient = error => error?.code === 'unavailable' || error?.code === 'deadline-exceeded';
+// the network dropped mid-save (Firestore: 'unavailable', 'deadline-exceeded'), or another device's transaction on the
+// same record won the race ('aborted'): the job stays pending and tries again
+const transient = error => error?.code === 'unavailable' || error?.code === 'deadline-exceeded' || error?.code === 'aborted';
 export const SEND_TIMEOUT = 30000;
-export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {} }) {
+export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
   const recover = labels.recover || 'Recover';
   const failure = job => new Error(new RegExp('in ' + recover + '\\b').test(job.error) ? job.error : job.error + ' — a copy is kept in ' + recover);
@@ -234,6 +237,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     // a save needs the user (failed, or met a change made elsewhere), without copying every entry as entries() does
     attention: kind => jobs.some(x => (!kind || x.kind === kind) && (x.state === 'failed' || x.state === 'conflict')),
     // a change made elsewhere stopped this record's saves: nothing more of it is sent until the user chooses
+    // this record has saves not sent yet (pending, failed or in conflict): for the engine's unsent option
+    unsent: (kind, id) => jobs.some(x => x.kind === kind && x.record.id === id && !terminal.has(x.state)),
     conflicted: (kind, id) => jobs.some(x => x.kind === kind && x.record.id === id && x.state === 'conflict'),
     // -> true once none of these records is being sent (false after ms): what became of each save is known then
     // (synced, conflict, failed, or pending: offline or waiting to retry), not only that it was stored, which is all
@@ -246,6 +251,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     async flush(ms = 4000) {
       kick(); await Promise.race([Promise.all([...running.values()]), delay(ms)]);
       if (jobs.some(x => !terminal.has(x.state))) return false;
+      // writes the app sends another way (straight to the SDK) and not yet on the server
+      if (otherPending) { try { if (await otherPending()) return false; } catch { return false; } }
       // changes another tab (or the home-screen app) has not synced yet are in the same store: signing out deletes them
       if (!owner) return true;
       // (the shared outbox can't be read: not known to be empty, so the sign-out gate stays shut)

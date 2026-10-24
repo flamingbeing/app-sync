@@ -41,7 +41,12 @@
 //
 // Extra tombstone feeds (feeds: { [coll]: kinds }): like the bin, for records that left a query without being
 // deleted (locked, moved, access removed), which a delta listener never hears of. leaveEntry builds the entry an app
-// writes there.
+// writes there; its deletedAt is max(at, the record's updatedAt + 1), in the type of at (a number, or an ISO string).
+//
+// Unsent saves (0.4.0): unsent(id) says a held record still has saves this device has not sent (queue.unsent). Such a
+// record that leaves the query (locked, moved, deleted elsewhere) stays on this device and onLeave(id, doc) reports
+// it, so the app can tell the user and the save meets the server's answer (a conflict, kept for the user) instead of
+// the record vanishing with the change in it.
 
 export const SKEW = 10 * 60e3;          // clocks may be this far behind
 export const FULL_EVERY = 7 * 864e5;     // a full read at least weekly
@@ -78,7 +83,10 @@ const newestServer = (docs, pending, field) => { let n = 0; for (const d of docs
 
 // A record that left a query without being deleted (locked, moved): the entry an app writes to an extra tombstone
 // feed, so devices holding that version (or older) drop it at their next open. A newer version shows again.
-export const leaveEntry = (kind, record, at = Date.now()) => ({ id: kind + ':' + record.id, kind, data: { id: String(record.id), updatedAt: record.updatedAt }, deletedAt: at });
+export const leaveEntry = (kind, record, at = Date.now()) => {
+  const t = Math.max(timeOf(at), timeOf(record.updatedAt) + 1);
+  return { id: kind + ':' + record.id, kind, data: { id: String(record.id), updatedAt: record.updatedAt }, deletedAt: typeof at === 'string' ? new Date(t).toISOString() : t };
+};
 
 // Apply a snapshot's changes to docs (a Map, changed in place). A copy older than a known deletion is stale and
 // skipped. A removal goes at once when the deletion is known or sure(id) says the server confirmed it; otherwise it
@@ -168,8 +176,11 @@ export async function eachSettled(ids, write, size = 20) {
 // ---- one collection ----
 
 // subscribe(cb) -> unsubscribe; cb(list, { fromCache, hasPendingWrites }) with the whole merged list (a copy each time).
-export function createCollectionSync({ scope, coll, store, listen, fetchOne = null, now = Date.now, onError = () => {}, unstamped = 'skip', expire = null, stampMode = 'client', serverField = 'serverAt' }) {
+export function createCollectionSync({ scope, coll, store, listen, fetchOne = null, now = Date.now, onError = () => {}, unstamped = 'skip', expire = null, stampMode = 'client', serverField = 'serverAt', unsent = () => false, onLeave = () => {} }) {
   const server = stampMode === 'server';
+  // a held record with saves not sent yet (can't tell: kept, the safe side)
+  const holding = id => { try { return docs.has(id) && !!unsent(id); } catch { return docs.has(id); } };
+  const left = id => { try { onLeave(id, copy(docs.get(id))); } catch (e) { console.warn('onLeave', e); } };
   const subs = new Set(), local = new Set();   // local: ids last seen with this device's write pending
   let docs = new Map(), meta = {}, flags = null, stopped = false, unlisten = null, chain = Promise.resolve(), runs = 0, planned = null;
   // A write that fails (storage full) leaves the device's copy short of what meta claims: until a later write puts the
@@ -219,7 +230,10 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     // server stamps: the anchor moves only on what the server confirmed, never on this device's pending writes
     const pending = new Set((s.changes || []).filter(c => c.pending).map(c => c.id));
     if (s.full) {
-      const r = replaceAll(docs, s.docs || []);
+      const list = s.docs || [], there = new Set(list.map(d => d.id));
+      const kept = [...docs.keys()].filter(id => !there.has(id) && holding(id));
+      const r = replaceAll(docs, [...list, ...kept.map(id => docs.get(id))]);
+      for (const id of kept) left(id);
       meta = { ...meta, syncAt: t, fullAt: t, gone: pruneGone(meta.gone, t), ...(s.epoch !== undefined ? { epoch: s.epoch } : {}),
         ...(server ? { anchor: newestServer(s.docs || [], pending, serverField) } : {}) };
       const swept = expireDocs(docs, meta.gone, expire, t);
@@ -227,12 +241,14 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       changed = !!(r.put.length || r.del.length);
       persist({ ...r, meta });
     } else {
-      const unsure = new Set();
-      for (const c of s.changes || []) {
+      const unsure = new Set(), kept = [];
+      const changes = (s.changes || []).filter(c => c.type !== 'removed' || !holding(c.id) || (kept.push(c.id), false));
+      for (const c of changes) {
         if (c.type === 'removed') { if (s.fromCache || local.has(c.id)) unsure.add(c.id); local.delete(c.id); }
         else if (c.pending) local.add(c.id); else local.delete(c.id);
       }
-      const r = applyChanges(docs, s.changes, meta.gone || {}, id => !unsure.has(id));
+      const r = applyChanges(docs, changes, meta.gone || {}, id => !unsure.has(id));
+      for (const id of kept) left(id);
       const swept = expireDocs(docs, meta.gone ||= {}, expire, t);
       if (swept.length) r.put = r.put.filter(d => !swept.includes(d.id)), r.del.push(...swept);
       changed = !!(r.put.length || r.del.length);
@@ -254,6 +270,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     try { doc = fetchOne ? await fetchOne(scope, coll, id) : undefined; } catch { doc = undefined; }
     if (stopped) return;
     const gone = meta.gone || {};
+    if (!(doc && !(gone[id] != null && stamp(doc) <= gone[id])) && holding(id)) { left(id); return; }
     if (doc && !(gone[id] != null && stamp(doc) <= gone[id])) {
       if (same(docs.get(id), doc)) return;
       docs.set(id, doc); persist({ put: [doc], meta });
@@ -355,7 +372,7 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
 // metaOnly). unstamped ('skip' | 'full'), expire ({ [coll]: { field, after } }) and stampMode ('client' | 'server',
 // with serverField; the bin and feeds too): see the top of this file.
 export const GRACE = 1500;
-export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, feeds: extraFeeds = {}, unstamped = 'skip', expire = {}, stampMode = 'client', serverField = 'serverAt' }) {
+export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, feeds: extraFeeds = {}, unstamped = 'skip', expire = {}, stampMode = 'client', serverField = 'serverAt', unsent = () => false, onLeave = () => {} }) {
   const feedKinds = [...(bin ? [[bin, binKinds]] : []), ...Object.entries(extraFeeds || {}).filter(([c]) => c && c !== bin)];
   const engines = new Map(), feeds = new Map(), stores = new Map(), timers = new Map(), stopping = new Map(), tombing = new Map();
   const key = (scope, coll) => scope + '\n' + coll;
@@ -418,7 +435,8 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     watch(scope, coll, cb) {
       const k = key(scope, coll);
       let e = engines.get(k);
-      if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen, fetchOne, now, onError, unstamped, expire: (expire && Object.hasOwn(expire, coll) && expire[coll]) || null, stampMode, serverField }); engines.set(k, e); }
+      if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen, fetchOne, now, onError, unstamped, expire: (expire && Object.hasOwn(expire, coll) && expire[coll]) || null, stampMode, serverField,
+        unsent: id => unsent(scope, coll, id), onLeave: (id, doc) => onLeave(scope, coll, id, doc) }); engines.set(k, e); }
       for (const [fc, kinds] of feedKinds) {
         const fk = key(scope, fc);
         if (!feeds.has(fk)) feeds.set(fk, createTombFeed({ scope, coll: fc, kinds, store: lazyStore(scope), listen, apply: tombsFor(scope), now, onError, stampMode, serverField }));

@@ -160,10 +160,23 @@ test('the page can ask for the stamped version', async () => {
   let got; const port = { postMessage: m => { got = m; } };
   await w.fire('message', { data: { type: 'update:version' }, ports: [port] });
   assert.equal(got.version, 'demo-2026-10-24-aaaaaaaa');
-  assert.equal(got.core, '0.1.0');
+  assert.equal(got.core, '0.2.0');
 });
 
 test('init refuses a version that does not start with the app name', () => {
   const w = makeWorld({ server: makeServer({}), scope: SCOPE });
   assert.throws(() => w.AppUpdate.init({ app: 'demo', version: 'other-1', shell: [] }), /should start with/);
+});
+
+test('waitForGo: install does not take over; the page\'s update:go does (old messages still work)', async () => {
+  const server = makeServer(files()), caches = new FakeCaches();
+  const w = boot(server, caches, 'demo-2026-10-24-aaaaaaaa', man(), { waitForGo: true });
+  await w.fire('install');
+  assert.ok(!w.self.skipped);
+  await w.fire('message', { data: { type: 'update:go' } });
+  assert.ok(w.self.skipped);
+  const w2 = boot(server, caches, 'demo-2026-10-25-bbbbbbbb', man(), { waitForGo: true });
+  await w2.fire('install');
+  await w2.fire('message', { data: { type: 'take-over' } });
+  assert.ok(w2.self.skipped);
 });

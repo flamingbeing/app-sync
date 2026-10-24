@@ -7,5 +7,6 @@ export { createOutbox } from './src/outbox.js';
 export { decide, createWatchdog, CACHE_MS, FLAG_MS, STALE_MS, THROTTLE_MS, ESCALATE_MS, CYCLE_THROTTLE_MS } from './src/watchdog.js';
 export { persistGuard } from './src/persist.js';
 export { syncStatus, attentionCount } from './src/status.js';
+export { forgetDevice } from './src/forget.js';
 export { createFirestoreBackend } from './src/firestore.js';
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';

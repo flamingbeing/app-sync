@@ -16,9 +16,13 @@ What it does:
   in order. A save that fails or meets a change made elsewhere (a conflict) is kept until the user chooses; it never
   expires and never blocks a later save made on the version shown. Several tabs share the outbox safely.
 - **An honest status.** A listener watchdog notices a stream that went quiet; the status rules say `synced` only
-  when nothing is waiting, failed or in conflict and the server is being heard.
-- **Sign-out wipes the device.** The sign-out check refuses while anything is unsent (in any tab), then every store
-  is deleted, in every tab.
+  when nothing is waiting, failed or in conflict and the server is being heard (with `confirmed`, `unknown` until the
+  server has answered once).
+- **Stamps only move forward.** The adapter stamps `max(now, the server copy + 1)` inside the commit transaction, so
+  a writer whose clock is behind still moves a record's stamp on (0.4.0).
+- **Sign-out wipes the device.** The sign-out check refuses while anything is unsent (in any tab, and the app's own
+  writes through `otherPending`), then `forgetDevice` stops everything, checks again, and deletes every store but the
+  account kept, the outbox, the SDK's offline cache (`clearCache`) and the app's own lists, in every tab.
 
 ## Modules
 
@@ -40,7 +44,7 @@ What it does:
 ```js
 import * as F from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { createSyncHub, createWriteQueue, createStores, createOutbox, createFirestoreBackend, replanOnWake,
-  persistGuard, syncStatus, attentionCount } from 'https://core.anawj.com/sync/0.3.0/index.js';
+  persistGuard, syncStatus, attentionCount, forgetDevice } from 'https://core.anawj.com/sync/0.4.0/index.js';
 
 const fs = createFirestoreBackend({ sdk: async () => ({ db, F }), path: (space, coll) => ['spaces', space, coll] });
 const stores = createStores({ prefix: 'myapp-store:', colls: ['items'] });
@@ -59,7 +63,13 @@ const off = hub.watch(currentSpace, 'items', (list, meta) => render(queue.overla
 await queue.save('item', currentSpace, { id: 'i1', text: 'Hello' }, previousCopy);   // base: the copy the edit started from
 
 const { persisted } = await persistGuard();
-const status = syncStatus({ online: navigator.onLine, pending: queue.pending(), attention: attentionCount(queue.entries()), persisted });
+const status = syncStatus({ online: navigator.onLine, pending: queue.pending(), attention: attentionCount(queue.entries()), persisted,
+  confirmed: heard, atRiskOnlyOffline: true });   // heard: a snapshot with fromCache false since the page opened
+
+// sign-out, after `await queue.flush()` said nothing is unsent
+await forgetDevice({ hub, stores, queue, proceed: async () => stillSigningOut(), keep: () => otherTabAccount(),
+  clearBackendCache: fs.clearCache, extra: async () => clearAppLists() });
+location.reload();   // the SDK was terminated by clearCache
 ```
 
 Each module's header comment describes its options and contract in full.
@@ -116,6 +126,16 @@ listener, so a device that was closed keeps it until the weekly full read. Write
 (`leaveEntry(kind, record)` plus the stamps) to a feed collection when it leaves, and name that collection in the
 hub's `feeds` (and in the stores' `metaOnly`): devices drop that version at their next open, and a newer version (the
 record unlocked) shows again.
+
+**Leave entries in the same transaction (0.4.0).** Give the adapter `onCommit` and return the leave entry from it
+when a commit locks or moves a record: it is written in the record's own transaction, so no device sees the lock
+without the entry (or the other way round), and its `deletedAt` is after the locked version (`leaveEntry` stamps
+`max(at, updatedAt + 1)`). A record that leaves while this device still has unsent saves for it is kept here, and the
+hub's `onLeave(scope, coll, id, doc)` says so (pass `unsent: (scope, coll, id) => queue.unsent(kind, id)`), so the
+save meets the server's answer instead of vanishing with the record.
+
+**Two phones at once.** A Firestore transaction that lost a race with another device's (`aborted`) is retried like a
+dropped connection, never shown as needing the user.
 
 ## What stays in each app
 

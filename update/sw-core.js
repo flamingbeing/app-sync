@@ -1,8 +1,8 @@
-/* app-update sw-core 0.1.0 (Apache-2.0). The service worker core shared by the apps: load it with importScripts from a
+/* app-update sw-core 0.2.0 (Apache-2.0). The service worker core shared by the apps: load it with importScripts from a
    pinned address, then call AppUpdate.init({ app, version, shell, manifest, ... }). See update/README.md. */
 (function (self) {
   'use strict';
-  const CORE_VERSION = '0.1.0';
+  const CORE_VERSION = '0.2.0';
   const MANIFEST_PATH = './.app-update-manifest';
   // never cached, whatever the app says: Firebase auth pages, Cloudflare Access, and its return pages
   const NEVER = [/^\/__\//, /^\/cdn-cgi\//];
@@ -70,7 +70,7 @@
     }
 
     self.addEventListener('install', event => {
-      self.skipWaiting();
+      if (!cfg.waitForGo) self.skipWaiting();   // waitForGo: stay waiting until a page sends update:go (register's canReload)
       event.waitUntil(precache());
     });
 
@@ -153,7 +153,7 @@
       const d = event.data;
       if (!d || typeof d !== 'object') return;
       if (d.type === 'update:version') (event.ports && event.ports[0] ? event.ports[0] : event.source).postMessage({ type: 'update:version', version, core: CORE_VERSION });
-      else if (d.type === 'skipWaiting' || d.type === 'take-over') self.skipWaiting();   // old page code during a migration
+      else if (d.type === 'update:go' || d.type === 'skipWaiting' || d.type === 'take-over') self.skipWaiting();   // the page's go; the other two: old page code during a migration
     });
   }
 
