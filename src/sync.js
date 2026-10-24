@@ -30,10 +30,23 @@
 // updatedAt (until a backfill stamps them all; a delta read would never see such a record change), and expire
 // ({ field, after }) drops a soft-deleted record from this device once that field is older than after (the time
 // after which the app removes it for good, which no delta listener hears).
+//
+// Server stamps (stampMode: 'server', 0.3.0): each write also carries serverField (default serverAt), set by the
+// server (Firestore serverTimestamp()), and the delta read is serverAt > the newest server stamp this device has had
+// confirmed (meta.anchor): no SKEW and no local clock, so a write that reached the server late (offline for days) or
+// a reader whose clock is off still meets. A stamp not yet resolved (this device's write not on the server: null, or
+// an estimate) and a cached snapshot never move the anchor. A held document without a server stamp (written before
+// adoption, or by an older app version) makes every open a full read until a backfill stamps it. updatedAt stays as
+// it was (conflict checks and tombstones still use it). The weekly full read stays (deletes without a tombstone).
+//
+// Extra tombstone feeds (feeds: { [coll]: kinds }): like the bin, for records that left a query without being
+// deleted (locked, moved, access removed), which a delta listener never hears of. leaveEntry builds the entry an app
+// writes there.
 
 export const SKEW = 10 * 60e3;          // clocks may be this far behind
 export const FULL_EVERY = 7 * 864e5;     // a full read at least weekly
 export const GONE_KEEP = 8 * 864e5;      // deleted ids remembered (longer than the weekly full read)
+export const REPLAN_EVERY = 3600e3;     // a page left open checks hourly whether its full read is due
 
 const copy = v => JSON.parse(JSON.stringify(v));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -51,6 +64,21 @@ export function plan(meta, now, newest = 0) {
   const full = !(m.fullAt > 0) || !(m.syncAt > 0) || now - m.fullAt > FULL_EVERY || m.fullAt > now + SKEW;
   return { full, since: full ? null : Math.min(Math.min(m.syncAt, now) - SKEW, newest > 0 ? newest : Infinity) };
 }
+
+// The same with server stamps: from the newest confirmed server stamp (meta.anchor), with no SKEW (the server's clock
+// stamped every document); a full read first, weekly, with no anchor yet, or when this clock went back.
+export function planServer(meta, now) {
+  const m = meta || {};
+  const full = !(m.fullAt > 0) || !(m.anchor > 0) || now - m.fullAt > FULL_EVERY || m.fullAt > now + SKEW;
+  return { full, since: full ? null : m.anchor - 1 };
+}
+
+// the newest resolved server stamp in a confirmed snapshot's documents (skipping this device's pending writes)
+const newestServer = (docs, pending, field) => { let n = 0; for (const d of docs) if (d && !pending.has(d.id)) n = Math.max(n, timeOf(d[field])); return n; };
+
+// A record that left a query without being deleted (locked, moved): the entry an app writes to an extra tombstone
+// feed, so devices holding that version (or older) drop it at their next open. A newer version shows again.
+export const leaveEntry = (kind, record, at = Date.now()) => ({ id: kind + ':' + record.id, kind, data: { id: String(record.id), updatedAt: record.updatedAt }, deletedAt: at });
 
 // Apply a snapshot's changes to docs (a Map, changed in place). A copy older than a known deletion is stale and
 // skipped. A removal goes at once when the deletion is known or sure(id) says the server confirmed it; otherwise it
@@ -140,7 +168,8 @@ export async function eachSettled(ids, write, size = 20) {
 // ---- one collection ----
 
 // subscribe(cb) -> unsubscribe; cb(list, { fromCache, hasPendingWrites }) with the whole merged list (a copy each time).
-export function createCollectionSync({ scope, coll, store, listen, fetchOne = null, now = Date.now, onError = () => {}, unstamped = 'skip', expire = null }) {
+export function createCollectionSync({ scope, coll, store, listen, fetchOne = null, now = Date.now, onError = () => {}, unstamped = 'skip', expire = null, stampMode = 'client', serverField = 'serverAt' }) {
+  const server = stampMode === 'server';
   const subs = new Set(), local = new Set();   // local: ids last seen with this device's write pending
   let docs = new Map(), meta = {}, flags = null, stopped = false, unlisten = null, chain = Promise.resolve(), runs = 0, planned = null;
   // A write that fails (storage full) leaves the device's copy short of what meta claims: until a later write puts the
@@ -168,14 +197,18 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
 
   const newestHeld = () => { let n = 0; for (const d of docs.values()) n = Math.max(n, stamp(d)); return n; };
   const anyUnstamped = () => { for (const d of docs.values()) if (!stamp(d)) return true; return false; };
-  const planNow = () => { const p = plan(meta, now(), newestHeld()); return !p.full && unstamped === 'full' && anyUnstamped() ? { full: true, since: null } : p; };
+  const anyUnresolved = () => { for (const d of docs.values()) if (!(timeOf(d && d[serverField]) > 0)) return true; return false; };
+  const planNow = () => {
+    if (server) { const p = planServer(meta, now()); return !p.full && anyUnresolved() ? { full: true, since: null } : p; }
+    const p = plan(meta, now(), newestHeld()); return !p.full && unstamped === 'full' && anyUnstamped() ? { full: true, since: null } : p;
+  };
   // (re)start the listener from meta; an older listener's late snapshots are ignored
   function start() {
     const run = ++runs;
     if (unlisten) { unlisten(); unlisten = null; }
     const p = planNow();
     planned = p;
-    unlisten = listen(scope, coll, { since: p.since, epoch: meta.epoch }, s => { if (run === runs) onSnap(s); }, onError);
+    unlisten = listen(scope, coll, { since: p.since, epoch: meta.epoch, ...(server ? { field: serverField } : {}) }, s => { if (run === runs) onSnap(s); }, onError);
     if (stopped) unlisten();
   }
 
@@ -183,9 +216,12 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     if (stopped) return;
     const t = now();
     let changed = false;
+    // server stamps: the anchor moves only on what the server confirmed, never on this device's pending writes
+    const pending = new Set((s.changes || []).filter(c => c.pending).map(c => c.id));
     if (s.full) {
       const r = replaceAll(docs, s.docs || []);
-      meta = { ...meta, syncAt: t, fullAt: t, gone: pruneGone(meta.gone, t), ...(s.epoch !== undefined ? { epoch: s.epoch } : {}) };
+      meta = { ...meta, syncAt: t, fullAt: t, gone: pruneGone(meta.gone, t), ...(s.epoch !== undefined ? { epoch: s.epoch } : {}),
+        ...(server ? { anchor: newestServer(s.docs || [], pending, serverField) } : {}) };
       const swept = expireDocs(docs, meta.gone, expire, t);
       if (swept.length) r.put = r.put.filter(d => !swept.includes(d.id)), r.del.push(...swept);
       changed = !!(r.put.length || r.del.length);
@@ -201,6 +237,10 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       if (swept.length) r.put = r.put.filter(d => !swept.includes(d.id)), r.del.push(...swept);
       changed = !!(r.put.length || r.del.length);
       if (!s.fromCache) meta = { ...meta, syncAt: t };
+      if (server && !s.fromCache) {
+        const n = newestServer((s.changes || []).filter(c => c.type !== 'removed').map(c => c.doc), pending, serverField);
+        if (n > (Number(meta.anchor) || 0)) meta = { ...meta, anchor: n };
+      }
       if (changed || !s.fromCache) persist({ put: r.put, del: r.del, meta });
       for (const id of r.verify) verify(id);
     }
@@ -260,7 +300,9 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
 
 // ---- the recycle bin as a feed of tombstones ----
 // Listens to bin entries changed since the last sync (deletedAt) and hands them on; keeps only its meta record.
-export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll = 'bin', now = Date.now, onError = () => {} }) {
+export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll = 'bin', now = Date.now, onError = () => {}, stampMode = 'client', serverField = 'serverAt' }) {
+  const server = stampMode === 'server';
+  const planNow = () => server ? planServer(meta, now()) : plan(meta, now(), Number(meta.newest) || 0);
   let meta = {}, stopped = false, unlisten = null, chain = Promise.resolve(), runs = 0, planned = null;
   const ready = (async () => {
     meta = (await store.load(coll)).meta || {};
@@ -273,19 +315,21 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
     if (unlisten) { unlisten(); unlisten = null; }
     // anchored to the newest deletedAt seen, as collections are to their newest stamp: a reader whose clock ran
     // ahead at its last sync still hears entries others stamped since
-    const p = plan(meta, now(), Number(meta.newest) || 0);
+    const p = planNow();
     planned = p;
-    unlisten = listen(scope, coll, { since: p.since, epoch: meta.epoch, field: 'deletedAt' }, s => {
+    unlisten = listen(scope, coll, { since: p.since, epoch: meta.epoch, field: server ? serverField : 'deletedAt' }, s => {
       if (stopped || run !== runs) return;
       const entries = s.full ? s.docs || [] : (s.changes || []).filter(c => c.type !== 'removed').map(c => c.doc);
       const t = now();
       const confirmed = !s.fromCache || s.full;
       const newest = entries.reduce((n, e) => Math.max(n, timeOf(e && e.deletedAt)), 0);
+      const anchor = server ? newestServer(entries, new Set((s.changes || []).filter(c => c.pending).map(c => c.id)), serverField) : 0;
       chain = chain.then(async () => {
         if (entries.length) await apply(binTombs(entries, kinds));
         if (stopped || !confirmed) return;
         meta = { ...meta, syncAt: t, ...(s.full ? { fullAt: t } : {}), ...(s.epoch !== undefined ? { epoch: s.epoch } : {}),
-          ...(newest > (Number(meta.newest) || 0) && newest <= t + SKEW ? { newest } : {}) };
+          ...(newest > (Number(meta.newest) || 0) && newest <= t + SKEW ? { newest } : {}),
+          ...(server && (s.full || anchor > (Number(meta.anchor) || 0)) ? { anchor } : {}) };
         await store.write(coll, { meta });
       }).catch(e => console.warn('Tombstone feed sync failed', e));
     }, onError);
@@ -294,7 +338,7 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
   return {
     ready,
     // a page left open: read the whole bin again once a full read is due
-    replan() { if (stopped || !planned || planned.full || !plan(meta, now(), Number(meta.newest) || 0).full) return false; start(); return true; },
+    replan() { if (stopped || !planned || planned.full || !planNow().full) return false; start(); return true; },
     // its store was deleted and opened again: tombstones may have been missed, so read the whole bin next time
     wiped() { if (stopped) return chain; meta = { ...meta, fullAt: 0 }; return (chain = chain.then(() => store.write(coll, { meta })).catch(e => console.warn('Tombstone feed sync failed', e))); },
     stop() { stopped = true; if (unlisten) unlisten(); return chain; },
@@ -306,10 +350,13 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
 // One engine per account and collection, shared by every caller (two callers never cost two listeners); the bin
 // feed runs while any of them does. An engine nobody watches stops after a short grace, so a caller that stops and
 // starts again (the app re-runs its start when the demo changes in another tab) keeps the same listener.
-// bin: the tombstone collection's name (null: no bin feed); binKinds: an entry's kind -> its collection.
-// unstamped ('skip' | 'full') and expire ({ [coll]: { field, after } }): see the top of this file.
+// bin: the tombstone collection's name (null: no bin feed); binKinds: an entry's kind -> its collection. feeds:
+// { [coll]: kinds }, more tombstone feeds of the same shape (records that left a query; list them in the stores'
+// metaOnly). unstamped ('skip' | 'full'), expire ({ [coll]: { field, after } }) and stampMode ('client' | 'server',
+// with serverField; the bin and feeds too): see the top of this file.
 export const GRACE = 1500;
-export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, unstamped = 'skip', expire = {} }) {
+export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, feeds: extraFeeds = {}, unstamped = 'skip', expire = {}, stampMode = 'client', serverField = 'serverAt' }) {
+  const feedKinds = [...(bin ? [[bin, binKinds]] : []), ...Object.entries(extraFeeds || {}).filter(([c]) => c && c !== bin)];
   const engines = new Map(), feeds = new Map(), stores = new Map(), timers = new Map(), stopping = new Map(), tombing = new Map();
   const key = (scope, coll) => scope + '\n' + coll;
   async function storeFor(scope) {
@@ -323,7 +370,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     if (p) s.then(() => {
       if (stores.get(scope) !== s) return;
       for (const [k, e] of engines) if (k.startsWith(scope + '\n')) e.wiped();
-      const f = feeds.get(scope); if (f) f.wiped();
+      for (const [k, f] of feeds) if (k.startsWith(scope + '\n')) f.wiped();
     });
     return s;
   }
@@ -365,15 +412,17 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
   }
   function idle(scope) {
     if ([...engines.keys()].some(k => k.startsWith(scope + '\n'))) return;
-    const f = feeds.get(scope);
-    if (f) { f.stop(); feeds.delete(scope); }
+    for (const [k, f] of feeds) if (k.startsWith(scope + '\n')) { f.stop(); feeds.delete(k); }
   }
   return {
     watch(scope, coll, cb) {
       const k = key(scope, coll);
       let e = engines.get(k);
-      if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen, fetchOne, now, onError, unstamped, expire: (expire && Object.hasOwn(expire, coll) && expire[coll]) || null }); engines.set(k, e); }
-      if (bin && !feeds.has(scope)) feeds.set(scope, createTombFeed({ scope, coll: bin, kinds: binKinds, store: lazyStore(scope), listen, apply: tombsFor(scope), now, onError }));
+      if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen, fetchOne, now, onError, unstamped, expire: (expire && Object.hasOwn(expire, coll) && expire[coll]) || null, stampMode, serverField }); engines.set(k, e); }
+      for (const [fc, kinds] of feedKinds) {
+        const fk = key(scope, fc);
+        if (!feeds.has(fk)) feeds.set(fk, createTombFeed({ scope, coll: fc, kinds, store: lazyStore(scope), listen, apply: tombsFor(scope), now, onError, stampMode, serverField }));
+      }
       clearTimeout(timers.get(k)); timers.delete(k);
       const off = e.subscribe(cb);
       return () => {
@@ -409,13 +458,15 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
   };
 }
 
-// Call hub.replan() when the page is shown again or the browser comes back online. -> a function that stops it.
-export function replanOnWake(hub, win = typeof window !== 'undefined' ? window : null) {
+// Call hub.replan() when the page is shown again, the browser comes back online, and every `every` ms while the page
+// is shown (a page that stays visible for days never wakes). -> a function that stops it.
+export function replanOnWake(hub, win = typeof window !== 'undefined' ? window : null, { every = REPLAN_EVERY } = {}) {
   if (!win || !win.addEventListener) return () => {};
   const doc = win.document;
   const wake = () => { if (!doc || doc.visibilityState !== 'hidden') hub.replan(); };
   win.addEventListener('online', wake);
   win.addEventListener('pageshow', wake);
   if (doc) doc.addEventListener('visibilitychange', wake);
-  return () => { win.removeEventListener('online', wake); win.removeEventListener('pageshow', wake); if (doc) doc.removeEventListener('visibilitychange', wake); };
+  const timer = every > 0 ? setInterval(wake, every) : null;
+  return () => { win.removeEventListener('online', wake); win.removeEventListener('pageshow', wake); if (doc) doc.removeEventListener('visibilitychange', wake); if (timer) clearInterval(timer); };
 }

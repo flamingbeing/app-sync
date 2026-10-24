@@ -17,6 +17,8 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
   a full read.
 - A Firestore listener can go quiet without an error; the watchdog's signs are fromCache too long, a pending flag
   that never clears, or nothing heard at a wake moment.
+- Firestore `serverTimestamp()` inside a transaction resolves on the server; an app's own offline `setDoc` shows the
+  field as null (pending) in local snapshots until it reaches the server, so a pending stamp never anchors a read.
 - Hosting: `tools/build-sync.mjs` builds `dist/sync/<x.y.z>/` (index.js, src/, LICENSE, NOTICE) from each `vX.Y.Z` tag
   and checks it against `versions.lock.json`; the Worker (`worker/`) serves only those files at
   `core.anawj.com/sync/<x.y.z>/` (one-year immutable cache, CORS `*`: public code, no credentials) and

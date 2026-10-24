@@ -131,6 +131,103 @@ await I.commit(S, 'stock', { id: 's1', _deleted: true }, null);
 await assert.rejects(I.commit(S, 'stock', { id: 's1', qty: 5 }, s0, { key: 'k3', ops: [{ inc: { qty: 2 } }] }), e => e.code === 'not-found');
 await F.terminate(idb);
 
+// ---- 0.3.0: server stamps (stampMode: 'server') ----
+// The server stamps serverAt; updatedAt stays the writer's clock. A writer offline for days whose clock is 3 days
+// behind, and readers whose clocks are 2 h fast or slow: the delta read still meets the write.
+let wclock = Date.now() - 3 * 864e5;
+const srvDevice = (name, stamp) => {
+  const app = initializeApp({ projectId: 'demo-app-sync', apiKey: 'fake-key' }, name);
+  const db = F.getFirestore(app);
+  F.connectFirestoreEmulator(db, HOST[0], Number(HOST[1]));
+  const reads = {};
+  const backend = createFirestoreBackend({ sdk: async () => ({ db, F }), path: (scope, coll) => ['spaces', scope, coll], stamp, stampMode: 'server',
+    merge: { shared: true }, onRead: (coll, kind, n) => { (reads[coll] ||= { billed: 0, served: 0 })[kind] += n; } });
+  return { db, backend, reads };
+};
+const W = srvDevice('srv-writer', doc => ({ ...doc, updatedAt: wclock })), R = srvDevice('srv-reader');
+const SS = S + '-srv';
+const c1 = await W.backend.commit(SS, 'notes', { id: 'n1', text: 'Fake note' }, null);
+assert.equal(c1.serverAt, undefined, 'the returned copy has no unresolved stamp');
+const got1 = await R.backend.fetchOne(SS, 'notes', 'n1');
+assert.equal(typeof got1.serverAt, 'number', 'serverAt reads as ms');
+assert.ok(Math.abs(got1.serverAt - Date.now()) < 60e3, 'stamped by the server, not the writer\'s clock');
+assert.ok(got1.updatedAt < Date.now() - 2 * 864e5, 'updatedAt untouched');
+// saving the copy read (base with serverAt) again is not a conflict, and the stamp moves on
+const c2 = await W.backend.commit(SS, 'notes', { ...got1, text: 'Fake note, edited' }, got1);
+assert.equal(c2.text, 'Fake note, edited');
+const got2 = await R.backend.fetchOne(SS, 'notes', 'n1');
+assert.ok(got2.serverAt >= got1.serverAt);
+// a merge collection (transaction + merge path) also gets the server stamp
+await W.backend.commit(SS, 'shared', { id: 'h1', f: { a: 1 } }, null);
+const h1 = await R.backend.fetchOne(SS, 'shared', 'h1');
+await W.backend.commit(SS, 'shared', { ...h1, f: { a: 1, b: 2 } }, h1);
+const h2 = await R.backend.fetchOne(SS, 'shared', 'h1');
+assert.deepEqual(h2.f, { a: 1, b: 2 }); assert.ok(h2.serverAt >= h1.serverAt);
+
+// the reader syncs with its clock 2 h fast
+let rclock = Date.now() + 2 * 3600e3;
+const sstores = createStores({ prefix: 'emu-srv:', colls: ['notes'] });
+const shub = createSyncHub({ openStore: sstores.openStore, listen: R.backend.listen, fetchOne: R.backend.fetchOne, bin: null, grace: 0, now: () => rclock, stampMode: 'server' });
+let notes = [];
+off = shub.watch(SS, 'notes', l => { notes = l; });
+assert.ok(await until(() => notes.length === 1), 'server mode: full read first');
+off(); await settle(50); await shub.stopAll();
+// the writer saves through its queue while offline; days later (its clock still behind) it comes back and sends
+let wOnline = false;
+const wbox = new Map();
+const wq = createWriteQueue({ store: { async put(x) { wbox.set(x.key, structuredClone(x)); }, async list(o) { return [...wbox.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return wbox.has(k) ? structuredClone(wbox.get(k)) : null; }, async remove(k) { wbox.delete(k); }, async forget() {} },
+  getOwner: () => SS, online: () => wOnline, backend: (scope, _kind, record, base) => W.backend.commit(scope, 'notes', record, base) });
+wq.save('note', SS, { id: 'n2', text: 'Fake, written offline' }, null).catch(() => {});
+await settle(200);
+assert.equal(await W.backend.fetchOne(SS, 'notes', 'n2'), null, 'still on the device');
+wclock += 1000; wOnline = true; wq.kick();
+assert.ok(await until(() => wq.status('note', 'n2') === 'synced'), 'sent on reconnect');
+// the reader opens again, now with its clock 2 h slow: a delta read on serverAt sees it
+rclock = Date.now() - 2 * 3600e3;
+const before = R.reads.notes.billed;
+off = shub.watch(SS, 'notes', l => { notes = l; });
+assert.ok(await until(() => notes.some(d => d.id === 'n2')), 'the late write arrives on the delta read');
+await settle();
+assert.ok(R.reads.notes.billed - before <= 2, 'a delta read, not a full one: ' + (R.reads.notes.billed - before));
+off(); await settle(50); await shub.stopAll();
+const smeta = (await (await sstores.openStore(SS)).load('notes')).meta;
+assert.ok(smeta.anchor >= (await R.backend.fetchOne(SS, 'notes', 'n2')).serverAt - 1, 'anchored on the server stamp');
+
+// an app's own write outside the queue, made offline: the local copy's stamp is pending and never moves the anchor
+const P = srvDevice('srv-pending');
+const pstores = createStores({ prefix: 'emu-srv-p:', colls: ['notes'] });
+const phub = createSyncHub({ openStore: pstores.openStore, listen: P.backend.listen, fetchOne: P.backend.fetchOne, bin: null, grace: 0, stampMode: 'server' });
+let pnotes = [];
+off = phub.watch(SS, 'notes', l => { pnotes = l; });
+assert.ok(await until(() => pnotes.length === 2));
+await settle(); await phub.flush();
+const anchor0 = (await (await pstores.openStore(SS)).load('notes')).meta.anchor;
+await F.disableNetwork(P.db);
+const stamps = await P.backend.stampFields();
+F.setDoc(F.doc(P.db, 'spaces', SS, 'notes', 'n3'), { id: 'n3', text: 'Fake, offline setDoc', ...stamps }).catch(() => {});
+await settle(300); await phub.flush();
+assert.equal((await (await pstores.openStore(SS)).load('notes')).meta.anchor, anchor0, 'a pending stamp leaves the anchor');
+await F.enableNetwork(P.db);
+assert.ok(await until(async () => { await phub.flush(); return ((await (await pstores.openStore(SS)).load('notes')).meta.anchor || 0) > anchor0; }), 'the anchor moves once the server stamps it');
+assert.equal(typeof pnotes.find(d => d.id === 'n3')?.serverAt, 'number');
+// a held record edited offline by the app's own setDoc stays shown on a delta listener while its stamp is pending
+off(); await settle(50); await phub.stopAll();
+const pdelta = [];
+const plisten = (...a) => { pdelta.push(a[2].since); return P.backend.listen(...a); };
+const phub2 = createSyncHub({ openStore: pstores.openStore, listen: plisten, fetchOne: P.backend.fetchOne, bin: null, grace: 0, stampMode: 'server' });
+off = phub2.watch(SS, 'notes', l => { pnotes = l; });
+await settle(500); await phub2.flush();
+assert.ok(pdelta[0] > 0, 'reopened on a delta read: ' + pdelta[0]);
+await F.disableNetwork(P.db);
+const n1 = pnotes.find(d => d.id === 'n1');
+F.setDoc(F.doc(P.db, 'spaces', SS, 'notes', 'n1'), { ...n1, text: 'Fake, edited offline', ...(await P.backend.stampFields()) }).catch(() => {});
+await settle(500); await phub2.flush();
+assert.ok(pnotes.some(d => d.id === 'n1'), 'still shown while offline: ' + pnotes.map(d => d.id));
+await F.enableNetwork(P.db);
+assert.ok(await until(() => pnotes.find(d => d.id === 'n1')?.text === 'Fake, edited offline' && typeof pnotes.find(d => d.id === 'n1').serverAt === 'number'), 'and arrives with its server stamp');
+off(); await settle(50); await phub2.stopAll();
+await Promise.all([W, R, P].map(d => F.terminate(d.db)));
+
 await Promise.all([A, B, OLD].map(d => F.terminate(d.db)));
 console.log('firestore emulator tests passed');
 process.exit(0);
