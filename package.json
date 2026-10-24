@@ -3,6 +3,28 @@
   "type": "module",
   "scripts": {
     "check": "node tools/check.mjs",
-    "test": "node --test 'worker/test/*.test.mjs'"
-  }
+    "test": "node --test 'worker/test/*.test.mjs' && npm run test:unit",
+    "test:unit": "node --test test/*.test.mjs",
+    "test:emulator": "firebase emulators:exec --only firestore --project demo-app-sync \"node test/firestore.emulator.mjs\""
+  },
+  "devDependencies": {
+    "firebase": "11.10.0",
+    "firebase-tools": "13.35.1"
+  },
+  "name": "app-sync",
+  "version": "0.1.0",
+  "description": "Offline-first sync engine for web apps: delta listeners, a durable outbox, tombstones, conflict checks; backend injected (Firestore adapter included).",
+  "license": "Apache-2.0",
+  "exports": {
+    ".": "./index.js",
+    "./*": "./src/*"
+  },
+  "files": [
+    "index.js",
+    "src/",
+    "LICENSE",
+    "NOTICE",
+    "README.md",
+    "CHANGELOG.md"
+  ]
 }
