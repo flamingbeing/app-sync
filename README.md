@@ -40,7 +40,7 @@ What it does:
 ```js
 import * as F from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { createSyncHub, createWriteQueue, createStores, createOutbox, createFirestoreBackend, replanOnWake,
-  persistGuard, syncStatus, attentionCount } from 'https://core.anawj.com/sync/0.1.0/index.js';
+  persistGuard, syncStatus, attentionCount } from 'https://core.anawj.com/sync/0.2.0/index.js';
 
 const fs = createFirestoreBackend({ sdk: async () => ({ db, F }), path: (space, coll) => ['spaces', space, coll] });
 const stores = createStores({ prefix: 'myapp-store:', colls: ['items'] });
@@ -63,6 +63,38 @@ const status = syncStatus({ online: navigator.onLine, pending: queue.pending(), 
 ```
 
 Each module's header comment describes its options and contract in full.
+
+## Adopting
+
+Three shapes of app, and what each passes in. Pin the version, precache it, and keep the app's own tests running
+against the emulator before switching users over.
+
+**Records with a conflict screen and a recycle bin.** The default: `merge` left out, so each save is checked against
+the copy it started from and a change made elsewhere is kept as a conflict for the user to choose. Deletes go through
+the queue (`{ id, _deleted: true }`) and the bin entry (`{ id, kind, data, deletedAt }`) is written beside it; the hub's
+`binKinds` maps entry kinds to collections. Writes that used to bypass an outbox (batches, indexes, settings) go
+through the queue too, so the status counts them.
+
+**Shared records merged by field (no conflict screen).** Name the collections in the adapter's `merge`. With `true`,
+`mergeFields` applies the fields this device changed onto the server's copy. When a change is an increment or a
+keyed update, pass it as ops (`queue.save(…, { ops })`) and give `merge` a function that applies ops to the
+server's copy; set `mark` (a field the security rules allow) so a resend counts once. A soft delete (a `removedAt`
+style field) stays an ordinary save; `expire` drops such a record from devices once it is due to be deleted for good.
+If the app already stamps ISO strings, keep them: `time: 'iso'`.
+
+**Records scoped by a query (one site, unlocked only).** Pass `where(scope, coll)`; a delta query then needs a
+composite index on those fields plus the stamp field. A record that leaves the query (locked, moved) leaves the
+device. Per-field timestamps inside a record can stay: give `merge` the app's own merge function.
+
+**Moving existing data.** Records written before adoption may have no `updatedAt`. Run the hub with
+`unstamped: 'full'` until a one-off job has stamped every record (count before and after; a dry run first), then
+drop the option so opens read only changes. Make the rules require the stamp on every write, so an app version still
+on someone's phone cannot write an unstamped change that delta readers would miss.
+
+**Moving off the SDK's own queue.** Send every save through the write queue (the adapter commits in a transaction,
+which never waits in the SDK's offline queue), so nothing is left that only the SDK's cache holds; call
+`persistGuard()` at sign-in, run `createWatchdog` on the listeners, and
+make sign-out use `queue.flush()` (it refuses while anything is unsent) before wiping stores.
 
 ## What stays in each app
 

@@ -19,3 +19,24 @@ export function checkWrite(current, desired, base, message = 'This record change
   }
   return true;
 }
+
+// Last-write-wins by field, for collections that need no conflict screen: what this device changed since base wins,
+// everything else keeps what the server holds now (current). Plain objects are merged key by key, so two devices
+// changing different keys of one map both keep their change; arrays and other values are replaced whole. A key the
+// record no longer has (but base had) is removed. Without a base (not known here yet), every field sent is merged into
+// current. updatedAt is the backend's (ignored here). -> the merged record (current is not changed)
+const isMap = v => !!v && typeof v === 'object' && !Array.isArray(v);
+const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+export function mergeFields(current, record, base) {
+  const merge = (cur, rec, was) => {
+    const out = isMap(cur) ? clone(cur) : {};
+    for (const k of new Set([...Object.keys(rec), ...Object.keys(was)])) {
+      if (k === 'updatedAt' || recordSignature(rec[k] ?? null) === recordSignature(was[k] ?? null) && k in rec === k in was) continue;
+      if (!(k in rec)) delete out[k];
+      else if (isMap(rec[k]) && (was[k] === undefined || isMap(was[k]))) out[k] = merge(out[k], rec[k], was[k] || {});
+      else out[k] = clone(rec[k]);
+    }
+    return out;
+  };
+  return merge(current, record || {}, base || {});
+}

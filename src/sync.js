@@ -24,6 +24,12 @@
 //   since: null = the whole collection. onSnap({ changes: [{ type: 'added'|'modified'|'removed', id, doc, pending? }],
 //   fromCache, hasPendingWrites, full?, docs?, epoch? }); full: docs is the whole collection, confirmed by the server.
 // fetchOne(scope, coll, id) -> doc | null (throws when it can't tell, e.g. offline)
+//
+// Stamps (updatedAt, deletedAt) are numbers (ms) or ISO strings; timeOf reads either. Options for apps adopting the
+// engine from whole-collection listeners: unstamped: 'full' reads in full while any record held here has no
+// updatedAt (until a backfill stamps them all; a delta read would never see such a record change), and expire
+// ({ field, after }) drops a soft-deleted record from this device once that field is older than after (the time
+// after which the app removes it for good, which no delta listener hears).
 
 export const SKEW = 10 * 60e3;          // clocks may be this far behind
 export const FULL_EVERY = 7 * 864e5;     // a full read at least weekly
@@ -31,7 +37,9 @@ export const GONE_KEEP = 8 * 864e5;      // deleted ids remembered (longer than 
 
 const copy = v => JSON.parse(JSON.stringify(v));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-const stamp = d => Number(d && d.updatedAt) || 0;
+// a stamp as ms: a number, or an ISO string (0: none or unreadable)
+export const timeOf = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;
+const stamp = d => timeOf(d && d.updatedAt);
 
 // ---- pure helpers (test/sync.test.mjs) ----
 
@@ -76,7 +84,7 @@ export function replaceAll(docs, list) {
 export function applyTombs(docs, gone, tombs) {
   const del = [];
   for (const t of tombs || []) {
-    const at = Number(t.deletedAt) || 0;
+    const at = timeOf(t.deletedAt);
     if (!t.id || !at) continue;
     gone[t.id] = Math.max(gone[t.id] || 0, at);
     if (docs.has(t.id) && stamp(docs.get(t.id)) <= at) { docs.delete(t.id); del.push(t.id); }
@@ -99,10 +107,22 @@ export function binTombs(entries, kinds = {}) {
   for (const e of entries || []) {
     const coll = e && Object.hasOwn(kinds, e.kind) ? kinds[e.kind] : null, id = e && e.data && e.data.id;
     if (!coll || !id) continue;
-    const at = Number(e.deletedAt) || 0, version = Number(e.data.updatedAt) || 0;
+    const at = timeOf(e.deletedAt), version = timeOf(e.data.updatedAt);
     (out[coll] ||= []).push({ id: String(id), deletedAt: version > 0 ? version : at });
   }
   return out;
+}
+
+// Soft-deleted records whose field (e.g. removedAt) is older than rule.after: removed from docs and remembered in
+// gone at their stamp (so a copy restored later, stamped after it, shows again). rule null: none. -> ids removed
+export function expireDocs(docs, gone, rule, now) {
+  if (!rule || !rule.field || !(rule.after > 0)) return [];
+  const del = [];
+  for (const [id, d] of docs) {
+    const at = timeOf(d && d[rule.field]);
+    if (at > 0 && at < now - rule.after) { docs.delete(id); del.push(id); gone[id] = Math.max(gone[id] || 0, stamp(d) || at); }
+  }
+  return del;
 }
 
 // Stamp ids again one small write at a time (a batch fails whole when one of them was deleted since); a failed one
@@ -120,7 +140,7 @@ export async function eachSettled(ids, write, size = 20) {
 // ---- one collection ----
 
 // subscribe(cb) -> unsubscribe; cb(list, { fromCache, hasPendingWrites }) with the whole merged list (a copy each time).
-export function createCollectionSync({ scope, coll, store, listen, fetchOne = null, now = Date.now, onError = () => {} }) {
+export function createCollectionSync({ scope, coll, store, listen, fetchOne = null, now = Date.now, onError = () => {}, unstamped = 'skip', expire = null }) {
   const subs = new Set(), local = new Set();   // local: ids last seen with this device's write pending
   let docs = new Map(), meta = {}, flags = null, stopped = false, unlisten = null, chain = Promise.resolve(), runs = 0, planned = null;
   // A write that fails (storage full) leaves the device's copy short of what meta claims: until a later write puts the
@@ -139,17 +159,21 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     if (stopped) return;
     docs = new Map(got.docs.map(d => [d.id, d]));
     meta = got.meta || {};
+    const swept = expireDocs(docs, meta.gone ||= {}, expire, now());
+    if (swept.length) persist({ del: swept, meta });
     // a list confirmed before shows at once; a device that never synced waits for the listener (as Firestore did)
     if (meta.syncAt) { flags = { fromCache: true, hasPendingWrites: false }; emit(); }
     start();
   })().catch(onError);
 
   const newestHeld = () => { let n = 0; for (const d of docs.values()) n = Math.max(n, stamp(d)); return n; };
+  const anyUnstamped = () => { for (const d of docs.values()) if (!stamp(d)) return true; return false; };
+  const planNow = () => { const p = plan(meta, now(), newestHeld()); return !p.full && unstamped === 'full' && anyUnstamped() ? { full: true, since: null } : p; };
   // (re)start the listener from meta; an older listener's late snapshots are ignored
   function start() {
     const run = ++runs;
     if (unlisten) { unlisten(); unlisten = null; }
-    const p = plan(meta, now(), newestHeld());
+    const p = planNow();
     planned = p;
     unlisten = listen(scope, coll, { since: p.since, epoch: meta.epoch }, s => { if (run === runs) onSnap(s); }, onError);
     if (stopped) unlisten();
@@ -161,8 +185,10 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     let changed = false;
     if (s.full) {
       const r = replaceAll(docs, s.docs || []);
-      changed = !!(r.put.length || r.del.length);
       meta = { ...meta, syncAt: t, fullAt: t, gone: pruneGone(meta.gone, t), ...(s.epoch !== undefined ? { epoch: s.epoch } : {}) };
+      const swept = expireDocs(docs, meta.gone, expire, t);
+      if (swept.length) r.put = r.put.filter(d => !swept.includes(d.id)), r.del.push(...swept);
+      changed = !!(r.put.length || r.del.length);
       persist({ ...r, meta });
     } else {
       const unsure = new Set();
@@ -171,6 +197,8 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
         else if (c.pending) local.add(c.id); else local.delete(c.id);
       }
       const r = applyChanges(docs, s.changes, meta.gone || {}, id => !unsure.has(id));
+      const swept = expireDocs(docs, meta.gone ||= {}, expire, t);
+      if (swept.length) r.put = r.put.filter(d => !swept.includes(d.id)), r.del.push(...swept);
       changed = !!(r.put.length || r.del.length);
       if (!s.fromCache) meta = { ...meta, syncAt: t };
       if (changed || !s.fromCache) persist({ put: r.put, del: r.del, meta });
@@ -203,7 +231,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     ready,
     // a page left open for days: once a full read is due, listen again from scratch (the whole collection), which
     // also stops the open delta query's result set growing for good. -> true when it restarted
-    replan() { if (stopped || !planned || planned.full || !plan(meta, now(), newestHeld()).full) return false; start(); return true; },
+    replan() { if (stopped || !planned || planned.full || !planNow().full) return false; start(); return true; },
     // deleted here (for good, or into the bin): gone at once, and copies of that version (or older) arriving later are
     // ignored; the tombstone is the deleted version's stamp (not this clock), so a restore stamped after it shows
     async drop(ids, at = now()) {
@@ -252,7 +280,7 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
       const entries = s.full ? s.docs || [] : (s.changes || []).filter(c => c.type !== 'removed').map(c => c.doc);
       const t = now();
       const confirmed = !s.fromCache || s.full;
-      const newest = entries.reduce((n, e) => Math.max(n, Number(e && e.deletedAt) || 0), 0);
+      const newest = entries.reduce((n, e) => Math.max(n, timeOf(e && e.deletedAt)), 0);
       chain = chain.then(async () => {
         if (entries.length) await apply(binTombs(entries, kinds));
         if (stopped || !confirmed) return;
@@ -279,8 +307,9 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
 // feed runs while any of them does. An engine nobody watches stops after a short grace, so a caller that stops and
 // starts again (the app re-runs its start when the demo changes in another tab) keeps the same listener.
 // bin: the tombstone collection's name (null: no bin feed); binKinds: an entry's kind -> its collection.
+// unstamped ('skip' | 'full') and expire ({ [coll]: { field, after } }): see the top of this file.
 export const GRACE = 1500;
-export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {} }) {
+export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, unstamped = 'skip', expire = {} }) {
   const engines = new Map(), feeds = new Map(), stores = new Map(), timers = new Map(), stopping = new Map(), tombing = new Map();
   const key = (scope, coll) => scope + '\n' + coll;
   async function storeFor(scope) {
@@ -343,7 +372,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     watch(scope, coll, cb) {
       const k = key(scope, coll);
       let e = engines.get(k);
-      if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen, fetchOne, now, onError }); engines.set(k, e); }
+      if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen, fetchOne, now, onError, unstamped, expire: (expire && Object.hasOwn(expire, coll) && expire[coll]) || null }); engines.set(k, e); }
       if (bin && !feeds.has(scope)) feeds.set(scope, createTombFeed({ scope, coll: bin, kinds: binKinds, store: lazyStore(scope), listen, apply: tombsFor(scope), now, onError }));
       clearTimeout(timers.get(k)); timers.delete(k);
       const off = e.subscribe(cb);
