@@ -13,7 +13,7 @@
     "firebase-tools": "13.35.1"
   },
   "name": "app-sync",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Offline-first sync engine for web apps: delta listeners, a durable outbox, tombstones, conflict checks; backend injected (Firestore adapter included).",
   "license": "Apache-2.0",
   "exports": {

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0 (2026-10-24)
+
+Server stamps, as an option. Nothing changes for 0.2.0 callers that leave the new options out, except the fix below.
+Each addition has a test in `test/server.test.mjs` (the adapter's in `test/firestore.emulator.mjs`).
+
+- `stampMode: 'server'` (adapter, hub, collection, bin feed): every commit also sets `serverAt` (`serverField`) to
+  the server's time, in the same transaction, beside the usual stamp; the delta read is `serverAt >` the newest
+  server stamp this device has had confirmed (`planServer`, `meta.anchor`), with no SKEW and no local clock. So a
+  write that reached the server late, a writer clock behind or a reader clock ahead no longer hides a change until
+  the weekly full read. A stamp not yet resolved (this device's pending write) or a cached snapshot never moves the
+  anchor; a held record without a server stamp makes opens read in full until a backfill stamps it. Reads give
+  `serverAt` as ms; the conflict check leaves it out. `stampFields()` gives the stamps for an app's own writes.
+- `feeds: { [coll]: kinds }` (hub): more tombstone feeds shaped like the bin, for records that leave a query without
+  being deleted (locked, moved, access removed); `leaveEntry(kind, record, at)` builds the entry to write.
+- Fixed: `replanOnWake` also checks hourly (`every`, `REPLAN_EVERY`) while the page is shown, so a page that stays
+  visible for days still starts its weekly full read.
+
 ## 0.2.0 (2026-10-24)
 
 For apps adopting the engine from whole-collection listeners and last-write-wins saves. Nothing changes for 0.1.0

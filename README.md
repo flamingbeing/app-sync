@@ -24,7 +24,7 @@ What it does:
 
 | Module | Exports |
 |---|---|
-| `src/sync.js` | `createSyncHub`, `createCollectionSync`, `createTombFeed`, `replanOnWake`, pure helpers (`plan`, `applyChanges`, `applyTombs`, `binTombs`, …) |
+| `src/sync.js` | `createSyncHub`, `createCollectionSync`, `createTombFeed`, `replanOnWake`, `leaveEntry`, pure helpers (`plan`, `planServer`, `applyChanges`, `applyTombs`, `binTombs`, …) |
 | `src/writes.js` | `createWriteQueue` |
 | `src/conflict.js` | `checkWrite`, `recordSignature` |
 | `src/store.js` | `createStores` (the device copy: `openStore`, `wipeStores`) |
@@ -40,7 +40,7 @@ What it does:
 ```js
 import * as F from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { createSyncHub, createWriteQueue, createStores, createOutbox, createFirestoreBackend, replanOnWake,
-  persistGuard, syncStatus, attentionCount } from 'https://core.anawj.com/sync/0.2.0/index.js';
+  persistGuard, syncStatus, attentionCount } from 'https://core.anawj.com/sync/0.3.0/index.js';
 
 const fs = createFirestoreBackend({ sdk: async () => ({ db, F }), path: (space, coll) => ['spaces', space, coll] });
 const stores = createStores({ prefix: 'myapp-store:', colls: ['items'] });
@@ -96,6 +96,27 @@ which never waits in the SDK's offline queue), so nothing is left that only the 
 `persistGuard()` at sign-in, run `createWatchdog` on the listeners, and
 make sign-out use `queue.flush()` (it refuses while anything is unsent) before wiping stores.
 
+**Server stamps (0.3.0).** With writers' clocks, a change can hide until the weekly full read: a writer clock more
+than 10 minutes behind, or a reader clock that stays that far ahead. `stampMode: 'server'` removes the clocks from
+the delta read: the adapter sets `serverAt` with `serverTimestamp()` in every commit (beside `updatedAt`, which
+stays), and the hub reads `serverAt >` the newest server stamp it has had confirmed. Roll it out in this order, so no
+change is missed while app versions are mixed:
+
+1. Writers: give the adapter `stampMode: 'server'` (the hub keeps the default). Stamp the app's own writes outside
+   the queue (bin entries, leave entries) with `await fs.stampFields()`.
+2. Backfill `serverAt` on every record and bin entry that has none (count before and after; a dry run first).
+3. Once no older app version can write (an update module makes one reload enough), require the stamp in the rules
+   (`request.resource.data.serverAt == request.time` on every create and update), then give the hub
+   `stampMode: 'server'` too. Until the backfill is done, a record held without `serverAt` makes opens read in full.
+
+A query filtered with `where` then needs a composite index on its fields plus `serverAt`.
+
+**Records that leave a query.** A record locked or moved out of a filtered query is never heard of again by a delta
+listener, so a device that was closed keeps it until the weekly full read. Write a leave entry
+(`leaveEntry(kind, record)` plus the stamps) to a feed collection when it leaves, and name that collection in the
+hub's `feeds` (and in the stores' `metaOnly`): devices drop that version at their next open, and a newer version (the
+record unlocked) shows again.
+
 ## What stays in each app
 
 Schemas and the clean/canonical form of a record, collection names and paths, security rules, which collections need
@@ -103,7 +124,8 @@ conflict handling, the bin and history screens, and how the status looks.
 
 ## Server rules the engine relies on
 
-- Every synced document carries a number field (default `updatedAt`) that only increases when it changes.
+- Every synced document carries a number field (default `updatedAt`) that only increases when it changes; in server
+  mode also `serverAt`, set to `request.time` on every write.
 - A bin entry is `{ id, kind, data, deletedAt }`, where `data` is the deleted version.
 - Never `merge` an empty map, and never batch-overwrite records without reading them first.
 
