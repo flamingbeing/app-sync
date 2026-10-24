@@ -7,7 +7,8 @@
 //   async () -> false to stop here (nothing deleted). keep: scopes whose stores stay (an array, or a function called
 //   after proceed; e.g. the account signed in now in another tab). clearBackendCache: e.g. the adapter's clearCache
 //   (the app reloads afterwards). extra: async (), the app's own (lists in localStorage, caches).
-// -> { wiped, failed }: wiped false when proceed said no; failed names the steps that threw (the others still ran).
+// -> { wiped, failed }: wiped false when proceed said no (nothing deleted, but the hub stays stopped: the app watches
+// again); failed names the steps that threw (the others still ran).
 export async function forgetDevice({ hub, stores, queue, proceed = async () => true, keep = [], clearBackendCache = null, extra = null } = {}) {
   const failed = [];
   const step = async (name, fn) => { try { await fn(); } catch (e) { failed.push(name); console.warn('forgetDevice: ' + name, e); } };

@@ -44,9 +44,9 @@
 // writes there; its deletedAt is max(at, the record's updatedAt + 1), in the type of at (a number, or an ISO string).
 //
 // Unsent saves (0.4.0): unsent(id) says a held record still has saves this device has not sent (queue.unsent). Such a
-// record that leaves the query (locked, moved, deleted elsewhere) stays on this device and onLeave(id, doc) reports
-// it, so the app can tell the user and the save meets the server's answer (a conflict, kept for the user) instead of
-// the record vanishing with the change in it.
+// record that leaves the query (locked, moved, deleted elsewhere), or whose bin or feed entry arrives (0.4.1), stays
+// on this device and onLeave(id, doc) reports it, so the app can tell the user and the save meets the server's answer
+// (a conflict, kept for the user) instead of the record vanishing with the change in it.
 
 export const SKEW = 10 * 60e3;          // clocks may be this far behind
 export const FULL_EVERY = 7 * 864e5;     // a full read at least weekly
@@ -297,9 +297,13 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       await persist({ del, meta });
       if (del.length) emit();
     },
+    // tombstones from the bin or a feed; a record with saves not sent yet stays and is reported, as when it leaves
+    // the query (its tombstone is not remembered, so the save's answer shows)
     async tombs(list) {
       await ready;
-      const del = applyTombs(docs, meta.gone ||= {}, list);
+      const kept = (list || []).filter(t => t && t.id && holding(t.id) && stamp(docs.get(t.id)) <= timeOf(t.deletedAt));
+      const del = applyTombs(docs, meta.gone ||= {}, (list || []).filter(t => !kept.includes(t)));
+      for (const t of kept) left(t.id);
       await persist({ del, meta });
       if (del.length) emit();
     },
@@ -411,7 +415,11 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       await stopping.get(k);
       const st = await storeFor(scope), got = await st.load(coll);
       const docs = new Map(got.docs.map(d => [d.id, d])), meta = got.meta || {};
-      const del = applyTombs(docs, meta.gone ||= {}, drop ? dropTombs(docs, list, now()) : list);
+      // (as a running engine: a record with saves not sent yet stays, reported)
+      const held = t => { if (!docs.has(t.id) || stamp(docs.get(t.id)) > timeOf(t.deletedAt)) return false; try { return !!unsent(scope, coll, t.id); } catch { return true; } };
+      const kept = drop ? [] : (list || []).filter(t => t && t.id && held(t));
+      const del = applyTombs(docs, meta.gone ||= {}, drop ? dropTombs(docs, list, now()) : list.filter(t => !kept.includes(t)));
+      for (const t of kept) { try { onLeave(scope, coll, t.id, copy(docs.get(t.id))); } catch (e) { console.warn('onLeave', e); } }
       await st.write(coll, { del, meta });
     });
     const tracked = run.finally(() => { if (tombing.get(k) === tracked) tombing.delete(k); });

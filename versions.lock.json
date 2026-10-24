@@ -55,5 +55,20 @@
     "src/sync.js": "1c6681f62695b988235ea210688ea87138e3234573ae63ce8ece3f4c59599cb4",
     "src/watchdog.js": "acfa925f1c5787538462aecaf7288ce71b1ce4b9721a29ae229e06d00d3caecd",
     "src/writes.js": "73fdb5e31c76fc0f034edf86d96675de31bdf5ce21a1f9f4c2ce9671bc4851df"
+  },
+  "0.4.1": {
+    "LICENSE": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "NOTICE": "a4a91e7763c9b0d122fcb4c69fcfb4088427b73bd713f37d513669095430894c",
+    "index.js": "3c1fd0632fb57f4c72518f2602994e488301a6df71ce71b238e43e402e7163a0",
+    "src/conflict.js": "ecc82691ec9a61891552b7f9f18928f558b8f1a3487c92862e1bca3ec1083d2b",
+    "src/firestore.js": "a3718f50f9fbe731af0989c5e4544cf1abe60b7f2336419e0ba40e64d0cc9477",
+    "src/forget.js": "bab7f7f0770f819b8d58d51be15946418db7f5ee8e7bbdbd25e6eacbd3ae4ab5",
+    "src/outbox.js": "8112ffc743e8700f81ea1b88a98a2526bafeea5d3f0e482ba6244d4a17ee6199",
+    "src/persist.js": "b0a27f138ace730446c9be9e45aae4cce549339636304041f18c69d9cd59ee1a",
+    "src/status.js": "36f5018c2ce3064cc77fd7a36776bab20d5581efe8f4992eb0a86861609fe995",
+    "src/store.js": "a523a13391a247d8c6c57627e9b9194a1b95e69af99e90ac12000d6e4f7fe162",
+    "src/sync.js": "926376c68a4bbfa5629a437bd46309241b9880f69b6072ac99da5f65bf2f5520",
+    "src/watchdog.js": "acfa925f1c5787538462aecaf7288ce71b1ce4b9721a29ae229e06d00d3caecd",
+    "src/writes.js": "73fdb5e31c76fc0f034edf86d96675de31bdf5ce21a1f9f4c2ce9671bc4851df"
   }
 }

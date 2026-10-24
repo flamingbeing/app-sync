@@ -44,7 +44,7 @@ What it does:
 ```js
 import * as F from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { createSyncHub, createWriteQueue, createStores, createOutbox, createFirestoreBackend, replanOnWake,
-  persistGuard, syncStatus, attentionCount, forgetDevice } from 'https://core.anawj.com/sync/0.4.0/index.js';
+  persistGuard, syncStatus, attentionCount, forgetDevice } from 'https://core.anawj.com/sync/0.4.1/index.js';
 
 const fs = createFirestoreBackend({ sdk: async () => ({ db, F }), path: (space, coll) => ['spaces', space, coll] });
 const stores = createStores({ prefix: 'myapp-store:', colls: ['items'] });
@@ -66,7 +66,8 @@ const { persisted } = await persistGuard();
 const status = syncStatus({ online: navigator.onLine, pending: queue.pending(), attention: attentionCount(queue.entries()), persisted,
   confirmed: heard, atRiskOnlyOffline: true });   // heard: a snapshot with fromCache false since the page opened
 
-// sign-out, after `await queue.flush()` said nothing is unsent
+// sign-out, after `await queue.flush()` said nothing is unsent (proceed false: nothing deleted, but the hub is
+// stopped, so watch again)
 await forgetDevice({ hub, stores, queue, proceed: async () => stillSigningOut(), keep: () => otherTabAccount(),
   clearBackendCache: fs.clearCache, extra: async () => clearAppLists() });
 location.reload();   // the SDK was terminated by clearCache
@@ -130,7 +131,8 @@ record unlocked) shows again.
 **Leave entries in the same transaction (0.4.0).** Give the adapter `onCommit` and return the leave entry from it
 when a commit locks or moves a record: it is written in the record's own transaction, so no device sees the lock
 without the entry (or the other way round), and its `deletedAt` is after the locked version (`leaveEntry` stamps
-`max(at, updatedAt + 1)`). A record that leaves while this device still has unsent saves for it is kept here, and the
+`max(at, updatedAt + 1)`). A record that leaves while this device still has unsent saves for it (the query drops it, or
+its bin or leave entry arrives) is kept here, and the
 hub's `onLeave(scope, coll, id, doc)` says so (pass `unsent: (scope, coll, id) => queue.unsent(kind, id)`), so the
 save meets the server's answer instead of vanishing with the record.
 

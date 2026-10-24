@@ -1,6 +1,7 @@
 # Status
 
 ## Now
+- 0.4.1: fault-injection tests (offline flapping, two devices on one record, sign-out mid-queue, 0.3.0 data, transient errors, leaving with unsent saves, reload with a draft open); a bin or feed entry no longer drops a record with unsent saves.
 - 0.4.0 and update 0.2.0 (safety pack): stamps forward, commit hook, `aborted` retried, honest status, unsent records kept on leave, `forgetDevice` + `clearCache`; update reload waits for `canReload`, `waitForGo`, online check, stamp tool pinned rule and SGT date.
 - 0.3.0: server stamps (`stampMode: 'server'`), extra tombstone feeds (`feeds`, `leaveEntry`), hourly re-plan in `replanOnWake`.
 - Update module `update/` (service worker core + page module for the apps' instant updates), 0.1.0: `core.anawj.com/update/0.1.0/sw-core.js` and `register.js` once tagged `update-v0.1.0`.
@@ -15,6 +16,7 @@
 1. A multi-device soak test (offline devices, same-record edits, skewed clocks) in real browsers.
 
 ## Recently done
+- 2026-10-25: 0.4.1 fault-injection tests and the tombstone fix (see CHANGELOG).
 - 2026-10-25: 0.4.0 safety pack and update 0.2.0 (see CHANGELOG).
 - 2026-10-24: 0.3.0 server-stamp mode, leave feeds and the hourly re-plan (see CHANGELOG).
 - 2026-10-24: update module 0.1.0 (all-or-nothing install, changed-files-only updates, instant take-over, runtime caps, offline page), with unit and real-browser tests.
