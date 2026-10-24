@@ -67,7 +67,7 @@
     "src/persist.js": "b0a27f138ace730446c9be9e45aae4cce549339636304041f18c69d9cd59ee1a",
     "src/status.js": "36f5018c2ce3064cc77fd7a36776bab20d5581efe8f4992eb0a86861609fe995",
     "src/store.js": "a523a13391a247d8c6c57627e9b9194a1b95e69af99e90ac12000d6e4f7fe162",
-    "src/sync.js": "c8260e343bbe38f204d31ac370bf7c2948e4429a5b0aa026cbaa7853c2547ba8",
+    "src/sync.js": "926376c68a4bbfa5629a437bd46309241b9880f69b6072ac99da5f65bf2f5520",
     "src/watchdog.js": "acfa925f1c5787538462aecaf7288ce71b1ce4b9721a29ae229e06d00d3caecd",
     "src/writes.js": "73fdb5e31c76fc0f034edf86d96675de31bdf5ce21a1f9f4c2ce9671bc4851df"
   }
