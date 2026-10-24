@@ -1,7 +1,7 @@
 # app-sync
 
 An offline-first sync engine for web apps, as plain ES modules with no dependencies. The backend is injected; a
-Firestore adapter is included. Each tagged version will be served unchanged at its own address, and an app pins an
+Firestore adapter is included. Each tagged version is served unchanged at `https://core.anawj.com/sync/<x.y.z>/`, and an app pins an
 exact version.
 
 What it does:
@@ -40,7 +40,7 @@ What it does:
 ```js
 import * as F from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { createSyncHub, createWriteQueue, createStores, createOutbox, createFirestoreBackend, replanOnWake,
-  persistGuard, syncStatus, attentionCount } from './app-sync/index.js';
+  persistGuard, syncStatus, attentionCount } from 'https://core.anawj.com/sync/0.1.0/index.js';
 
 const fs = createFirestoreBackend({ sdk: async () => ({ db, F }), path: (space, coll) => ['spaces', space, coll] });
 const stores = createStores({ prefix: 'myapp-store:', colls: ['items'] });

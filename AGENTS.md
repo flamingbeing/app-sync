@@ -32,7 +32,8 @@ node tools/proofread.mjs      # page and doc mistakes
 ## Releasing
 
 1. Bump `version` in `package.json` and `VERSION` in `index.js`; add the CHANGELOG entry.
-2. Merge with Checks green: `release.yml` then tags that commit `vX.Y.Z` (only if the tag doesn't exist yet).
+2. Run `node tools/build-sync.mjs --lock` and commit `versions.lock.json` (checks fail without it).
+3. Merge with Checks green: `release.yml` then tags that commit `vX.Y.Z` (only if the tag doesn't exist yet).
 
 ## Working with the owner
 

@@ -1,0 +1,16 @@
+{
+  "0.1.0": {
+    "LICENSE": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "NOTICE": "a4a91e7763c9b0d122fcb4c69fcfb4088427b73bd713f37d513669095430894c",
+    "index.js": "41a55af1ed17f723e3d0b76600563c652d0d1a8f60f9f6ff561cf8ae56d40c4a",
+    "src/conflict.js": "5df1124ec9259bfad75e877add3bdc19de62463e84dcdb027787c6d567d8d640",
+    "src/firestore.js": "981ab51bd18e61528582bf55032f852a6170a4f888ae7d8bb4351ba60c7eda43",
+    "src/outbox.js": "8112ffc743e8700f81ea1b88a98a2526bafeea5d3f0e482ba6244d4a17ee6199",
+    "src/persist.js": "b0a27f138ace730446c9be9e45aae4cce549339636304041f18c69d9cd59ee1a",
+    "src/status.js": "c3126bbbf337bf72986e7759583cf9ba8bc31b31a4733865d7355f1d32f0a630",
+    "src/store.js": "a523a13391a247d8c6c57627e9b9194a1b95e69af99e90ac12000d6e4f7fe162",
+    "src/sync.js": "aa5549cc89d48be94ac752f94dac2084bacb3714366d79b4986c3acb129f743d",
+    "src/watchdog.js": "acfa925f1c5787538462aecaf7288ce71b1ce4b9721a29ae229e06d00d3caecd",
+    "src/writes.js": "d55fe2f08973ee6a2986f0df3d977a5aab830e52ec0215368ff9de2c9b6c4a1e"
+  }
+}

@@ -3,26 +3,45 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../sites.js';
 
-const FILES = { '/example/index.html': '<h1>hi</h1>', '/example/sw.js': '//' };
+const FILES = {
+  '/sync/0.1.0/index.js': 'export const VERSION = "0.1.0";',
+  '/sync/0.1.0/src/sync.js': '//',
+  '/sync/0.1.0/LICENSE': 'Apache',
+  '/sync/versions.json': '{"latest":"0.1.0","versions":["0.1.0"]}',
+  '/sync/0.1.0/secret.txt': 'x',
+};
 const env = { ASSETS: { fetch: async req => {
   const p = new URL(req.url).pathname;
   return p in FILES ? new Response(FILES[p], { status: 200 }) : new Response('', { status: 404 });
 } } };
 const get = (url, method = 'GET') => worker.fetch(new Request(url, { method }), env);
+const H = 'https://core.anawj.com';
 
-test('serves the folder index, noindex', async () => {
-  const r = await get('https://example.example.com/');
+test('a version file is served with immutable caching, CORS and the right type', async () => {
+  const r = await get(`${H}/sync/0.1.0/index.js`);
   assert.equal(r.status, 200);
-  assert.equal(await r.text(), '<h1>hi</h1>');
-  assert.equal(r.headers.get('X-Robots-Tag'), 'noindex, nofollow');
+  assert.match(await r.text(), /VERSION/);
+  assert.equal(r.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+  assert.equal(r.headers.get('Access-Control-Allow-Origin'), '*');
+  assert.match(r.headers.get('Content-Type'), /^text\/javascript/);
+  assert.equal((await get(`${H}/sync/0.1.0/src/sync.js`)).status, 200);
+  assert.equal((await get(`${H}/sync/0.1.0/LICENSE`)).status, 200);
 });
 
-test('folder without a slash redirects; missing files 404; unknown hosts 404', async () => {
-  assert.equal((await get('https://example.example.com/example')).status, 301);
-  assert.equal((await get('https://example.example.com/nope.js')).status, 404);
-  assert.equal((await get('https://x.workers.dev/example/')).status, 404);
+test('the version list is short-lived, not immutable', async () => {
+  const r = await get(`${H}/sync/versions.json`);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('Cache-Control'), 'public, max-age=300');
+  assert.match(r.headers.get('Content-Type'), /^application\/json/);
+});
+
+test('nothing else is served: other types, folders, other hosts, bad versions', async () => {
+  for (const u of [`${H}/sync/0.1.0/secret.txt`, `${H}/sync/0.1.0/`, `${H}/sync/`, `${H}/`, `${H}/sync/latest/index.js`,
+    `${H}/sync/0.1/index.js`, `${H}/sync/9.9.9/index.js`, 'https://x.workers.dev/sync/0.1.0/index.js'])
+    assert.equal((await get(u)).status, 404, u);
 });
 
 test('only GET and HEAD', async () => {
-  assert.equal((await get('https://example.example.com/', 'POST')).status, 405);
+  assert.equal((await get(`${H}/sync/0.1.0/index.js`, 'POST')).status, 405);
+  assert.equal((await get(`${H}/sync/0.1.0/index.js`, 'HEAD')).status, 200);
 });
