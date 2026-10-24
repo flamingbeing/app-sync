@@ -1,7 +1,7 @@
 # Status
 
 ## Now
-- Version server built (Worker + `tools/build-sync.mjs` + lock); live once the owner's batch is done (deploy secrets, domain).
+- Live: `https://core.anawj.com/sync/0.1.0/` (Worker `app-sync`, deployed 2026-10-24 17:24 SGT); `/sync/versions.json` lists versions.
 - 0.1.0 released: engine, write queue, stores, outbox, watchdog, status rules, storage guard, Firestore adapter.
 
 ## Waiting on the owner
