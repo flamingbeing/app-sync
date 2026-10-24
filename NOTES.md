@@ -8,6 +8,9 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
 - Emulator: `npm ci && npm run test:emulator` (demo project `demo-app-sync`, open test-only rules in
   `test/emulator.rules`; Java 11+).
 
+- Update module: `node --test update/test/*.test.mjs` (fake worker world in `update/test/fake-sw.mjs`) and
+  `node update/test/e2e.mjs` (fixture app + real Chromium; Playwright is installed with `--no-save` in CI).
+
 ## Lessons
 
 - A delta listener only hears changes inside its result set: a hard delete of an older record needs a tombstone or
@@ -18,3 +21,8 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
   and checks it against `versions.lock.json`; the Worker (`worker/`) serves only those files at
   `core.anawj.com/sync/<x.y.z>/` (one-year immutable cache, CORS `*`: public code, no credentials) and
   `/sync/versions.json` (5 min). A moved tag or edited released file fails the build, so a re-deploy cannot change a version.
+- Update module (`update/`): same hosting idea as sync, with its own lock (`update.lock.json`), tags (`update-vX.Y.Z`)
+  and path (`core.anawj.com/update/<x.y.z>/`: `sw-core.js`, `register.js`). `register()` must not throw offline: with the
+  network gone `serviceWorker.register` rejects, so it falls back to the installed registration. The page module is
+  loaded from another site, so apps list its exact-pin address in their `SHELL` (cached as a pinned cross-origin file)
+  or the page would not start offline.

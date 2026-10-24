@@ -5,6 +5,7 @@
 // 3. wrangler.jsonc keeps preview links and the workers.dev address off.
 // 4. The package.json version is locked in versions.lock.json (a released version never changes).
 // 5. The Worker's tests pass (node --test 'worker/test/*.test.mjs').
+// 6. The update module's version (update/VERSION) is locked in update.lock.json and matches its files.
 // Exits 1 on any failure.
 
 import fs from 'node:fs';
@@ -48,6 +49,9 @@ if (fs.existsSync(wrangler)) {
 
 // the package.json version must be in versions.lock.json with the working tree's hashes (tools/build-sync.mjs --lock)
 try { execFileSync(process.execPath, ['tools/build-sync.mjs', '--check'], { cwd: ROOT, stdio: 'pipe' }); }
+catch (e) { fail(String(e.stderr || e.message).trim()); }
+
+try { execFileSync(process.execPath, ['tools/build-update.mjs', '--check'], { cwd: ROOT, stdio: 'pipe' }); }
 catch (e) { fail(String(e.stderr || e.message).trim()); }
 
 if (fs.existsSync(path.join(ROOT, 'worker/test'))) {

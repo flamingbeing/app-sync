@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Fixture</title>
+<link rel="stylesheet" href="style.css"><script src="app.js" defer></script></head>
+<body><p id="build">build 1</p><p id="v"></p><p id="label"></p><p id="loads"></p>
+<script type="module">
+import { register, version, versionLabel } from '__CORE__/register.js';
+const n = Number(sessionStorage.getItem('loads') || 0) + 1;
+sessionStorage.setItem('loads', String(n));
+document.getElementById('loads').textContent = String(n);
+window.__version = version;
+window.__label = versionLabel;
+window.__reg = await register({ app: 'demo', sw: 'sw.js' });
+</script></body></html>

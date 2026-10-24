@@ -35,6 +35,13 @@ node tools/proofread.mjs      # page and doc mistakes
 2. Run `node tools/build-sync.mjs --lock` and commit `versions.lock.json` (checks fail without it).
 3. Merge with Checks green: `release.yml` then tags that commit `vX.Y.Z` (only if the tag doesn't exist yet).
 
+## The update module (`update/`)
+
+`update/` holds the service worker core and page module the apps share (README inside). It is released separately:
+`update/VERSION`, `update.lock.json` (`node tools/build-update.mjs --lock`), tag `update-vX.Y.Z`, served at
+`core.anawj.com/update/<x.y.z>/`. Same rules: a released version never changes, no app-specific names. Tests:
+`node --test update/test/*.test.mjs`, and `node update/test/e2e.mjs` (needs Playwright with Chromium).
+
 ## Working with the owner
 
 - Instructions mostly come from a phone. Work through a request to the end; ask only when a decision is genuinely
