@@ -22,9 +22,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: flamingbeing/app-devkit/setup-node@v1
         with:
-          node-version: 22
+          install: 'false'
       - name: Repo check (with the Worker tests)
         run: node tools/check.mjs
       - name: Unit tests
@@ -37,19 +37,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: flamingbeing/app-devkit/setup-node@v1
+      - uses: flamingbeing/app-devkit/setup-emulators@v1
         with:
-          node-version: 22
-          cache: npm
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 21
-      - run: npm ci
-      - name: Cache the Firestore emulator
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/firebase/emulators
-          key: emulators-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          firebase-tools-version: '13.35.1'   # same as package.json
+          devkit-dir: ''
       - name: Firestore adapter (local emulator)
         run: npm run test:emulator
