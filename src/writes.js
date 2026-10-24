@@ -8,6 +8,10 @@
 //   { code: 'write-conflict', remote } (conflict.js checkWrite), a transient error ('unavailable',
 //   'deadline-exceeded': stays pending, retried with backoff) or any other error (failed). sendTimeout: a backend call
 //   that doesn't settle in this time counts as transient, so one stuck call never holds a record's saves for good.
+// save(kind, owner, record, base, { ops }): ops (optional) describe the change for a backend that applies changes by
+//   field (a last-write-wins collection: increments, keyed updates). They are stored with the save and handed on as
+//   backend(owner, kind, record, base, { key, ops: [ops, …] }), key the save's own id (a backend can use it to apply
+//   a save only once); a failed save replaced by a newer one passes its ops on first, so no change is lost.
 import { recordSignature } from './conflict.js';
 const copy = value => JSON.parse(JSON.stringify(value));
 const keyOf = job => job.kind + ':' + job.record.id;
@@ -73,7 +77,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
         if (!current(email, gen)) return;
         if (moved) { notify(); continue; }
         try {
-          const result = await send(email, job.kind, copy(job.record), copy(job.base));
+          const result = await send(email, job.kind, copy(job.record), copy(job.base), { key: job.key, ...(job.ops ? { ops: copy(job.ops) } : {}) });
           if (!current(email, gen)) return;
           job.result = copy(result); job.state = 'synced'; job.error = '';
         } catch (error) {
@@ -121,7 +125,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     return loading;
   }
   function kick() { for (const wait of waits.values()) wait.timer = null; if (owner && getOwner() === owner) for (const id of new Set(jobs.map(keyOf))) void drain(id).catch(error => { storageError = error.message; notify(); }); }
-  async function save(kind, email, record, base = null) {
+  async function save(kind, email, record, base = null, { ops } = {}) {
     record = copy(normalize(kind, copy(record))); base = copy(base);
     if (getOwner() !== email) throw new Error('Account changed; the editor has not been saved');
     await activate(email); const gen = generation, id = kind + ':' + record.id;
@@ -145,6 +149,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       job = { key: email + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2), owner: email,
         kind, record: copy(record), base: copy(stale?.state === 'failed' ? stale.base : base), state: held ? 'conflict' : 'pending', accepted: false, at: Math.max(Date.now(), ...jobs.map(x => x.at + 1)) };
       if (held) { job.remote = copy(conflict.remote ?? null); job.error = conflict.error; }
+      const carried = stale?.state === 'failed' ? stale.ops || [] : [];
+      if (ops !== undefined || carried.length) job.ops = [...carried, ...(ops !== undefined ? [copy(ops)] : [])];
     }
     try { await persist(job); storageError = ''; }
     catch { storageError = 'Local storage is unavailable. Your input has not been cleared.'; notify(); throw new Error(storageError); }

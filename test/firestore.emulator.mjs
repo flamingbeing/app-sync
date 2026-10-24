@@ -85,6 +85,52 @@ assert.ok(await until(() => q.status('item', 'i5') === 'synced'));
 assert.equal((await B.backend.fetchOne(S, 'items', 'i5')).text, 'Fake 5 merged');
 assert.equal(await q.flush(), true);
 
+// ---- 0.2.0: ISO stamps, query filters, merge (last-write-wins by field) commits ----
+const iapp = initializeApp({ projectId: 'demo-app-sync', apiKey: 'fake-key' }, 'iso');
+const idb = F.getFirestore(iapp);
+F.connectFirestoreEmulator(idb, HOST[0], Number(HOST[1]));
+const ireads = {};
+// a made-up app: ISO stamps, one site's records only, counts merged by ops ({ inc: { field: n } }), saves applied once
+const applyOps = (cur, rec, base, ops) => {
+  const out = { ...(cur || {}), ...rec };
+  if (ops) { for (const k of Object.keys(out)) if (cur && k in cur && k !== 'id') out[k] = cur[k]; for (const o of ops) for (const [k, n] of Object.entries(o.inc || {})) out[k] = (Number(out[k]) || 0) + n; }
+  return out;
+};
+const I = createFirestoreBackend({ sdk: async () => ({ db: idb, F }), path: (scope, coll) => ['spaces', scope, coll], time: 'iso',
+  where: (_scope, coll) => coll === 'rows' ? [['site', '==', 'X']] : [], merge: { rows: true, stock: applyOps }, mark: '_saves',
+  onRead: (coll, kind, n) => { (ireads[coll] ||= { billed: 0, served: 0 })[kind] += n; } });
+assert.match(I.stamp(), /^\d{4}-\d\d-\d\dT/, 'stamp() is the backend\'s stamp (ISO here)');
+const r1 = await I.commit(S, 'rows', { id: 'r1', site: 'X', f: { a: 1 } }, null);
+assert.equal(typeof r1.updatedAt, 'string');
+await I.commit(S, 'rows', { id: 'r2', site: 'Y', f: { a: 1 } }, null);
+// two devices change different fields of one record: both kept (no conflict)
+await I.commit(S, 'rows', { ...r1, f: { a: 1, b: 2 } }, r1);
+await I.commit(S, 'rows', { ...r1, f: { a: 10 } }, r1);
+assert.deepEqual((await I.fetchOne(S, 'rows', 'r1')).f, { a: 10, b: 2 });
+// the engine on ISO stamps and a filtered query: only site X, and a reopen reads only what changed
+const istores = createStores({ prefix: 'emu-iso:', colls: ['rows'] });
+const ihub = createSyncHub({ openStore: istores.openStore, listen: I.listen, fetchOne: I.fetchOne, bin: null, grace: 0 });
+let rows = [];
+off = ihub.watch(S, 'rows', l => { rows = l; });
+assert.ok(await until(() => rows.length === 1), 'the filter applies: ' + rows.length);
+off(); await settle(50); await ihub.stopAll();
+const ibilled = ireads.rows.billed;
+off = ihub.watch(S, 'rows', l => { rows = l; });
+assert.ok(await until(() => ireads.rows.billed > ibilled));
+await I.commit(S, 'rows', { id: 'r3', site: 'X', f: {} }, null);
+assert.ok(await until(() => rows.length === 2), 'a new record arrives on the delta listener with ISO stamps');
+off(); await settle(50); await ihub.stopAll();
+// increments from two devices both count; a save sent twice (lost acknowledgement) counts once
+const s0 = await I.commit(S, 'stock', { id: 's1', qty: 3 }, null, { key: 'k0' });
+await I.commit(S, 'stock', { id: 's1', qty: 2 }, s0, { key: 'k1', ops: [{ inc: { qty: -1 } }] });
+await I.commit(S, 'stock', { id: 's1', qty: 2 }, s0, { key: 'k2', ops: [{ inc: { qty: -1 } }] });
+await I.commit(S, 'stock', { id: 's1', qty: 2 }, s0, { key: 'k2', ops: [{ inc: { qty: -1 } }] });
+assert.equal((await I.fetchOne(S, 'stock', 's1')).qty, 1);
+// a record deleted elsewhere is not brought back by a merge: the save fails (kept by the queue)
+await I.commit(S, 'stock', { id: 's1', _deleted: true }, null);
+await assert.rejects(I.commit(S, 'stock', { id: 's1', qty: 5 }, s0, { key: 'k3', ops: [{ inc: { qty: 2 } }] }), e => e.code === 'not-found');
+await F.terminate(idb);
+
 await Promise.all([A, B, OLD].map(d => F.terminate(d.db)));
 console.log('firestore emulator tests passed');
 process.exit(0);

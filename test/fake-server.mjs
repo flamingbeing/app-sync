@@ -1,5 +1,7 @@
 // A fake server for the engine's tests: collections of docs, live queries ("changed since" on a field), and a count
 // of documents sent. Made-up data only.
+// stamps may be numbers or ISO strings (as the engine's timeOf)
+const when = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;
 export function fakeServer() {
   const colls = new Map();
   const coll = name => { if (!colls.has(name)) colls.set(name, new Map()); return colls.get(name); };
@@ -13,7 +15,7 @@ export function fakeServer() {
       srv.listens++;
       const w = { coll: c, prev: null };
       w.run = () => {
-        const docs = [...coll(c).values()].filter(d => since === null || (Number(d[field]) || 0) > since).map(d => ({ ...d }));
+        const docs = [...coll(c).values()].filter(d => since === null || when(d[field]) > since).map(d => ({ ...d }));
         const next = new Map(docs.map(d => [d.id, JSON.stringify(d)])), changes = [];
         for (const d of docs) { const was = w.prev && w.prev.get(d.id); if (was !== next.get(d.id)) changes.push({ type: was ? 'modified' : 'added', id: d.id, doc: d }); }
         for (const id of (w.prev || new Map()).keys()) if (!next.has(id)) changes.push({ type: 'removed', id, doc: null });
