@@ -1,0 +1,35 @@
+# Tags each new version: on a push to main, if package.json's version has no tag yet, tag that commit vX.Y.Z.
+# An existing tag is never moved or replaced (versions are immutable). Also runs by hand.
+name: Release tag
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag the version if it is new
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          code="$(node -p "require('fs').readFileSync('index.js','utf8').match(/VERSION = '([^']+)'/)[1]")"
+          if [ "$v" != "v$code" ]; then echo "::error::package.json ($v) and index.js (v$code) disagree"; exit 1; fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$v" >/dev/null; then echo "$v exists; nothing to do"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$v" -m "app-sync ${v#v}" "$GITHUB_SHA"
+          git push origin "refs/tags/$v"
+          echo "tagged $v at $GITHUB_SHA"
