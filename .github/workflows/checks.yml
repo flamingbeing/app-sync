@@ -1,0 +1,55 @@
+# Every PR and push to main: the repo checks and unit tests, and the Firestore adapter against the local emulator
+# (demo project, nothing reaches a real Firebase project). Two jobs side by side.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Repo check (with the Worker tests)
+        run: node tools/check.mjs
+      - name: Unit tests
+        run: node --test test/*.test.mjs
+      - name: Proof-read (pages and documents)
+        run: node tools/proofread.mjs
+
+  emulator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - name: Cache the Firestore emulator
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: emulators-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Firestore adapter (local emulator)
+        run: npm run test:emulator

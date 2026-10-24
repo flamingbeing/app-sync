@@ -1,0 +1,9 @@
+app-sync
+Copyright 2026 flamingbeing
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+No third-party source code is included. Its design follows patterns described in the public documentation of
+these projects, credited here:
+- RxDB Firestore replication (Apache License 2.0): checkpoint on a server-set field, soft deletes, conflict handler.
+- TinyBase MergeableStore (MIT License): hybrid logical clock for last-write-wins (considered, not used in 0.1.0).

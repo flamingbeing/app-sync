@@ -1,9 +1,9 @@
-# <repo name>
+# app-sync
 
 Instructions for every AI assistant working here (Claude Code reads this through `CLAUDE.md`).
-Replace the placeholders in angle brackets, then delete this line.
 
-<One or two lines: what this repo is and who uses it.>
+A shared, brand-neutral sync engine for the owner's web apps (ES modules, backend injected, Firestore adapter).
+Apps load a pinned version; real people's data depends on it, so treat every change as vital.
 
 ## Public here, private elsewhere
 
@@ -13,38 +13,39 @@ repo; never copy anything from there into this repo, a PR or an issue (neutral p
 
 ## Rules that bite
 
-- <Rule the next session must not get wrong.>
-
-## App defaults
-
-- Installable web apps cancel the browser's automatic install prompt: add
-  `<script>addEventListener('beforeinstallprompt', e => e.preventDefault());</script>` to the `<head>` of every page
-  that links a manifest. Keep the manifest, icons and service worker: installable, never prompted. No install buttons.
+- **Nothing app-specific in `src/`**: no app names, collection names, wording or schemas. Apps pass them in.
+- **No dependencies at run time.** `src/` imports only its own files; the Firebase SDK is passed in by the app.
+- **A released tag never changes.** Fixes go in a new version with a CHANGELOG entry; breaking API = new major.
+- **Every bug fix starts with a failing test** (`test/fixes.test.mjs` or the module's test), then the fix.
+- Never weaken a data-loss gate (outbox, sign-out check, conflict check) to make a test pass.
+- Use Opus for changes to `src/`; run the full unit and emulator tests before merging.
 
 ## Checks before merging
 
 ```
-node tools/check.mjs        # repo checks + Worker tests
-node tools/proofread.mjs    # page and doc mistakes
+node tools/check.mjs          # repo checks + Worker tests
+node --test test/*.test.mjs   # unit tests
+npm run test:emulator         # Firestore adapter on the local emulator (Java)
+node tools/proofread.mjs      # page and doc mistakes
 ```
+
+## Releasing
+
+1. Bump `version` in `package.json` and `VERSION` in `index.js`; add the CHANGELOG entry.
+2. Merge with Checks green, then tag `vX.Y.Z` on that commit and push the tag.
 
 ## Working with the owner
 
 - Instructions mostly come from a phone. Work through a request to the end; ask only when a decision is genuinely
   the owner's. When asked to plan, plan and wait.
-- Keep each PR small and finished on its own. Start PR titles with the app: "<App>: …".
-- Merge your own PRs once the checks pass, then report with the PR link (merge by the number the PR creation
-  returned) and call `unsubscribe_pr_activity`: each PR event re-sends the whole context.
-- Push once per finished step, not after every small commit (limited build minutes).
-- Each app keeps `NOTES.md` (lasting decisions, how to test) and `STATUS.md` (now, waiting on the owner, next,
-  dated decisions). Read them before starting; update them when a task finishes. Cheap end of session: `quick-save`.
+- Keep each PR small and finished on its own. Start PR titles with "app-sync: …".
+- Merge your own PRs once the checks pass, then report with the PR link and call `unsubscribe_pr_activity`.
+- Keep `NOTES.md` (lasting decisions, how to test) and `STATUS.md` (now, next, dated decisions) current.
+  Cheap end of session: `quick-save`.
 - Plain words, short; explain technical terms briefly the first time.
 
 ## Token savers
 
-- `.claude/settings.json` is only read when a session has exactly one repo attached. Sessions usually attach the
-  owner's notes repo as well; then the environment's shared settings apply instead, so keep both in step.
-- `.claude/settings.json` denies reading `__/` and `vendor/` folders. Add generated files and very large files to its
-  `deny` list (edit their build scripts instead), and say so here. Ask the owner if one is really needed.
-- Run only the touched app's tests while iterating and the full run once before merge. Screenshots only for visual
-  changes (one, viewport-sized); debug logic with text.
+- `.claude/settings.json` is only read when a session has exactly one repo attached; otherwise the environment's
+  shared settings apply.
+- `node_modules/` is for the emulator test only; never read it.
