@@ -2,5 +2,9 @@
   "0.1.0": {
     "sw-core.js": "b85ba174800c7f2f6c25b7d21006a7af7ec3c2dc7e8b7faf6a4e3ecf8d6b7961",
     "register.js": "bb8f84071769d86b966603ceac4eea2fac73034547bf9e0dd266584de3df65a3"
+  },
+  "0.2.0": {
+    "sw-core.js": "ec68b141711dc18dfe05d53fb6e51235527c9bbafb9acb9b676c08892c43b5d2",
+    "register.js": "b77edf29f91f0628cebe4a7d805827ffe0bd5f1a72e7ffb029485d39ac3dd0dd"
   }
 }

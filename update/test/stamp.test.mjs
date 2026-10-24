@@ -47,3 +47,21 @@ test('a worker with no VERSION, SHELL or MANIFEST line is refused', () => {
   fs.writeFileSync(path.join(dir, 'sw.js'), "const VERSION = 'demo-v1';\nconst SHELL = [];\n");
   assert.throws(() => stamp({ dir }), /MANIFEST/);
 });
+
+test('only exact-pinned core.anawj.com addresses are pinned; other cross-site entries get a per-deploy hash', () => {
+  const dir = mk();
+  fs.writeFileSync(path.join(dir, 'sw.js'), "const VERSION = 'demo-v1';\nconst SHELL = ['./', 'https://core.anawj.com/update/0.2.0/register.js', 'https://design.anawj.com/v1/x.css', 'https://core.anawj.com/update/latest/x.js'];\nconst MANIFEST = {};\n");
+  const a = stamp({ dir, write: false, now: Date.UTC(2026, 9, 24, 1) });
+  assert.equal(a.manifest['https://core.anawj.com/update/0.2.0/register.js'], 'pinned');
+  assert.match(a.manifest['https://design.anawj.com/v1/x.css'], /^[0-9a-f]{12}$/);
+  assert.match(a.manifest['https://core.anawj.com/update/latest/x.js'], /^[0-9a-f]{12}$/);
+  const b = stamp({ dir, write: false, now: Date.UTC(2026, 9, 24, 2) });
+  assert.notEqual(b.manifest['https://design.anawj.com/v1/x.css'], a.manifest['https://design.anawj.com/v1/x.css']);
+});
+
+test('the date is the last git change in SGT, else now in SGT; --date wins', () => {
+  const dir = mk();
+  assert.match(stamp({ dir, gitDate: '2026-10-24T20:30:00Z', now: Date.UTC(2026, 9, 30) }).version, /-2026-10-25-/);   // 04:30 SGT next day
+  assert.match(stamp({ dir, gitDate: null, now: Date.UTC(2026, 9, 24, 17) }).version, /-2026-10-25-/);                 // 01:00 SGT
+  assert.match(stamp({ dir, gitDate: '2026-10-24T20:30:00Z', date: '2026-01-02' }).version, /-2026-01-02-/);
+});

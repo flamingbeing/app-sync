@@ -110,6 +110,34 @@ try {
   assert.equal(await text('loads'), '3');
   assert.equal(await page.evaluate(() => window.__version()), v4.version);
 
+  step = 'waitForGo + canReload: a new worker waits while the page says no, takes over on retryUpdate';
+  await page.evaluate(() => sessionStorage.removeItem('app-update:reload:demo'));
+  const edit = (f, a, b) => fs.writeFileSync(path.join(appRoot, f), fs.readFileSync(path.join(appRoot, f), 'utf8').replace(a, b));
+  edit('sw.js', "offline: 'offline.html' }", "offline: 'offline.html', waitForGo: true }");
+  edit('index.html', "import { register, version, versionLabel }", "import { register, version, versionLabel, retryUpdate }");
+  edit('index.html', "register({ app: 'demo', sw: 'sw.js' })", "register({ app: 'demo', sw: 'sw.js', canReload: () => !!window.__ok })");
+  edit('index.html', 'window.__label = versionLabel;', 'window.__label = versionLabel; window.__retry = retryUpdate;');
+  fs.writeFileSync(path.join(appRoot, 'app.js'), "document.title = 'fifth build';");
+  const v5 = stamp({ dir: appRoot, date: '2026-10-28' });
+  await page.evaluate(() => window.__reg.update());   // the old page has no canReload: it gives the go at once
+  await page.waitForFunction(() => document.title === 'fifth build', null, { timeout: 15000 });
+  await settle(1000);
+  assert.equal(await text('loads'), '4');
+  assert.equal(await page.evaluate(() => window.__version()), v5.version);
+  await page.evaluate(() => sessionStorage.removeItem('app-update:reload:demo'));
+  fs.writeFileSync(path.join(appRoot, 'app.js'), "document.title = 'sixth build';");
+  const v6 = stamp({ dir: appRoot, date: '2026-10-29' });
+  await page.evaluate(() => window.__reg.update());
+  await page.waitForFunction(() => !!window.__reg.waiting, null, { timeout: 15000 });
+  await settle(1500);
+  assert.equal(await text('loads'), '4', 'no reload while canReload says no');
+  assert.equal(await page.evaluate(() => window.__version()), v5.version, 'the new worker waits');
+  await page.evaluate(() => { window.__ok = true; return window.__retry(); });
+  await page.waitForFunction(() => document.title === 'sixth build', null, { timeout: 15000 });
+  await settle(1000);
+  assert.equal(await text('loads'), '5');
+  assert.equal(await page.evaluate(() => window.__version()), v6.version);
+
   console.log('e2e: ok');
 } catch (e) {
   console.error('e2e failed at: ' + step + '\n' + (e.stack || e));

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { initializeApp } from 'firebase/app';
 import * as F from 'firebase/firestore';
 import { createFirestoreBackend } from '../src/firestore.js';
-import { createSyncHub } from '../src/sync.js';
+import { createSyncHub, leaveEntry } from '../src/sync.js';
 import { createWriteQueue } from '../src/writes.js';
 import { createStores } from '../src/store.js';
 
@@ -16,7 +16,7 @@ async function until(check, ms = 8000) {
   while (Date.now() < end) { if (await check()) return true; await settle(50); }
   return false;
 }
-function device(name, stamp) {
+function device(name, stamp, opts = {}) {
   const app = initializeApp({ projectId: 'demo-app-sync', apiKey: 'fake-key' }, name);
   const db = F.getFirestore(app);
   F.connectFirestoreEmulator(db, HOST[0], Number(HOST[1]));
@@ -26,6 +26,7 @@ function device(name, stamp) {
     path: (scope, coll) => ['spaces', scope, coll],
     stamp,
     onRead: (coll, kind, n) => { (reads[coll] ||= { billed: 0, served: 0 })[kind] += n; },
+    ...opts,
   });
   return { app, db, backend, reads };
 }
@@ -227,6 +228,23 @@ await F.enableNetwork(P.db);
 assert.ok(await until(() => pnotes.find(d => d.id === 'n1')?.text === 'Fake, edited offline' && typeof pnotes.find(d => d.id === 'n1').serverAt === 'number'), 'and arrives with its server stamp');
 off(); await settle(50); await phub2.stopAll();
 await Promise.all([W, R, P].map(d => F.terminate(d.db)));
+
+// ---- 0.4.0: a stamp moves past a fast writer's; a leave entry in the lock's own transaction; clearCache ----
+const FAST = device('fast', doc => ({ ...doc, updatedAt: Date.now() + 3600e3 }));
+const fast = await FAST.backend.commit(S, 'items', { id: 'f1', text: 'Fake by a fast clock' }, null);
+const later = await A.backend.commit(S, 'items', { id: 'f1', text: 'Fake later edit' }, fast);
+assert.equal(later.updatedAt, fast.updatedAt + 1, 'max(now, the server copy + 1)');
+assert.equal((await A.backend.fetchOne(S, 'items', 'f1')).updatedAt, fast.updatedAt + 1);
+const LOCK = device('lock', undefined, { onCommit: ({ scope, before, after, at, fields }) => after && after.locked && !(before && before.locked)
+  ? [{ path: ['spaces', scope, 'leaves', 'item:' + after.id], data: { ...leaveEntry('item', after, at), ...fields } }] : [] });
+const l1 = await LOCK.backend.commit(S, 'items', { id: 'l1', text: 'Fake' }, null);
+assert.equal((await F.getDocFromServer(F.doc(LOCK.db, 'spaces', S, 'leaves', 'item:l1'))).exists(), false);
+const l2 = await LOCK.backend.commit(S, 'items', { ...l1, locked: true }, l1);
+const entry = (await F.getDocFromServer(F.doc(LOCK.db, 'spaces', S, 'leaves', 'item:l1'))).data();
+assert.equal(entry.data.updatedAt, l2.updatedAt, 'the leave entry names the locked version');
+assert.ok(entry.deletedAt > l2.updatedAt);
+await LOCK.backend.clearCache();
+await Promise.all([FAST].map(d => F.terminate(d.db)));
 
 await Promise.all([A, B, OLD].map(d => F.terminate(d.db)));
 console.log('firestore emulator tests passed');

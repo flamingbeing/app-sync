@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.4.0 (2026-10-25)
+
+Safety pack. Nothing changes for 0.3.0 callers that leave the new options out, except the fixes marked below. Each
+change has a test in `test/safety.test.mjs` that failed before it (the adapter's also in `test/firestore.emulator.mjs`).
+
+- Fixed: the adapter's default stamp is `max(now, the server copy's stamp + 1)`, taken inside the commit transaction
+  (plain and merge commits, numbers and ISO strings), so a writer whose clock is behind the last writer's still moves
+  the stamp forward and delta readers see the change. An adapter given its own `stamp` function is unchanged.
+  `stamp(prev)` and `stampFields(prev)` give the same rule for an app's own writes (no argument: now, as before).
+- Fixed: `leaveEntry(kind, record, at)` stamps `deletedAt` as `max(at, record.updatedAt + 1)`, in the type of `at`,
+  so an entry is always after the version it removes (0.3.0 gave `at` as it was, also when equal).
+- Fixed: the write queue treats Firestore `aborted` (another device's transaction on the same record won) as
+  transient: the save stays pending and is retried, instead of failing and needing the user.
+- Adapter `onCommit({ scope, coll, before, after, at, fields })`: more writes (`{ path, data, merge }` or
+  `{ path, delete: true }`) in the same transaction as a record's write, e.g. a leave entry with a lock.
+- Adapter `clearCache()`: terminates the SDK and clears its offline cache (sign-out on a shared device).
+- `syncStatus({ confirmed })`: false gives the new state `unknown` instead of `synced` until the server has
+  answered once; `atRiskOnlyOffline: true` says `at-risk` only while offline.
+- Write queue `otherPending: async () => bool`: writes sent outside the queue keep the sign-out check (`flush`) shut
+  (a throw too); `queue.unsent(kind, id)` says a record has saves not sent yet.
+- Hub and collection `unsent` and `onLeave`: a record that leaves the query (delta removal, a full read without it,
+  or a check that finds it gone) while it has unsent saves stays on this device and is reported, instead of dropped.
+- `forgetDevice({ hub, stores, queue, proceed, keep, clearBackendCache, extra })` (`src/forget.js`): sign-out in one
+  order: stop all, check `proceed` again, wipe the stores keeping `keep`, forget the outbox, clear the SDK cache,
+  then the app's own; `{ wiped, failed }`.
+
+## update 0.2.0 (2026-10-25)
+
+The update module (`core.anawj.com/update/0.2.0/`), tag `update-v0.2.0`. Nothing changes for 0.1.0 callers that leave
+the new options out, except the stamp tool fixes. Tests in `update/test/` (unit and real browser).
+
+- `register({ canReload, beforeReload })`: the take-over reload waits while `canReload()` says no (someone typing,
+  a sheet open, changes sending) and is tried again when the tab is hidden or shown, on `pagehide`, and on
+  `retryUpdate()`; `beforeReload` runs just before the reload. A worker started with `waitForGo` gets its go
+  (`update:go`) only when `canReload` allows. Updates are also checked when the browser comes back online.
+- `forceLatest({ canReload })` refuses while `canReload` (given here, else to `register`) says no.
+- sw-core `waitForGo: true`: no `skipWaiting` on install; the new version waits for a page's go.
+- Fixed (`tools/stamp-versions.mjs`, copied by apps): only exact-version `core.anawj.com/<name>/<x.y.z>/` addresses
+  count as pinned; any other cross-site `SHELL` entry gets a new hash every deploy, so a changed file under a moving
+  address (`…/v1/`) reaches the phones. The date is the app folder's last git change in SGT (was today in UTC).
+
 ## 0.3.0 (2026-10-24)
 
 Server stamps, as an option. Nothing changes for 0.2.0 callers that leave the new options out, except the fix below.
