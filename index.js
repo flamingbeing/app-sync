@@ -9,4 +9,4 @@ export { persistGuard } from './src/persist.js';
 export { syncStatus, attentionCount } from './src/status.js';
 export { forgetDevice } from './src/forget.js';
 export { createFirestoreBackend } from './src/firestore.js';
-export const VERSION = '0.4.0';
+export const VERSION = '0.4.1';

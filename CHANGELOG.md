@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1 (2026-10-25)
+
+Fault-injection tests (`test/faults.test.mjs`): the network dropping and coming back mid-queue, two devices writing one
+record (clocks apart, lost transaction races), sign-out with saves not sent, data left by 0.3.0 clients, Firestore's
+transient errors, a record leaving the query with unsent saves, and the update module's reload with a draft open.
+
+- Fixed: a record with unsent saves whose bin or leave-feed entry arrives (deleted, locked or moved elsewhere) stays
+  on this device and `onLeave` reports it, as 0.4.0 already did when the query dropped it; it was removed, so the
+  save's conflict had no record to show against. Also for a collection nobody watches at that moment.
+- Docs: after `forgetDevice` says no (`proceed` false), the hub is stopped; the app watches again.
+
 ## 0.4.0 (2026-10-25)
 
 Safety pack. Nothing changes for 0.3.0 callers that leave the new options out, except the fixes marked below. Each
