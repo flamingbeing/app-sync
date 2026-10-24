@@ -3,7 +3,8 @@
 //    its own prefix (apps can share an origin).
 // 2. Every file in an app's SHELL list exists.
 // 3. wrangler.jsonc keeps preview links and the workers.dev address off.
-// 4. The Worker's tests pass (node --test 'worker/test/*.test.mjs').
+// 4. The package.json version is locked in versions.lock.json (a released version never changes).
+// 5. The Worker's tests pass (node --test 'worker/test/*.test.mjs').
 // Exits 1 on any failure.
 
 import fs from 'node:fs';
@@ -44,6 +45,10 @@ if (fs.existsSync(wrangler)) {
   if (!/"preview_urls"\s*:\s*false/.test(w)) fail('wrangler.jsonc: "preview_urls" should be false (no preview links)');
   if (!/"workers_dev"\s*:\s*false/.test(w)) fail('wrangler.jsonc: "workers_dev" should be false (real addresses only)');
 }
+
+// the package.json version must be in versions.lock.json with the working tree's hashes (tools/build-sync.mjs --lock)
+try { execFileSync(process.execPath, ['tools/build-sync.mjs', '--check'], { cwd: ROOT, stdio: 'pipe' }); }
+catch (e) { fail(String(e.stderr || e.message).trim()); }
 
 if (fs.existsSync(path.join(ROOT, 'worker/test'))) {
   try { execFileSync(process.execPath, ['--test', 'worker/test/*.test.mjs'], { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] }); }

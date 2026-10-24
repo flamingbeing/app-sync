@@ -1,5 +1,6 @@
 # Deploys this repo's Worker on every push to main (and to beta, as the Worker's "beta" environment, if
-# wrangler.jsonc has one). The deploy build stamps the service worker versions first (tools/stamp-versions.mjs).
+# wrangler.jsonc has one). The deploy first builds dist/ from every release tag (tools/build-sync.mjs), which fails if
+# a released version no longer matches versions.lock.json.
 # Needs repo secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; without them the run says so and skips.
 name: Deploy
 
@@ -35,14 +36,14 @@ jobs:
       - uses: actions/checkout@v4
         if: steps.gate.outputs.go == 'true'
         with:
-          fetch-depth: 0   # stamp-versions dates each app by its last commit
+          fetch-depth: 0   # all tags: each release is rebuilt from its tag
       - uses: actions/setup-node@v4
         if: steps.gate.outputs.go == 'true'
         with:
           node-version: 22
-      - name: Stamp service worker versions
+      - name: Build the versions (dist/sync/<x.y.z>/)
         if: steps.gate.outputs.go == 'true'
-        run: if [ -f tools/stamp-versions.mjs ]; then node tools/stamp-versions.mjs; fi
+        run: git fetch --tags --force --quiet && node tools/build-sync.mjs
       - name: Deploy
         if: steps.gate.outputs.go == 'true'
         run: |

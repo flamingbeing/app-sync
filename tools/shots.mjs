@@ -8,7 +8,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 // the page to show for changes in a folder, when it isn't just /<folder>/ (e.g. an app's demo mode)
-export const PAGES = { 'example/': '/example/' };
+export const PAGES = {};
 const MAX = 6;
 // files that never change what a page shows: notes, tests, local tools, the Worker
 const UNSEEN = /(\.md$|(^|\/)(test|tools|worker)\/)/;

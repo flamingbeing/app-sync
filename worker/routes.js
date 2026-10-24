@@ -9,7 +9,7 @@
 //                                             root add a few extra folders)
 //      or { moved: { '/old/': 'https://example.org/new/' } }  (apps now on another site: each path forwards there)
 export const SITES = {
-  'example.example.com': { root: 'example/' },
+  'core.anawj.com': { prefixes: { '/sync/': 'sync/' } },   // files come from dist/ (tools/build-sync.mjs)
 };
 
 // Folders every host serves as they are (shared files, no data), e.g. ['/shared/']
