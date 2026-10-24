@@ -5,8 +5,8 @@ import { resolve } from './routes.js';
 
 const NOINDEX = 'noindex, nofollow';
 // a released version's files never change: browsers and the CDN may keep them for a year. The list of versions can.
-const VERSIONED = /^\/sync\/\d+\.\d+\.\d+\/.+\.(js|json)$|^\/sync\/\d+\.\d+\.\d+\/(LICENSE|NOTICE)$/;
-const LISTING = '/sync/versions.json';
+const VERSIONED = /^\/sync\/\d+\.\d+\.\d+\/.+\.(js|json)$|^\/sync\/\d+\.\d+\.\d+\/(LICENSE|NOTICE)$|^\/update\/\d+\.\d+\.\d+\/(sw-core|register)\.js$/;
+const LISTING = ['/sync/versions.json', '/update/versions.json'];
 // public code, no cookies or credentials, so any app origin may import it
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Cross-Origin-Resource-Policy': 'cross-origin' };
 
@@ -14,7 +14,7 @@ export default {
   async fetch(request, env) {
     if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
     const url = new URL(request.url);
-    if (url.pathname !== LISTING && !VERSIONED.test(url.pathname)) return notFound();   // no folder listings, no other files
+    if (!LISTING.includes(url.pathname) && !VERSIONED.test(url.pathname)) return notFound();   // no folder listings, no other files
     const r = resolve(url.hostname, url.pathname);
     if (r.redirect) return redirect(url, r.redirect);
     if (r.notFound) return notFound();
@@ -32,7 +32,7 @@ export default {
     res = new Response(res.body, res);
     res.headers.set('X-Robots-Tag', NOINDEX);
     for (const [k, v] of Object.entries(CORS)) res.headers.set(k, v);
-    res.headers.set('Cache-Control', url.pathname === LISTING ? 'public, max-age=300' : 'public, max-age=31536000, immutable');
+    res.headers.set('Cache-Control', LISTING.includes(url.pathname) ? 'public, max-age=300' : 'public, max-age=31536000, immutable');
     if (url.pathname.endsWith('.js')) res.headers.set('Content-Type', 'text/javascript; charset=utf-8');
     else if (url.pathname.endsWith('.json')) res.headers.set('Content-Type', 'application/json; charset=utf-8');
     else res.headers.set('Content-Type', 'text/plain; charset=utf-8');

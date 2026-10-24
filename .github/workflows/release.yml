@@ -1,4 +1,5 @@
-# Tags each new version: on a push to main, if package.json's version has no tag yet, tag that commit vX.Y.Z.
+# Tags each new version: on a push to main, if package.json's version has no tag yet, tag that commit vX.Y.Z; the same
+# for the update module (update/VERSION -> update-vX.Y.Z).
 # An existing tag is never moved or replaced (versions are immutable). Also runs by hand.
 name: Release tag
 
@@ -31,5 +32,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$v" -m "app-sync ${v#v}" "$GITHUB_SHA"
+          git push origin "refs/tags/$v"
+          echo "tagged $v at $GITHUB_SHA"
+      - name: Tag the update module if its version is new
+        run: |
+          v="update-v$(tr -d '[:space:]' < update/VERSION)"
+          for f in update/sw-core.js update/register.js; do
+            if ! grep -q "CORE_VERSION = '${v#update-v}'" "$f"; then echo "::error::$f and update/VERSION disagree"; exit 1; fi
+          done
+          if git ls-remote --exit-code --tags origin "refs/tags/$v" >/dev/null; then echo "$v exists; nothing to do"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$v" -m "app-update ${v#update-v}" "$GITHUB_SHA"
           git push origin "refs/tags/$v"
           echo "tagged $v at $GITHUB_SHA"

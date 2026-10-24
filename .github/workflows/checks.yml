@@ -6,7 +6,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['v*', 'update-v*']
   workflow_dispatch:
 
 permissions:
@@ -28,7 +28,7 @@ jobs:
       - name: Repo check (with the Worker tests)
         run: node tools/check.mjs
       - name: Unit tests
-        run: node --test test/*.test.mjs
+        run: node --test test/*.test.mjs update/test/*.test.mjs
       - name: Proof-read (pages and documents)
         run: node tools/proofread.mjs
 
@@ -44,3 +44,16 @@ jobs:
           devkit-dir: ''
       - name: Firestore adapter (local emulator)
         run: npm run test:emulator
+
+  update-browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flamingbeing/app-devkit/setup-node@v1
+        with:
+          install: 'false'
+      - name: Playwright with Chromium (not saved in package.json)
+        run: npm install --no-save --no-package-lock playwright@1.63.0 && npx playwright install --with-deps chromium
+      - name: Update module in a real browser
+        run: node update/test/e2e.mjs

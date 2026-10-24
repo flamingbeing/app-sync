@@ -1,5 +1,5 @@
 # Deploys this repo's Worker on every push to main (and to beta, as the Worker's "beta" environment, if
-# wrangler.jsonc has one). The deploy first builds dist/ from every release tag (tools/build-sync.mjs), which fails if
+# wrangler.jsonc has one). The deploy first builds dist/ from every release tag (tools/build-sync.mjs, tools/build-update.mjs), which fails if
 # a released version no longer matches versions.lock.json.
 # Needs repo secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID; without them the run says so and skips.
 name: Deploy
@@ -20,6 +20,6 @@ jobs:
   deploy:
     uses: flamingbeing/app-devkit/.github/workflows/deploy-worker.yml@v1
     with:
-      build-command: git fetch --tags --force --quiet && node tools/build-sync.mjs   # dist/sync/<x.y.z>/ from every release tag
+      build-command: git fetch --tags --force --quiet && node tools/build-sync.mjs && node tools/build-update.mjs   # dist/sync/<x.y.z>/ and dist/update/<x.y.z>/ from the release tags
       beta-env: true
     secrets: inherit
