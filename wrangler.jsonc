@@ -1,0 +1,23 @@
+// Cloudflare Workers config. The Worker (worker/sites.js) serves this repo's files and decides which folder each
+// address may see (worker/routes.js). No data and no secrets in this file: settings the Worker needs are set in the
+// Cloudflare dashboard (keep_vars keeps them across deploys).
+{
+  "name": "<repo-name>",
+  "main": "worker/sites.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS",
+    // every request goes through the Worker first (it picks the folder by address); it does the folder-index and
+    // trailing-slash handling itself, so Cloudflare's own are off
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  // no preview link per branch or build, and no *.workers.dev address: only the real addresses serve the apps
+  "preview_urls": false,
+  "workers_dev": false,
+  "keep_vars": true
+  // add the real addresses here, one per host in worker/routes.js SITES:
+  // "routes": [{ "pattern": "<app>.example.com", "custom_domain": true }]
+}
