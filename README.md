@@ -242,7 +242,7 @@ import { auth, emailLink, password, passcode, anonymous } from '@core/auth';   /
 auth({ methods: ['google', password(), anonymous()] });   // or SHAPES.md names: 'emailLink', 'passcode', ... (loaded when asked)
 await app.auth.signIn({ method: 'password', email, password: secret });   // -> { ok, reason }
 await app.auth.signIn({ method: 'emailLink', email });   // reason 'sent'; the page the link opens: the same call signs in
-await app.auth.signIn({ method: 'passcode', code });   // passcode({ url }): POST { code, email? } -> { token }; else 'refused'
+await app.auth.signIn({ method: 'passcode', code });   // passcode({ url }): POST { code, email? } -> { token }; else 'refused' (also when signOut() came first)
 sync({ ..., colls: ['items', 'news'], public: ['news'] });
 app.sync.watch('public:all', 'news', list => draw(list));   // no sign-in needed; read only
 ```

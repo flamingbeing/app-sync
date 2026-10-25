@@ -398,3 +398,61 @@ test('passcode: the code goes to the app\'s url, its token signs in; a refused c
   assert.deepEqual(t.sdk.calls, ['token tok1']);
   assert.equal(t.app.auth.user().uid, 'guest-tok1');
 });
+
+test('passcode: a sign-out while the code is out wins: its token signs nobody in', async () => {
+  let answer;
+  const fetch = () => new Promise(r => { answer = () => r({ ok: true, status: 200, json: async () => ({ token: 'tok1' }) }); });
+  const t = setup({ options: { methods: [passcode({ url: 'https://guest.example.test/token', fetch })] } });
+  await t.app.ready;
+  const pending = t.app.auth.signIn({ method: 'passcode', code: 'right' });
+  await settle();
+  await t.app.auth.signOut();
+  answer();
+  assert.deepEqual(await pending, { ok: false, reason: 'refused' });
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.equal(t.app.auth.user(), null);
+  assert.deepEqual(t.log, []);
+});
+
+test('forget(): a wipe that throws keeps the owner, so the next account is a switch that wipes again', async () => {
+  const device = { rows: [], unsent: 0 }, log = [];
+  let broken = true;
+  const flaky = {
+    name: 'flaky', needs: ['auth'],
+    start(ctx) {
+      ctx.on('forget', () => { if (broken) throw new Error('wipe failed'); });
+      ctx.on('switch', () => { log.push('flaky switch'); });
+      return {};
+    },
+    stop() {},
+  };
+  const sdk = fakeSdk();
+  const app = createApp({ config: { name: 'fake-app', storage: memStorage(), sdk: sdk.sdk }, modules: [auth(), fakeData(device, log), flaky] });
+  await app.ready;
+  await app.auth.signIn();
+  assert.deepEqual(await app.auth.forget(), { ok: true, reason: '', failed: ['flaky'] });
+  broken = false;
+  sdk.as(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  assert.deepEqual(await app.auth.signIn(), { ok: true, reason: '' });
+  assert.deepEqual(log, ['signin u1', 'signout u1', 'forget u1', 'switch u1>u2', 'flaky switch', 'signin u2']);
+});
+
+test('stop() while the app\'s beforeSwitch runs: the switch goes no further, no claims watch is left', async () => {
+  let release, entered;
+  const inBefore = new Promise(r => { entered = r; });
+  const t = setup({ options: {
+    beforeSwitch: () => { entered(); return new Promise(r => { release = r; }); },
+    claims: { url: 'https://claims.example.test', watch: true, doc: u => 'roles/' + u.uid },
+  } });
+  await t.app.ready;
+  await t.app.auth.signIn();
+  await t.app.auth.signOut();
+  t.sdk.as(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  void t.app.auth.signIn();
+  await inBefore;
+  await t.app.stop();
+  release();
+  await settle();
+  assert.equal(t.sdk.docCbs.size, 0, 'no claims watch after stop');
+  assert.deepEqual(t.log, ['signin u1', 'signout u1']);
+});

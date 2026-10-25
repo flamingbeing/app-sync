@@ -14,6 +14,21 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.6 (2026-10-26)
+
+Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fixes are a
+few lines in `src/auth.js` and `src/signin/passcode.js` (the passcode method still has its own chunk).
+
+- **A sign-out wins over a sign-in still out**: a passcode sign-in whose token came back after `signOut()` or
+  `forget()` signed the account back in. A sign-in that was out when either came now signs nobody in and answers
+  `{ ok: false, reason: 'refused' }`. The passcode method hands its token to the auth module (`{ token }`, an optional
+  field of a sign-in method's answer) instead of signing in itself, so the check covers it.
+- **A failed forget keeps the owner**: a module whose `forget` wipe threw still cleared the device's owner, so the next
+  account's sign-in was no switch and the old account's rows stayed under the new one. The owner now stays when a wipe
+  threw (`failed` names it, as before): another account's sign-in is a switch that wipes again.
+- **`stop()` during the app's `beforeSwitch` ends the switch**: the switch went on after `app.stop()` and left a live
+  claims watch. Nothing is wiped and nothing more is started once the app has stopped.
+
 ## 1.3.5 (2026-10-26)
 
 Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is a few
