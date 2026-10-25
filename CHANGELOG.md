@@ -23,7 +23,7 @@ Fix, no API, module contract or stored-format change; modular: yes, shaken: no n
   stored by another tab that then closed (offline) was never sent by the tab left open, and a held or refused save
   that the other tab had already settled stayed "waiting" here, shutting the sign-out check and the update reload until
   a reload. `kick()` (online, wake, `flush()`) now reads the outbox again: saves it had not seen are sent, settled ones
-  are cleared. `kick()` returns a promise (it returned nothing).
+  are cleared; a refused save settled elsewhere too. `kick()` returns a promise (it returned nothing).
 
 ## 1.2.1 (2026-10-26)
 

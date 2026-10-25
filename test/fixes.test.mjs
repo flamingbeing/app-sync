@@ -226,7 +226,7 @@ function tabs() {
   const records = new Map(), remote = new Map(); let online = true;
   const store = { async put(x) { records.set(x.key, structuredClone(x)); }, async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; }, async remove(k) { records.delete(k); }, async forget(o) { for (const [k, x] of records) if (x.owner === o) records.delete(k); } };
   const tab = () => createWriteQueue({ store, getOwner: () => 'a', online: () => online, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))),
-    backend: async (_o, _k, record, base) => { const cur = remote.get(record.id) || null; checkWrite(cur, record, base); remote.set(record.id, structuredClone(record)); return record; } });
+    backend: async (_o, _k, record, base) => { const cur = remote.get(record.id) || null; checkWrite(cur, record._deleted ? null : record, base); if (record._deleted) remote.delete(record.id); else remote.set(record.id, structuredClone(record)); return record; } });
   return { records, remote, tab, online: x => { online = x; } };
 }
 
@@ -250,4 +250,30 @@ test('a conflict another tab already chose is cleared here too (1.2.2)', async (
   assert.equal(await a.flush(), true, 'nothing waits here any more');
   assert.equal(a.entries()[0].state, 'archived');
   assert.equal(a.attention(), false);
+});
+
+test('this tab reads what another tab stored before it sends its own later save of the same record (1.2.2)', async () => {
+  const w = tabs(); w.online(false);
+  const a = w.tab(); await a.activate('a');
+  const first = { id: '1', text: 'one' };
+  const b = w.tab(); await b.save('item', 'a', first);   // (the older save, from a tab that is gone)
+  await settle();
+  await a.save('item', 'a', { id: '1', _deleted: true }, first);   // (the later one, here)
+  w.online(true); a.kick();
+  assert.equal(await a.flush(), true);
+  assert.equal(w.remote.has('1'), false, 'the delete was made last: the record stays deleted');
+});
+
+test('a refused save another tab retried is cleared here too (1.2.2)', async () => {
+  const w = tabs(); let refuse = true;
+  const a = w.tab(); await a.activate('a');
+  a.configure({ backend: async () => { if (refuse) throw Object.assign(new Error('rejected'), { code: 'permission-denied' }); return {}; } });
+  await assert.rejects(a.save('item', 'a', { id: '1', text: 'x' }));
+  await a.archive(a.entries()[0].key, { refused: true });
+  assert.equal(a.entries()[0].refused, true);
+  const b = w.tab(); await b.activate('a');
+  b.configure({ backend: async (_o, _k, r) => r }); refuse = false;
+  await b.retry(b.entries()[0].key);   // (retried in the other tab)
+  a.kick();
+  assert.equal(await a.flush(), true, 'nothing waits here any more');
 });

@@ -141,7 +141,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       if (newer < KEEP) return false;
       job.state = 'archived'; jobs = jobs.filter(x => x !== job); return true;
     }
-    if (stored.state === job.state || stored.state === 'pending') return false;
+    if (stored.state === job.state && !stored.refused === !job.refused || stored.state === 'pending') return false;
     Object.assign(job, { state: stored.state, error: stored.error || '', result: stored.result, remote: stored.remote, accepted: stored.accepted, kept: stored.kept, code: stored.code, refused: stored.refused });
     return true;
   }
@@ -221,16 +221,15 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     const known = new Set(jobs.map(x => x.key)), added = stored.filter(x => !known.has(x.key) && !inflight.has(keyOf(x)));
     jobs.push(...added);
     let moved = added.length > 0;
-    for (const job of jobs.filter(x => x.state === 'conflict' || x.state === 'failed')) moved = await refresh(job) || moved;
+    for (const job of jobs.filter(x => x.state === 'conflict' || x.state === 'failed' || x.refused)) moved = await refresh(job) || moved;
     if (moved && current(email, gen)) notify();
     return moved && current(email, gen);
   }
-  // sends what waits, then what the store shows that this window had not seen
+  // reads the store first, so an older save another window stored is sent before this window's later one
   /** @returns {Promise<void>} */
   function kick() {
     for (const wait of waits.values()) wait.timer = null;
-    sendAll();
-    return rescan().then(moved => { if (moved) sendAll(); }).catch(error => { storageError = error.message; notify(); });
+    return rescan().then(sendAll).catch(error => { storageError = error.message; notify(); });
   }
   /**
    * @param {string} kind
@@ -285,7 +284,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     // set aside once the new save is stored: the one it replaces, or (made on the other copy) the whole stopped chain,
     // kept in the history for good, and the user told
     for (const x of over ? chain : stale && stale !== job ? [stale] : []) { x.state = 'archived'; if (over) x.kept = true; await persist(x); }
-    if (!jobs.includes(job)) jobs.push(job);
+    const at = jobs.findIndex(x => x.key === job.key);   // (a rescan may have read it from the store first)
+    if (at < 0) jobs.push(job); else jobs[at] = job;
     unshow(); notify();
     if (over && !same(/** @type {Job} */ (previous).record, record)) notice('Your version from this device is kept in ' + recover);
     if (held) throw failure(job);
