@@ -29,7 +29,8 @@ jobs:
       - name: Types (JSDoc, tsc --checkJs)
         run: npm install --no-save --no-package-lock typescript@5.8.3 && npx tsc -p .   # same as package.json
       - name: Types are up to date (types/, generated from the JSDoc)
-        run: npx tsc -p tsconfig.types.json && git add -N types && git diff --exit-code --stat -- types || { echo "types/ is stale: run npm run types and commit it"; exit 1; }
+        run: |
+          npx tsc -p tsconfig.types.json && git add -N types && git diff --exit-code --stat -- types || { echo "types/ is stale: run npm run types and commit it"; exit 1; }
       - name: Types through the import-map names (@core/* via paths)
         run: npx tsc -p test/types
       - name: Modularity rules (side-effect-free entries, no cross-entry imports, literal URLs, .js)

@@ -28,10 +28,13 @@ test('the check catches each broken rule', async () => {
   w('auth.js', "export { auth } from './src/auth.js';\n");
   w('sync.js', "export { sync } from './src/module-sync.js';\n");
   w('update.js', "export { update } from './src/module-update.js';\nexport const later = () => import('./' + 'x.js');\n");   // import() not literal
+  w('src/late.js', "export const late = () => import('./auth.js');\nexport const lazy = () => import('./util');\n");   // literal import(): another module, no .js
+  w('src/runner.js', "export const createApp = () => import('./late.js');\n");
   w('package.json', '{ "type": "module" }\n');
   const problems = (await checkModularity(dir)).join('\n');
   for (const want of [/src\/auth\.js imports src\/module-sync\.js/, /'\.\/util' has no \.js extension/, /top-level await/,
-    /new URL\(\) without a literal/, /import\(\) without a literal/, /update\.js touches localStorage on import/])
+    /new URL\(\) without a literal/, /import\(\) without a literal/, /update\.js touches localStorage on import/,
+    /src\/late\.js imports src\/auth\.js, another module's main file \(app\.js\)/, /src\/late\.js:2: '\.\/util' has no \.js extension/])
     assert.match(problems, want);
   fs.rmSync(dir, { recursive: true, force: true });
 });

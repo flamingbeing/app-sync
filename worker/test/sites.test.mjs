@@ -7,6 +7,8 @@ const FILES = {
   '/sync/0.1.0/index.js': 'export const VERSION = "0.1.0";',
   '/sync/0.1.0/src/sync.js': '//',
   '/sync/0.1.0/LICENSE': 'Apache',
+  '/sync/0.1.0/types/app.d.ts': 'export {};',
+  '/sync/0.1.0/src/sync.ts': 'x',
   '/sync/versions.json': '{"latest":"0.1.0","versions":["0.1.0"]}',
   '/sync/0.1.0/secret.txt': 'x',
   '/update/0.1.0/sw-core.js': 'self.AppUpdate = {};',
@@ -32,6 +34,14 @@ test('a version file is served with immutable caching, CORS and the right type',
   assert.equal((await get(`${H}/sync/0.1.0/LICENSE`)).status, 200);
 });
 
+test('the type declarations (types/*.d.ts, from 0.9.2) are served as text, immutable', async () => {
+  const r = await get(`${H}/sync/0.1.0/types/app.d.ts`);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+  assert.equal(r.headers.get('Access-Control-Allow-Origin'), '*');
+  assert.match(r.headers.get('Content-Type'), /^text\/plain/);
+});
+
 test('the version list is short-lived, not immutable', async () => {
   const r = await get(`${H}/sync/versions.json`);
   assert.equal(r.status, 200);
@@ -40,7 +50,7 @@ test('the version list is short-lived, not immutable', async () => {
 });
 
 test('nothing else is served: other types, folders, other hosts, bad versions', async () => {
-  for (const u of [`${H}/sync/0.1.0/secret.txt`, `${H}/sync/0.1.0/`, `${H}/sync/`, `${H}/`, `${H}/sync/latest/index.js`,
+  for (const u of [`${H}/sync/0.1.0/secret.txt`, `${H}/sync/0.1.0/src/sync.ts`, `${H}/sync/0.1.0/`, `${H}/sync/`, `${H}/`, `${H}/sync/latest/index.js`,
     `${H}/sync/0.1/index.js`, `${H}/sync/9.9.9/index.js`, 'https://x.workers.dev/sync/0.1.0/index.js'])
     assert.equal((await get(u)).status, 404, u);
 });
