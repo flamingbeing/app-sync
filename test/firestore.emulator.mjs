@@ -353,6 +353,17 @@ assert.deepEqual([...have].sort(), Array.from({ length: 40 }, (_, i) => 'm' + (i
   }
 }
 
+// listenDoc (0.8.3): one document, live; not there says doc null with the server's answer
+{
+  const heard = [];
+  const off = A.backend.listenDoc(['spaces', S, 'items', 'doc1'], m => heard.push(m), e => heard.push({ error: e }));
+  assert.ok(await until(() => heard.some(m => !m.fromCache && m.doc === null)), 'not there: null from the server');
+  await B.backend.commit(S, 'items', { id: 'doc1', text: 'Fake doc' }, null);
+  assert.ok(await until(() => heard.some(m => !m.fromCache && m.doc?.text === 'Fake doc')), 'then the server\'s copy');
+  assert.equal(heard.find(m => m.doc)?.doc.id, 'doc1');
+  off();
+}
+
 await Promise.all([A, B, OLD].map(d => F.terminate(d.db)));
 console.log('firestore emulator tests passed');
 process.exit(0);

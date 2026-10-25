@@ -745,5 +745,6 @@ export function replanOnWake(hub, win = typeof window !== 'undefined' ? window :
   win.addEventListener('pageshow', wake);
   if (doc) doc.addEventListener('visibilitychange', wake);
   const timer = every > 0 ? setInterval(wake, every) : null;
+  /** @type {any} */ (timer)?.unref?.();   // (never keeps a test process alive)
   return () => { win.removeEventListener('online', wake); win.removeEventListener('pageshow', wake); if (doc) doc.removeEventListener('visibilitychange', wake); if (timer) clearInterval(timer); };
 }

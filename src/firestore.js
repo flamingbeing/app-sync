@@ -48,7 +48,7 @@
 //   segments. Not called when nothing is written (the server already has this content).
 //   A merge function may refuse a change it can't apply (a status changed elsewhere) by throwing { code:
 //   'write-conflict', remote: current }: the queue keeps the save as a conflict for the user, never failed.
-// -> { listen, fetchOne, commit, create, existing, stamp, stampFields, clearCache }
+// -> { listen, listenDoc (0.8.3), fetchOne, commit, create, existing, stamp, stampFields, clearCache }
 //   commit(scope, coll, record, base, { key, ops, after }): a transaction that writes record (record._deleted:
 //   deletes it) only when the server's copy still matches base; throws { code: 'write-conflict', remote } otherwise
 //   (conflict.js). after (0.6.3): a record not on the server is stamped after this time (its delete's tombstone, so
@@ -203,6 +203,25 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
         }
         onSnapshotMeta(coll, { fromCache: !server, hasPendingWrites: snap.metadata.hasPendingWrites });
         onSnap({ changes, fromCache: !server, hasPendingWrites: snap.metadata.hasPendingWrites, ...(full ? { full: true, docs: snap.docs.map(/** @param {any} d */ d => ({ ...read(d.data()), id: d.id })) } : {}) });
+      }, onError);
+    }).catch(onError);
+    return () => { stopped = true; if (stop) stop(); };
+  }
+
+  // (0.8.3) one document, live: onSnap({ doc (null: not there), fromCache, hasPendingWrites }) on every snapshot
+  /** @param {(string | number)[]} segments @param {(s: { doc: Doc | null, fromCache: boolean, hasPendingWrites: boolean }) => void} onSnap @param {(e: any) => void} onError @returns {() => void} */
+  function listenDoc(segments, onSnap, onError) {
+    /** @type {(() => void) | null} */
+    let stop = null;
+    let stopped = false;
+    const coll = String(segments[segments.length - 2] ?? '');
+    sdk().then(({ db, F }) => {
+      if (stopped) return;
+      stop = F.onSnapshot(F.doc(db, ...segments.map(String)), { includeMetadataChanges: true }, /** @param {any} snap */ snap => {
+        const server = !snap.metadata.fromCache;
+        if (server) onRead(coll, 'billed', 1);
+        onSnapshotMeta(coll, { fromCache: !server, hasPendingWrites: snap.metadata.hasPendingWrites });
+        onSnap({ doc: snap.exists() ? { ...read(snap.data()), id: snap.id } : null, fromCache: !server, hasPendingWrites: snap.metadata.hasPendingWrites });
       }, onError);
     }).catch(onError);
     return () => { stopped = true; if (stop) stop(); };
@@ -419,5 +438,5 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return Promise.race([clear(), late]).finally(() => clearTimeout(timer));
   }
 
-  return { listen, fetchOne, commit, create, existing, stamp: /** @param {any} [prev] */ prev => next(prev), stampFields, clearCache };
+  return { listen, listenDoc, fetchOne, commit, create, existing, stamp: /** @param {any} [prev] */ prev => next(prev), stampFields, clearCache };
 }

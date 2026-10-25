@@ -88,6 +88,18 @@ the person chose that). Promised from `queue` and `hub`: `queue.{ onChange, pend
 conflicted }` (0.8.2: and `refused`, `retry`, `discard`, `entries`, `finished`, `lastSent`) and `hub.drop`; the rest
 of `parts` is an escape hatch with no promise.
 
+### One document, reconnect, wake and the claims watch (0.8.3)
+
+```js
+const stop = app.watchDoc(['households', hid], (h, meta) => h ? show(h) : leave());   // null: gone (server or listener failure)
+await app.reconnect({ why: 'Sync now' });          // the connection restarted (false offline or under an outside write)
+createApp({ ..., wake: true });                    // online, pageshow, shown again: the watchdog asks, saves are sent
+createApp({ ..., claims: { url: '/api/claims', watch: true, doc: u => ['members', u.uid], onClaims: ({ asked, status }) => show(status) } });
+```
+
+`watchDoc` never says "gone" from the device copy alone (no signal, nothing cached); the watchdog restarts it like the
+lists, and sign-out stops it. The claims watch reads the role doc live and checks the token again whenever it changes.
+
 ### Refused saves, job data and the watch change info (0.8.2)
 
 ```js
