@@ -326,7 +326,7 @@ test('a refused save keeps its code across a reload; set aside as refused it out
   assert.equal(f.records.get(key).refused, true);
   assert.deepEqual(again.refused().map(x => [x.key, x.code]), [[key, 'permission-denied']], 'still refused, set aside');
   for (let i = 0; i < 105; i++) await again.save('item', 'a', { id: 'x' + i, text: 'Fake' });
-  assert.equal(await again.flush(), true, 'set aside: the sign-out gate is open');
+  assert.equal(await again.flush(), false, 'set aside, not given up: the sign-out gate stays shut (review)');
   assert.ok(f.records.has(key), 'kept out of pruning');
   const third = createWriteQueue(config); await third.activate('a');
   assert.deepEqual(third.refused().map(x => x.key), [key], 'and after another reload');
@@ -343,8 +343,11 @@ test('discard(key): a refused save leaves the refused list and becomes ordinary 
   await q.discard(key);
   assert.equal(q.stateOf(key), 'archived'); assert.deepEqual(q.refused(), []);
   assert.equal(f.records.get(key).refused, undefined); assert.equal(await q.flush(), true);
-  await q.archive(key, { refused: true }); await q.discard(key);   // set aside first, discarded later
-  assert.deepEqual(q.refused(), []); assert.equal(f.records.get(key).refused, undefined);
+  await assert.rejects(q.save('item', 'a', { id: 's', text: 'Fake' }), /kept/);
+  const k2 = q.jobKey('item', 's');
+  await q.archive(k2, { refused: true }); assert.equal(await q.flush(), false, 'set aside: still shut');
+  await q.discard(k2);   // given up later
+  assert.deepEqual(q.refused(), []); assert.equal(f.records.get(k2).refused, undefined); assert.equal(await q.flush(), true);
 });
 test('save(..., { meta }) is kept with the job across a reload: entries() and finished(key) (0.8.2)', async () => {
   const f = fixture(); f.online(false);
@@ -366,4 +369,11 @@ test('lastSent(kind, id) survives a reload: the stamp and signature this device 
   const next = createWriteQueue(config); await next.activate('a');
   assert.deepEqual(next.lastSent('item', '1'), { stamp: 42, signature: recordSignature({ id: '1', text: 'Fake' }) });
   assert.equal(next.lastSent('item', '2'), null);
+});
+test('lastSent signs what the server stored (a merge), without the engine fields (review, 0.8.2)', async () => {
+  const f = fixture();
+  const config = { ...f.config, engine: ['serverAt'], backend: async (_o, _k, record) => ({ ...record, other: 'merged elsewhere', serverAt: { sentinel: true }, updatedAt: 9 }) };
+  const q = createWriteQueue(config);
+  await q.save('item', 'a', { id: '1', text: 'Fake' }); assert.equal(await q.flush(), true);
+  assert.deepEqual(q.lastSent('item', '1'), { stamp: 9, signature: recordSignature({ id: '1', text: 'Fake', other: 'merged elsewhere' }) });
 });

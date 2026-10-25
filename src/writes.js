@@ -26,10 +26,12 @@
 //   the saves the server refused that wait for the user: failed ones, and ones set aside with archive(key,
 //   { refused: true }) (state archived with refused: true, so every version's sign-out gate counts them finished;
 //   kept out of the history's pruning until discarded or sent). retry(key) sends a refused save again; discard(key)
-//   gives it up (it stays in the history as an ordinary set-aside save).
+//   gives it up (it stays in the history as an ordinary set-aside save). Until then it keeps flush() (the sign-out
+//   gate) false, here and through the registry: the outbox is its only copy.
 // finished(key) (0.8.2) -> the job once synced or archived (meta included), null while it is not (or not on this
 //   device). lastSent(kind, id) (0.8.2) -> { stamp, signature } of the copy this device last sent of that record
-//   (stamp: the backend's answer's field, option field = 'updatedAt'; signature: conflict.js recordSignature), null
+//   (what the backend answered it stored, else the record sent; stamp: its field, option field = 'updatedAt';
+//   signature: conflict.js recordSignature, without the option engine's fields, e.g. serverAt), null
 //   when none is in the device history (the last 100 finished saves): after a reload too.
 //
 // watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb) -> unsubscribe (0.5.2): the engine's list of coll
@@ -67,7 +69,7 @@ export const SEND_TIMEOUT = 30000;
 export const JOB_FORMAT = 1;
 export const JOB_STATES = Object.freeze(['pending', 'synced', 'failed', 'conflict', 'archived']);
 /** @param {QueueOptions} options */
-export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null, ignore = [], field = 'updatedAt' }) {
+export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null, ignore = [], field = 'updatedAt', engine = [] }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
   /** @param {any} v */
   const bare = v => { if (!ignore.length || !v || typeof v !== 'object') return v; const out = { ...v }; for (const f of ignore) delete out[f]; return out; };
@@ -383,7 +385,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     },
     async flush(ms = 4000) {
       kick(); await Promise.race([Promise.all([...running.values()]), delay(ms)]);
-      if (jobs.some(x => !terminal.has(x.state))) return false;
+      // (0.8.2) a refused save set aside is not given up either: kept until the person retries or discards it
+      if (jobs.some(x => !terminal.has(x.state) || x.refused)) return false;
       // writes the app sends another way (straight to the SDK) and not yet on the server
       if (otherPending) { try { if (await otherPending()) return false; } catch { return false; } }
       // the other apps on this origin (they share sign-in): their unsent saves for this user
@@ -392,7 +395,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       // changes another tab (or the home-screen app) has not synced yet are in the same store: signing out deletes them
       if (!owner) return true;
       // (the shared outbox can't be read: not known to be empty, so the sign-out gate stays shut)
-      try { const mine = new Set(jobs.map(x => x.key)); return !(await store.list(owner)).some(x => !mine.has(x.key) && !terminal.has(x.state)); }
+      try { const mine = new Set(jobs.map(x => x.key)); return !(await store.list(owner)).some(x => !mine.has(x.key) && (!terminal.has(x.state) || x.refused)); }
       catch { return false; }
     },
     error: () => storageError,
@@ -412,7 +415,10 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     lastSent(kind, id) {
       const job = [...ordered()].reverse().find(x => x.kind === kind && x.record.id === id && x.state === 'synced');
       if (!job) return null;
-      return { stamp: job.result?.[field] ?? job.record[field] ?? null, signature: signature(job.record) };
+      // what the server stored (a merge may hold more than was sent), without the engine's own fields
+      const doc = job.result && typeof job.result === 'object' && 'id' in job.result ? job.result : job.record;
+      const out = { ...bare(doc) }; for (const f of engine) delete out[f];
+      return { stamp: doc[field] ?? null, signature: recordSignature(out) };
     },
   };
   if (report) { try { report.watch(api); } catch { /* a report never stops the queue */ } }

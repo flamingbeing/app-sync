@@ -228,7 +228,7 @@ test('status: unknown, not synced, until the server has answered once since the 
   off();
 });
 
-test('a save the server refuses: onRefused hears it with its code; "archive" sets it aside so sign-out is not blocked for good', async () => {
+test('a save the server refuses: onRefused hears it with its code; "archive" sets it aside, kept until Retry or Discard (0.8.2: the gate stays shut)', async () => {
   const srv = fakeServer();
   const refused = [];
   const { app } = makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: {
@@ -238,7 +238,11 @@ test('a save the server refuses: onRefused hears it with its code; "archive" set
   await app.save('item', 's1', { id: 'r1', text: 'Fake' });
   assert.ok(await until(() => refused.length === 1));
   assert.deepEqual(refused[0], { code: 'permission-denied', kind: 'item', id: 'r1' });
-  assert.equal(await app.flush(500), true, 'set aside: nothing unsent');
+  assert.equal(await app.flush(500), false, 'set aside, kept by the engine: the gate stays shut until Retry or Discard (0.8.2)');
+  const r = await app.signOut({ wait: 200 });
+  assert.equal(r.ok, false); assert.equal(r.reason, 'refused');
+  await app.queue.discard(app.queue.refused()[0].key);
+  assert.equal(await app.flush(500), true, 'discarded: nothing unsent');
 });
 
 test('a refused save with no onRefused stays failed and keeps the sign-out shut (never dropped silently)', async () => {
@@ -672,7 +676,7 @@ test('a refused save found after a reload: onRefused hears its code from the job
   assert.deepEqual(heard[0], ['permission-denied', 'r1'], 'the code came from the stored job, not this page\'s memory');
   assert.ok(await until(() => two.app.queue.refused().length === 1 && two.app.queue.refused()[0].state === 'archived'));
   assert.equal(two.app.queue.refused()[0].code, 'permission-denied');
-  assert.equal(await two.app.flush(300), true, 'set aside: the gate is open');
+  assert.equal(await two.app.flush(300), false, 'set aside: the gate stays shut until discarded');
 });
 
 test('watch meta says what changed and what was removed; copyOf and lastSeen read the last delivered copy (0.8.2)', async () => {
@@ -704,4 +708,18 @@ test('watch meta says what changed and what was removed; copyOf and lastSeen rea
   assert.ok(await until(() => app.lastSeen('item', 'c') !== null));
   assert.equal(app.lastSeen('item', 'c').signature, app.queue.lastSent('item', 'c').signature);
   off();
+});
+
+test('a refused save set aside in another registered outbox keeps this app\'s sign-out shut (review, 0.8.2)', async () => {
+  const storage = memStorage(), srv = fakeServer(), boxes = new Map();
+  const box = name => { if (!boxes.has(name)) boxes.set(name, memOutbox(name)); return boxes.get(name); };
+  const registry = createOutboxRegistry({ storage, open: name => box(name) });
+  const nameA = uniq(), nameB = uniq(), sdkParts = fakeAuthSdk();
+  const one = makeApp({ sdkParts, srv, name: nameA, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { storage, outbox: box(nameA + '-outbox'), queue: { registry }, onRefused: () => 'archive' } });
+  const two = makeApp({ sdkParts, srv, name: nameB, options: { storage, outbox: box(nameB + '-outbox'), queue: { registry } } });
+  await one.app.onUser(() => {}); await two.app.onUser(() => {});
+  await one.app.signIn(); await one.app.open('s1'); await two.app.open('s1');
+  await one.app.save('item', 's1', { id: 'r1', text: 'Fake' }).catch(() => {});   // (set aside at once: no throw)
+  assert.ok(await until(() => one.app.queue.refused()[0]?.state === 'archived'));
+  assert.equal(await two.app.flush(300), false);
 });

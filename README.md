@@ -102,7 +102,8 @@ const mine = app.queue.lastSent('item', id), seen = app.lastSeen('item', id);   
 
 A refused save keeps its error code on the job. `onRefused` returning `'archive'` sets it aside (state `archived`
 with `refused: true`, so every version's sign-out gate counts it finished) and the engine keeps it out of the
-history's pruning until the person retries or discards it, so an app needs no refused list of its own. `lastSent` is
+history's pruning until the person retries or discards it, so an app needs no refused list of its own. Until then
+the sign-out gate stays shut (`reason: 'refused'`; `force` still signs out). `lastSent` is
 the copy this device last sent (while it is in the device history, the last 100 finished saves) and `lastSeen` the
 server's as last heard: when their signatures differ, someone else saved since.
 

@@ -23,6 +23,9 @@ optional job fields (FORMATS.md), no new job state. Tests: `test/writes.test.mjs
   kept out of the history's pruning, listed by `queue.refused(kind?)` (with the failed ones), sent again by
   `queue.retry(key)` (in its own place: a newer save made since meets it through the conflict check) or given up by
   `queue.discard(key)`. `queue.archive(key, { refused: true })` does the same by hand.
+- **Changed:** a refused save set aside that way keeps the sign-out gate shut (`flush()` false, `signOut` reason
+  `'refused'`, also through the origin's registry) until the person retries or discards it, or `signOut({ force })`:
+  the outbox is now its only copy. Before, `'archive'` opened the gate (the app kept its own copy).
 - **Job data:** `save(kind, scope, record, base, { ops, meta })`: `meta`, the app's own data about the save, is
   stored with the job and returned by `entries()` and `queue.finished(key)` (the job once synced or set aside, null
   before), after a reload too.

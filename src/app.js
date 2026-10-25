@@ -22,7 +22,8 @@
 //   refresh the token. A failure changes nothing (the rules fall back to reading the role doc).
 //   onRefused(err, entry) -> 'archive' | anything: a save the server refused (err.code, as the backend threw it);
 //   'archive' sets it aside, kept with its code for queue.refused(), retry(key) and discard(key) (0.8.2; after a
-//   reload too: the code is on the job, and a refused save found then is told once more). Otherwise it stays failed: shown as
+//   reload too: the code is on the job, and a refused save found then is told once more). The outbox is then its only
+//   copy, so the sign-out gate stays shut ('refused') until it is retried or discarded, or signOut({ force }). Otherwise it stays failed: shown as
 //   attention, and the sign-out gate stays shut until the user chooses.
 //   forget: { extra, keep }: forgetDevice's (the app's own lists; the scopes whose device copy stays).
 //   report: the nothing-lost report (createReport), opt-in. storage: where the origin's outbox list is kept
@@ -210,7 +211,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   if (storage) { try { registry = createOutboxRegistry({ storage }); registry.register(outbox); } catch (e) { registry = null; console.warn('outbox registry', e?.message); } }
   let scope = '';
   const queue = createWriteQueue({
-    store: outbox, getOwner: () => scope || null, online, registry, report, field: stampField, ...(heldOn ? { ignore: engineFields } : {}), ...options.queue,
+    store: outbox, getOwner: () => scope || null, online, registry, report, field: stampField, engine: engineFields, ...(heldOn ? { ignore: engineFields } : {}), ...options.queue,
     backend: async (owner, kind, record, base, extra) => {
       // a record deleted elsewhere and saved again here (a restore, "keep mine"): stamped above the delete's tombstone,
       // which other devices hold, or a clock behind the deleter's would leave it hidden there (0.6.3)
@@ -430,7 +431,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
 
   // sign-out on a shared device: the gate, then forgetDevice's order, then the SDK's sign-out
   // (0.8.1) 'refused' when a save the server refused waits for the user, else 'unsent'
-  const shut = () => queue.entries().some(x => x.state === 'failed') ? 'refused' : 'unsent';
+  const shut = () => queue.entries().some(x => x.state === 'failed' || x.refused) ? 'refused' : 'unsent';
   /** @param {{ wait?: number, force?: boolean, before?: (() => any) | null }} [options] @returns {Promise<{ ok: boolean, reason: '' | 'unsent' | 'refused' | 'changed', reload: boolean, failed: string[] }>} */
   async function signOut({ wait = 4000, force = false, before = null } = {}) {
     const s = await load(), uid = s.auth.currentUser?.uid || null;
