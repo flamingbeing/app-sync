@@ -527,3 +527,41 @@ test('a sign-out during a self-signing method wins too: the account it signed in
   assert.deepEqual(t.device.rows, [{ id: 'kept' }]);
   assert.ok(!t.log.some(l => l.startsWith('switch') || l === 'signin u2'), t.log.join());
 });
+
+test('a sign-out during the app\'s beforeSwitch wins: nothing is wiped, the old account stays the owner, no signin', async () => {
+  let release, entered;
+  const inBefore = new Promise(r => { entered = r; });
+  const t = setup({ options: { beforeSwitch: () => { entered(); return new Promise(r => { release = r; }); } } });
+  await t.app.ready;
+  await t.app.auth.signIn();
+  t.app.data.save({ id: 'kept' });
+  t.app.data.sent();
+  await t.app.auth.signOut();
+  t.sdk.as(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  const pending = t.app.auth.signIn();
+  await inBefore;
+  const out = t.app.auth.signOut();
+  await settle();
+  release();
+  await out;
+  assert.deepEqual(await pending, { ok: false, reason: 'refused' });
+  await settle();
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.deepEqual(t.device.rows, [{ id: 'kept' }]);
+  assert.match([...t.storage.m.values()].join(), /"uid":"u1"/);
+  assert.deepEqual(t.log, ['signin u1', 'signout u1']);
+});
+
+test('stop() during forget\'s wipes: the owner stays (a wipe may not have run)', async () => {
+  let app;
+  const stopper = { name: 'stopper', needs: ['auth'], start(ctx) { ctx.on('forget', () => app.stop()); return {}; }, stop() {} };
+  const storage = memStorage(), sdk = fakeSdk(), device = { rows: [], unsent: 0 }, log = [];
+  app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), stopper, fakeData(device, log)] });
+  await app.ready;
+  await app.auth.signIn();
+  app.data.save({ id: 'kept' });
+  app.data.sent();
+  await app.auth.forget();
+  assert.deepEqual(device.rows, [{ id: 'kept' }]);
+  assert.match([...storage.m.values()].join(), /"uid":"u1"/);
+});

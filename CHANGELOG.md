@@ -30,6 +30,9 @@ few lines in `src/auth.js`, `src/runner.js` and `src/signin/passcode.js` (the pa
 - **`stop()` during the app's `beforeSwitch` ends the switch**: the switch went on after `app.stop()` and left a live
   claims watch; a stop during the switch's wipes still made the new account the owner. Once the app has stopped, nothing
   is wiped, the owner stays and nothing more is started.
+  A stop during `forget()`'s wipes keeps the owner too.
+- **A sign-out during the app's `beforeSwitch` wins**: the switch went on (wiped, made the new account the owner, sent
+  `signin`) before the sign-out. Now nothing is wiped and the old account stays the owner.
 - **A handler that stops the app ends the event**: `emit` ran the handlers after one that awaited `app.stop()`. It now
   stops there, as it already did for an event sent after stop.
 

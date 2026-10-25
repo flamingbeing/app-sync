@@ -118,7 +118,9 @@ export function auth(options = {}) {
   // the sign-ins still out; signOut() and forget() mark them overtaken: those sign nobody in
   /** @type {Set<{ overtaken: boolean }>} */
   const signIns = new Set();
-  const overtakeSignIns = () => { for (const t of signIns) t.overtaken = true; };
+  // (outs counts them: an answer whose switch waited on the app or a wipe goes no further after one)
+  let outs = 0;
+  const overtakeSignIns = () => { outs++; for (const t of signIns) t.overtaken = true; };
 
   const load = async () => {
     const x = await ctx.sdk();
@@ -147,6 +149,7 @@ export function auth(options = {}) {
     const uid = u?.uid || null;
     if (uid === seen) { if (u && current) current = userOf(u); return; }
     seen = uid;
+    const at = outs;
     if (!u) {
       stopClaimsWatch();
       const was = current;
@@ -164,9 +167,11 @@ export function auth(options = {}) {
       const failed = [];
       if (beforeSwitch) { try { await beforeSwitch({ from, to: user }); } catch (e) { failed.push('before'); console.warn('auth: beforeSwitch', e); } }
       if (stopped) return;   // (the app stopped during its step: nothing is wiped)
+      if (outs !== at) { await s.A.signOut(s.auth); return; }   // (a sign-out came during it: nothing is wiped)
       if (unsent() > 0) return refuse(from, user, 'unsent');   // (a save made during the app's step)
       const wipes = await ctx.emit('switch', { from, to: user });
       if (stopped) return;   // (a module may have stopped before its wipe: the old account stays the owner)
+      if (outs !== at) { await s.A.signOut(s.auth); return; }
       failed.push(...wipes);
       if (failed.length) ctx.report({ event: 'switch', failed });
       // a wipe that threw left old data: the old account stays the owner, the switch is tried again next sign-in
@@ -303,8 +308,9 @@ export function auth(options = {}) {
     if (x?.auth.currentUser) { await x.A.signOut(x.auth); await chain; }
     const wipes = await ctx.emit('forget', { user, force });
     failed.push(...wipes);
-    // a wipe that threw left this owner's data: kept as the owner, the next other account is a switch (wiped again)
-    if (!wipes.length) { store.remove('owner'); held = null; }
+    // a wipe that threw (or a stop before every wipe ran) left this owner's data: kept as the owner, the next other
+    // account is a switch (wiped again)
+    if (!wipes.length && !stopped) { store.remove('owner'); held = null; }
     blocked = null;
     return { ok: true, reason: '', failed };
   }
