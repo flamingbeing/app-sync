@@ -155,3 +155,66 @@ test('forgetDevice refuses while another registered app has unsent saves, and de
   assert.equal(theirs.records.size, 1);
   await settle();
 });
+
+// ---- the adapter: writeId, onCommit's key and ops, a merge that refuses a change ----
+
+// a small fake of the modular SDK: documents by path, a transaction's writes applied at the end
+function fakeSdk() {
+  const docs = new Map(), db = {};
+  const snapOf = (path, data) => ({ id: path.split('/').at(-1), exists: () => data !== undefined, data: () => structuredClone(data) });
+  const F = {
+    collection: (_db, ...segs) => ({ path: segs.join('/') }),
+    doc: (parent, ...segs) => { const path = parent === db ? segs.join('/') : parent.path + '/' + segs.join('/'); return { path, id: path.split('/').at(-1) }; },
+    serverTimestamp: () => ({ serverTimestamp: true }),
+    async runTransaction(_db, fn) {
+      const writes = [];
+      const tx = { get: async ref => snapOf(ref.path, docs.get(ref.path)), set: (ref, data) => writes.push([ref.path, data]), delete: ref => writes.push([ref.path, undefined]) };
+      const out = await fn(tx);
+      for (const [p, d] of writes) if (d === undefined) docs.delete(p); else docs.set(p, structuredClone(d));
+      return out;
+    },
+  };
+  return { docs, sdk: async () => ({ db, F }) };
+}
+const path = (s, c) => ['spaces', s, c];
+
+test('writeId: false keeps the id as the document id only (rules that whitelist fields without id)', async () => {
+  const f = fakeSdk();
+  const b = createFirestoreBackend({ sdk: f.sdk, path, writeId: false, merge: { notes: true } });
+  const out = await b.commit('s1', 'items', { id: 'r1', text: 'a' }, null);
+  assert.equal(out.id, 'r1');
+  assert.deepEqual(Object.keys(f.docs.get('spaces/s1/items/r1')).sort(), ['text', 'updatedAt']);
+  await b.commit('s1', 'items', { id: 'r1', text: 'b' }, { id: 'r1', text: 'a', updatedAt: out.updatedAt });
+  assert.equal(f.docs.get('spaces/s1/items/r1').text, 'b', 'the conflict check still matches (the id comes back from the document)');
+  await b.commit('s1', 'notes', { id: 'n1', text: 'x' }, null);
+  assert.equal(Object.hasOwn(f.docs.get('spaces/s1/notes/n1'), 'id'), false, 'merge collections too');
+  const def = createFirestoreBackend({ sdk: f.sdk, path });
+  await def.commit('s1', 'items', { id: 'r2', text: 'a' }, null);
+  assert.equal(f.docs.get('spaces/s1/items/r2').id, 'r2', 'the default writes the id, as before');
+});
+
+test('onCommit is given the save\'s key and ops (an audit entry from the save, landing once)', async () => {
+  const f = fakeSdk(), seen = [];
+  const b = createFirestoreBackend({ sdk: f.sdk, path, merge: { notes: (cur, rec) => ({ ...cur, ...rec }) },
+    onCommit: ctx => { seen.push([ctx.coll, ctx.key, ctx.ops]); return [{ path: ['spaces', ctx.scope, 'log', ctx.key], data: { ops: ctx.ops } }]; } });
+  await b.commit('s1', 'items', { id: 'r1', text: 'a' }, null, { key: 'k1', ops: [{ add: 1 }] });
+  await b.commit('s1', 'notes', { id: 'n1', text: 'a' }, null, { key: 'k2', ops: [{ add: 2 }] });
+  assert.deepEqual(seen, [['items', 'k1', [{ add: 1 }]], ['notes', 'k2', [{ add: 2 }]]]);
+  assert.deepEqual(f.docs.get('spaces/s1/log/k2'), { ops: [{ add: 2 }] });
+});
+
+test('a merge function that refuses a change (throws write-conflict with the server copy) ends as a conflict, not failed (pattern, no change)', async () => {
+  const f = fakeSdk();
+  f.docs.set('spaces/s1/notes/n1', { status: 'cancelled', updatedAt: 5 });
+  const b = createFirestoreBackend({ sdk: f.sdk, path, merge: { notes: (cur, rec) => {
+    if (cur && cur.status === 'cancelled') { const e = new Error('Cancelled elsewhere'); e.code = 'write-conflict'; e.remote = cur; throw e; }
+    return { ...cur, ...rec };
+  } } });
+  const q = createWriteQueue({ store: memoryOutbox('a'), backend: (owner, _kind, rec, base, x) => b.commit(owner, 'notes', rec, base, x), getOwner: () => 's1' });
+  await q.activate('s1');
+  await assert.rejects(q.save('note', 's1', { id: 'n1', status: 'answered' }, { id: 'n1', status: 'sent', updatedAt: 1 }), /Cancelled elsewhere/, 'the editor keeps its input');
+  await q.settle('note', ['n1'], 1000);
+  assert.equal(q.status('note', 'n1'), 'conflict');
+  assert.equal(f.docs.get('spaces/s1/notes/n1').status, 'cancelled', 'nothing written');
+  assert.equal(q.attention('note'), true, 'the user chooses (discard or try again)');
+});

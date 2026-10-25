@@ -13,6 +13,11 @@ Each change has a test in `test/origin.test.mjs` that failed before it.
   saves for this user (unreadable or no answer counts as unsent), and `forget` forgets this user in all of them.
   Opt-in: apps that don't register, and queues without `registry`, work as before.
 - `createOutbox` returns its `name` and `realm` (the registry's key).
+- Adapter `writeId: false`: the id stays the document's id only, not a field (rules whose field whitelist has no
+  `id`). Default as before.
+- Adapter `onCommit` is also given the save's `key` and `ops` (an audit entry from the save, stored under its key).
+- Docs and test: a merge function refuses a change it can't apply by throwing `{ code: 'write-conflict', remote }`;
+  the save ends as a conflict for the user (discard or try again), not as failed, which would keep sign-out shut.
 
 ## 0.4.1 (2026-10-25)
 

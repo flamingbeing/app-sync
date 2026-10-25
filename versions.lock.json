@@ -76,7 +76,7 @@
     "NOTICE": "a4a91e7763c9b0d122fcb4c69fcfb4088427b73bd713f37d513669095430894c",
     "index.js": "d6fa4991e44295e8d9efd7e9e58d08c0bb98c07f9b1bd822129c96faea857fc6",
     "src/conflict.js": "ecc82691ec9a61891552b7f9f18928f558b8f1a3487c92862e1bca3ec1083d2b",
-    "src/firestore.js": "79c8f843c29135724959af569f9851209c52eb77bbf1eeb0570bb98a82750fba",
+    "src/firestore.js": "6dfec6a27ddcfb79a5e056c440ba9bcd221c8e44964f193a8910a26dbfd7ef26",
     "src/forget.js": "befcd0a71bacb20058d2c568dd8ead97b9e5d134d88f2108ba9a0072f402f7d7",
     "src/outbox.js": "06bf8e938ed3e0a640af3c514da1a27f4d80c25022c4a41084de1328551db45b",
     "src/persist.js": "b0a27f138ace730446c9be9e45aae4cce549339636304041f18c69d9cd59ee1a",
