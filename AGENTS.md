@@ -45,16 +45,19 @@ NODE_OPTIONS="--import <app-devkit>/serve-candidate/patch.mjs" npx playwright te
 
 ## Releasing
 
-1. Bump `version` in `package.json` and `VERSION` in `index.js` and `app.js`; add the CHANGELOG entry.
+1. Bump `version` in `package.json`, `VERSION` in `index.js` and `app.js`, and `CORE_VERSION` in `update/sw-core.js` and
+   `update/register.js` (one version for both from 1.0.0-rc.1); add the CHANGELOG entry.
    A new or removed `src/` import: update `FILES` in `index.js` and `files.json` (`test/freeze.test.mjs` checks both).
-2. Run `node tools/build-sync.mjs --lock` and commit `versions.lock.json` (checks fail without it).
+2. Run `node tools/build-sync.mjs --lock` and `node tools/build-update.mjs --lock`; commit `versions.lock.json` and
+   `update.lock.json` (checks fail without them).
 3. Merge with Checks green: `release.yml` then tags that commit `vX.Y.Z` (only if the tag doesn't exist yet).
 
 ## The update module (`update/`)
 
-`update/` holds the service worker core and page module the apps share (README inside). It is released separately:
-`update/VERSION`, `update.lock.json` (`node tools/build-update.mjs --lock`), tag `update-vX.Y.Z`, served at
-`core.anawj.com/update/<x.y.z>/`. Same rules: a released version never changes, no app-specific names. Tests:
+`update/` holds the service worker core and page module the apps share (README inside). From 1.0.0-rc.1 it has the
+engine's version: the tag `vX.Y.Z` serves it at `core.anawj.com/update/<x.y.z>/` too, its bytes locked in
+`update.lock.json` (`node tools/build-update.mjs --lock`). Until 0.9.x it was released on its own (`update/VERSION`, tags
+`update-vX.Y.Z`; those stay served). Same rules: a released version never changes, no app-specific names. Tests:
 `node --test update/test/*.test.mjs`, and `node update/test/e2e.mjs` (needs Playwright with Chromium).
 
 ## Working with the owner

@@ -1,5 +1,6 @@
 // Builds the folder the Worker serves: dist/sync/<x.y.z>/ for every release tag vX.Y.Z, read from git (so a deploy
-// always rebuilds the same bytes), plus dist/sync/versions.json. Every version's files are checked against
+// always rebuilds the same bytes; a pre-release such as v1.0.0-rc.1 too), plus dist/sync/versions.json (latest: the last
+// stable version). Every version's files are checked against
 // versions.lock.json, so a moved tag or a changed file stops the deploy instead of changing a released version.
 //   node tools/build-sync.mjs           build dist/ from the tags and verify against the lock
 //   node tools/build-sync.mjs --lock    add the package.json version (from the working tree) to the lock; part of a release
@@ -8,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { VERSION_RE, byVersion, listing } from './semver.mjs';
 
 export const ROOT = process.env.SYNC_ROOT || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const PUBLISHED = ['index.js', 'app.js', 'auth.js', 'sync.js', 'update.js', 'files.json', 'entries.json', 'src', 'types', 'LICENSE', 'NOTICE'];   // what a version contains (files.json from 0.8.0; app.js, auth.js from 0.9.0; sync.js, update.js from 0.9.1; types/ from 0.9.2; entries.json from 0.9.4)
@@ -15,8 +17,6 @@ const LOCK = path.join(ROOT, 'versions.lock.json');
 const git = (args, opts = {}) => execFileSync('git', args, { cwd: ROOT, maxBuffer: 1 << 26, ...opts });
 const sha = buf => crypto.createHash('sha256').update(buf).digest('hex');
 const readLock = () => (fs.existsSync(LOCK) ? JSON.parse(fs.readFileSync(LOCK, 'utf8')) : {});
-const semver = v => v.split('.').map(Number);
-const byVersion = (a, b) => { const x = semver(a), y = semver(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; };
 
 // { 'src/sync.js': Buffer, … } for a tag
 function tagFiles(tag) {
@@ -52,7 +52,7 @@ function lockVersion({ write }) {
 }
 
 function build() {
-  const tags = git(['tag', '--list', 'v*']).toString().split('\n').filter(t => /^v\d+\.\d+\.\d+$/.test(t));
+  const tags = git(['tag', '--list', 'v*']).toString().split('\n').filter(t => VERSION_RE.test(t.slice(1)));
   if (!tags.length) throw new Error('no release tags (vX.Y.Z) found; fetch tags first');
   const lock = readLock(), out = path.join(ROOT, 'dist', 'sync');
   fs.rmSync(path.join(ROOT, 'dist'), { recursive: true, force: true });
@@ -67,9 +67,9 @@ function build() {
     }
     versions.push(v);
   }
-  versions.sort(byVersion);
-  fs.writeFileSync(path.join(out, 'versions.json'), JSON.stringify({ latest: versions.at(-1), versions }, null, 2) + '\n');
-  return `built ${versions.join(', ')}`;
+  const list = listing(versions);
+  fs.writeFileSync(path.join(out, 'versions.json'), JSON.stringify(list, null, 2) + '\n');
+  return `built ${list.versions.join(', ')}`;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {

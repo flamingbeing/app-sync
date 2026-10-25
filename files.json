@@ -1,12 +1,9 @@
 [
   "index.js",
-  "src/app.js",
   "src/cache.js",
   "src/conflict.js",
-  "src/core.js",
   "src/firestore.js",
   "src/forget.js",
-  "src/internal.js",
   "src/outbox.js",
   "src/persist.js",
   "src/registry.js",

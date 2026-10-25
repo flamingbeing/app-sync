@@ -14,6 +14,46 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.0.0-rc.1 (2026-10-25)
+
+The first 1.0 candidate. **Breaking** for apps on the one-object `createApp(options)` (they move to the modules:
+[MIGRATING.md](MIGRATING.md)); no stored-format change, so phones keep what they hold across the move. Apps pinned to
+0.x keep working (tags never change).
+
+- **Removed:** the one-object `createApp(options)` (`src/app.js`, deprecated since 0.9.0) and its `index.js` export, and
+  the deprecated `export *` of `src/internal.js` from `index.js` (`plan`, `applyChanges`, `createCollectionSync`,
+  `watchSaved`, `decide`, the tuning constants, …: import `src/internal.js` itself, with no promise). `userOf` and
+  `claimsBehind` stay public (now from `src/user.js`). `files.json` / `FILES` shrink to what `index.js` still loads.
+  The sync options are documented in `src/core.js`, the sign-in ones in `src/auth.js`.
+- **One version:** the update module (`update/`) now has the engine's version. The tag `v1.0.0-rc.1` serves
+  `/sync/1.0.0-rc.1/` and `/update/1.0.0-rc.1/` (`sw-core.js`, `register.js`; `CORE_VERSION = '1.0.0-rc.1'`, the same
+  bytes as update 0.2.0 otherwise). `update/VERSION` and `update-vX.Y.Z` tags stop; `/update/0.1.0/` and `/update/0.2.0/`
+  stay served. `tools/build-update.mjs` builds both kinds of tag, `release.yml` checks that `app.js` and the update core
+  carry package.json's version, and pre-release tags (`v1.0.0-rc.1`) build and sort before their release;
+  `versions.json`'s `latest` stays the last stable version.
+
+### The 1.0 promise (from 1.0.0; additive only until 2.0)
+
+- **Module contract:** `createApp({ config, modules })` -> `app` (one key per module's api, plus `ready`, `stop()`,
+  `status$`); a module is `{ name, needs, start(ctx, deps) -> api, stop() }`, started in `needs` order, stopped in
+  reverse, failing fast on a cycle, a missing or a duplicate name; `deps` holds only the apis named in `needs`.
+- **ctx:** `name, module, config, sdk(), user(), on(event, fn), emit(event, data), storage(ns), status, report(fact),
+  ready`. Events: `signin { user }`, `signout { user }` (keeps the data), `switch { from, to }` (another account: the
+  old data is wiped), `forget { user, force }`. Sign-out never wipes; `auth.forget()` and a switch are the only wipes,
+  both refused while anything is unsent unless forced.
+- **Entry names:** `/sync/<v>/app.js`, `auth.js`, `sync.js`, `update.js` (import-map names `@core/app`, `@core/auth`,
+  `@core/sync`, `@core/update`; reserved: `@core/files`, `@core/ui`, `@core/theme`, `@core/settings`, `@core/sw`,
+  `@core/devkit`), each with its `.d.ts` under `types/`, `entries.json` and `files.json`, and `/update/<v>/sw-core.js`
+  and `register.js`. Everything `index.js` names. Each module's api and options as its header comment gives them.
+- **Types:** the generated `.d.ts` (strict JSDoc) and package.json `exports` with `types`; 1.x only adds to them.
+- **Formats:** [FORMATS.md](FORMATS.md) (device copy, outbox job, storage namespaces, the scope a record was fetched
+  by): no new job state, renamed key, prefix or field before 2.0. The 1.x additions are written down in
+  [SHAPES.md](SHAPES.md) (sign-in methods, a no-sign-in scope, partial device data, bulk saves, watch queries, files).
+- **SDK range:** the app passes its own Firebase JS SDK (modular API, `A` and `F` functions); 1.x supports Firebase
+  11.x (tested: 11.10.0). A newer SDK major is added in a 1.x release after the tests pass on it, never by dropping 11.x.
+- **Release:** a tag never changes; 1.0.0 follows this candidate, with no change to the contract above, once the
+  reference app runs on it.
+
 ## 0.9.4 (2026-10-25)
 
 Additive: no stored-format change, no change to the module contract, every 0.9.3 name unchanged.

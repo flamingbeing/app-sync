@@ -20,22 +20,24 @@ What it does:
   server has answered once).
 - **Stamps only move forward.** The adapter stamps `max(now, the server copy + 1)` inside the commit transaction, so
   a writer whose clock is behind still moves a record's stamp on (0.4.0).
-- **Sign-out wipes the device.** The sign-out check refuses while anything is unsent (in any tab, and the app's own
-  writes through `track`), then `forgetDevice` stops everything, checks again, and deletes every store but the
-  account kept, the outbox, the SDK's offline cache (`clearCache`) and the app's own lists, in every tab.
+- **Sign-out keeps the device's data.** An accidental sign-out loses nothing: the device copy and unsent saves stay
+  and send when the same account signs in again. The device is wiped only by `auth.forget()` or when a different
+  account signs in; both are refused while anything is unsent (in any tab, another app on the origin, and the app's
+  own writes through `track`), then `forgetDevice` stops everything, checks again, and deletes every store but the
+  account kept, the outbox, the SDK's offline cache (`clearCache`) and the app's own lists.
 
-## The modules (0.9.x, the 1.0 shape)
+## The modules (the 1.0 shape)
 
-From 0.9.0 an app is a list of modules started by one runner; the one-object `createApp` below is deprecated (removed
-in 1.0.0-rc.1). 0.9.0 has the runner (`app.js`) and `auth` (`auth.js`); 0.9.1 adds `sync` (`sync.js`) and `update`
-(`update.js`).
+An app is a list of modules started by one runner: `createApp({ config, modules })` (`app.js`), with `auth`
+(`auth.js`), `sync` (`sync.js`) and `update` (`update.js`). The one-object `createApp(options)` of 0.6-0.9 is removed in
+1.0.0-rc.1; moving an app over: [MIGRATING.md](MIGRATING.md). The 1.0 promise: [CHANGELOG.md](CHANGELOG.md) (1.0.0-rc.1).
 
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.9.4/app.js';
-import { auth } from 'https://core.anawj.com/sync/0.9.4/auth.js';
-import { sync } from 'https://core.anawj.com/sync/0.9.4/sync.js';
-import { update } from 'https://core.anawj.com/sync/0.9.4/update.js';
-import * as register from 'https://core.anawj.com/update/0.2.0/register.js';
+import { createApp } from 'https://core.anawj.com/sync/1.0.0-rc.1/app.js';
+import { auth } from 'https://core.anawj.com/sync/1.0.0-rc.1/auth.js';
+import { sync } from 'https://core.anawj.com/sync/1.0.0-rc.1/sync.js';
+import { update } from 'https://core.anawj.com/sync/1.0.0-rc.1/update.js';
+import * as register from 'https://core.anawj.com/update/1.0.0-rc.1/register.js';
 
 const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [
   auth(),
@@ -58,7 +60,7 @@ emit(event, data), storage(ns), status, report(fact), ready` (every module start
 `switch { from, to }` (another account: the old data is wiped after `auth({ beforeSwitch })`), `forget { user, force }`.
 Another account's sign-in is refused while the last one has unsent saves (also one made during `beforeSwitch`) or
 when a module's wipe throws (the next sign-in tries again); `app.auth.blocked()` says which. Each tab switches its
-own data, even after another tab switched first. `sync` has the one-object `createApp`'s sync api (open, watch,
+own data, even after another tab switched first. `sync` has the sync api (open, watch,
 watchDoc, save, flush, conflicts, status and the rest) and the same stored formats, so phones keep what they hold;
 `scope(user)` opens the account's scope at each sign-in. `update` registers the service worker with register.js
 (passed in) and holds the take-over reload while any module has unsent saves. Details: the comments at the top of
@@ -73,10 +75,10 @@ them once, in one import map; the version appears only there:
 ```html
 <script type="importmap">
 { "imports": {
-  "@core/app": "https://core.anawj.com/sync/0.9.4/app.js",
-  "@core/auth": "https://core.anawj.com/sync/0.9.4/auth.js",
-  "@core/sync": "https://core.anawj.com/sync/0.9.4/sync.js",
-  "@core/update": "https://core.anawj.com/sync/0.9.4/update.js"
+  "@core/app": "https://core.anawj.com/sync/1.0.0-rc.1/app.js",
+  "@core/auth": "https://core.anawj.com/sync/1.0.0-rc.1/auth.js",
+  "@core/sync": "https://core.anawj.com/sync/1.0.0-rc.1/sync.js",
+  "@core/update": "https://core.anawj.com/sync/1.0.0-rc.1/update.js"
 } }
 </script>
 ```
@@ -101,11 +103,12 @@ yet: `@core/files`, `@core/ui`, `@core/theme`, `@core/settings`, `@core/sw`, `@c
 
 ## Modules
 
-`index.js` is the public API (everything below); each module also loads on its own (`src/<name>.js`).
+`index.js` names the building blocks (everything below; the modules above are the way to wire them); each also loads
+on its own (`src/<name>.js`).
 
 | Module | Public |
 |---|---|
-| `src/app.js` | `createApp` (everything below wired in one call; deprecated from 0.9.0), `userOf`, `claimsBehind` |
+| `src/user.js` | `userOf`, `claimsBehind` |
 | `src/sync.js` | `createSyncHub`, `replanOnWake`, `leaveEntry`, `eachSettled`, `SKEW` |
 | `src/writes.js` | `createWriteQueue`, `JOB_FORMAT`, `JOB_STATES` |
 | `src/conflict.js` | `checkWrite`, `recordSignature`, `mergeFields`; held conflicts: `mergeHeld`, `describeConflict`, `resolvedRecord`, `pathOf` |
@@ -118,47 +121,50 @@ yet: `@core/files`, `@core/ui`, `@core/theme`, `@core/settings`, `@core/sw`, `@c
 | `src/firestore.js` | `createFirestoreBackend` |
 | `src/report.js` | `createReport` (from `index.js`, version filled in), `REPORT_ENDPOINT` |
 | `index.js` | the above, plus `FILES` and `VERSION` |
-| `src/internal.js` | engine internals (`plan`, `applyChanges`, `createCollectionSync`, `decide`, `watchSaved`, tuning constants, …): no promise. Until 1.0 they also load from `index.js` (deprecated). |
+| `src/internal.js` | engine internals (`plan`, `applyChanges`, `createCollectionSync`, `decide`, `watchSaved`, tuning constants, …): no promise (from 1.0.0-rc.1 they no longer load from `index.js`). |
 
 **Files of a version:** `FILES` (in `index.js`) and `sync/<x.y.z>/files.json` list every file the version loads,
 for a service worker's offline list (0.8.0). `entries.json` (0.9.4) lists the files each entry (`app`, `auth`, `sync`, `update`) loads, so a page that uses only some entries can precache or vendor those alone.
 
 ## Use
 
+The options of each module: `src/core.js` (sync), `src/auth.js`, `src/module-update.js`. The examples below use the
+`app` from the code above.
+
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.8.1/index.js';
+const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [
+  auth({ claims: { url: '/api/claims', entry: user => roleDoc(user) } }),   // optional: role claims on the token
+  sync({
+    colls: ['items'], path: (space, coll) => ['spaces', space, coll],
+    scope: user => user.email,                   // what to open at sign-in (or call app.sync.open(space) later)
+    onRefused: (err, entry) => 'archive',        // optional: a save the server refused (else it waits for the user)
+    forget: { extra: async () => clearAppLists() },   // optional: the app's own lists, wiped by a switch or forget()
+  }),
+] });
 
-const app = createApp({
-  name: 'myapp', colls: ['items'], path: (space, coll) => ['spaces', space, coll],
-  sdk: async () => ({ A, F, auth, db }),          // the app's Firebase SDK, initialised (Auth and Firestore functions)
-  scope: user => user.email,                     // what to open at sign-in (or call app.open(space) later)
-  claims: { url: '/api/claims', entry: user => roleDoc(user) },   // optional: role claims on the token
-  onRefused: (err, entry) => 'archive',          // optional: a save the server refused (else it waits for the user)
-  forget: { extra: async () => clearAppLists() },               // optional: the app's own lists, wiped at sign-out
-});
+await app.ready;
+await app.auth.signIn();
+app.sync.status$(st => drawChip(st));            // { state, count }: synced only once the server has answered
+const off = app.sync.watch(space, 'items', list => render(list));   // device copy, then the server; unsent saves laid over
+await app.sync.save('items', space, { id: 'i1', text: 'Hello' }, previousCopy);   // base: the copy the edit started from
 
-await app.signIn();
-app.status$(st => drawChip(st));                 // { state, count }: synced only once the server has answered
-const off = app.watch(space, 'items', list => render(list));    // device copy, then the server; unsent saves laid over
-await app.save('items', space, { id: 'i1', text: 'Hello' }, previousCopy);   // base: the copy the edit started from
-
-const out = await app.signOut();                 // { ok, reason: 'unsent' | 'refused' | 'changed', reload }
-if (out.ok && out.reload) location.reload();     // the SDK's offline cache was cleared
+await app.auth.signOut();                        // keeps the device copy and unsent saves (same account: they send later)
+const out = await app.auth.forget();             // { ok, reason: '' | 'unsent', failed }: wipes this device on purpose
 ```
 
 ### Writes outside the queue, and the sign-in/sign-out hooks (0.8.1)
 
 ```js
-await app.track(setDoc(ref, data), { kind: 'items', id });   // a write sent straight to the SDK: unsent until it settles
-app.unsentOutside();                             // their count, at once (0 when none)
-app.heard({ fromCache: snap.metadata.fromCache });   // a listener of the app's own heard: status and watchdog
-const ready = app.idle();                        // nothing stored, sent, queued or outside: an update's canReload
-await app.signIn({ hint: lastEmail });           // login_hint; also { popupOnly, redirectFirst } per call
-await app.signOut({ before: async () => stopMyListeners(), force: userSaidLoseThem });
+await app.sync.track(setDoc(ref, data), { kind: 'items', id });   // a write sent straight to the SDK: unsent until it settles
+app.sync.unsentOutside();                             // their count, at once (0 when none)
+app.sync.heard({ fromCache: snap.metadata.fromCache });   // a listener of the app's own heard: status and watchdog
+const ready = app.sync.idle();                        // nothing stored, sent, queued or outside: an update's canReload
+await app.auth.signIn({ hint: lastEmail });      // login_hint; also { popupOnly, redirectFirst } per call
+await app.auth.forget({ before: async () => stopMyListeners(), force: userSaidLoseThem });
 ```
 
-Tracked writes count everywhere the queue's saves do: the status, `flush`, the sign-out gate, `idle()` and the
-watchdog. `before` runs after every listener stopped and before the wipe. `force` forgets unsent saves (only once
+Tracked writes count everywhere the queue's saves do: the status, `flush`, the switch and forget() gate, `idle()` and the
+watchdog. `before` runs before the wipe (forget()). `force` forgets unsent saves (only once
 the person chose that). Promised from `queue` and `hub`: `queue.{ onChange, pending, status, error, unsent,
 conflicted }` (0.8.2: and `refused`, `retry`, `discard`, `entries`, `finished`, `lastSent`) and `hub.drop`; the rest
 of `parts` is an escape hatch with no promise.
@@ -166,48 +172,48 @@ of `parts` is an escape hatch with no promise.
 ### One document, reconnect, wake and the claims watch (0.8.3)
 
 ```js
-const stop = app.watchDoc(['households', hid], (h, meta) => h ? show(h) : leave());   // null: gone (server or listener failure)
-await app.reconnect({ why: 'Sync now' });          // the connection restarted (false offline or under an outside write)
-createApp({ ..., wake: true });                    // online, pageshow, shown again: the watchdog asks, saves are sent
-createApp({ ..., claims: { url: '/api/claims', watch: true, doc: u => ['members', u.uid], onClaims: ({ asked, status }) => show(status) } });
+const stop = app.sync.watchDoc(['households', hid], (h, meta) => h ? show(h) : leave());   // null: gone (server or listener failure)
+await app.sync.reconnect({ why: 'Sync now' });          // the connection restarted (false offline or under an outside write)
+sync({ ..., wake: true });                         // online, pageshow, shown again: the watchdog asks, saves are sent
+auth({ claims: { url: '/api/claims', watch: true, doc: u => ['members', u.uid], onClaims: ({ asked, status }) => show(status) } });
 ```
 
 `watchDoc` never says "gone" from the device copy alone (no signal, nothing cached); the watchdog restarts it like the
-lists, and sign-out stops it. The claims watch reads the role doc live and checks the token again whenever it changes.
+lists, and sign-out pauses it. The claims watch reads the role doc live and checks the token again whenever it changes.
 
 ### Refused saves, job data and the watch change info (0.8.2)
 
 ```js
-app.queue.refused();                              // saves the server refused, waiting for the person: [{ key, code, record, meta, … }]
-await app.queue.retry(key); await app.queue.discard(key);   // send it again, or give it up
-await app.save('item', scope, rec, base, { meta: { row: 3 } });   // kept with the job, after a reload too
-app.queue.finished(key)?.meta;                    // the job once synced or set aside (null while it is not)
-app.watch(scope, 'items', (list, { changed, removed }) => redraw(changed, removed));
-app.copyOf('item', id);                           // the copy last handed to a watch, at once
-const mine = app.queue.lastSent('item', id), seen = app.lastSeen('item', id);   // { stamp, signature }, after a reload too
+app.sync.queue.refused();                              // saves the server refused, waiting for the person: [{ key, code, record, meta, … }]
+await app.sync.queue.retry(key); await app.sync.queue.discard(key);   // send it again, or give it up
+await app.sync.save('item', scope, rec, base, { meta: { row: 3 } });   // kept with the job, after a reload too
+app.sync.queue.finished(key)?.meta;                    // the job once synced or set aside (null while it is not)
+app.sync.watch(scope, 'items', (list, { changed, removed }) => redraw(changed, removed));
+app.sync.copyOf('item', id);                           // the copy last handed to a watch, at once
+const mine = app.sync.queue.lastSent('item', id), seen = app.sync.lastSeen('item', id);   // { stamp, signature }, after a reload too
 ```
 
 A refused save keeps its error code on the job. `onRefused` returning `'archive'` sets it aside (state `archived`
 with `refused: true`, so every version's sign-out gate counts it finished) and the engine keeps it out of the
 history's pruning until the person retries or discards it, so an app needs no refused list of its own. Until then
-the sign-out gate stays shut (`reason: 'refused'`; `force` still signs out). `lastSent` is
+a switch or forget() is refused (`forget({ force })` still wipes). `lastSent` is
 the copy this device last sent (while it is in the device history, the last 100 finished saves) and `lastSeen` the
 server's as last heard: when their signatures differ, someone else saved since.
 
 Anything the facade does not cover: pass the parts' own options (`backend`, `hub`, `stores`, `queue`), replace a part
-(`adapter`, `commit`, `outbox`), or use `app.parts` (hub, queue, stores, adapter, watchdog, registry). Each module
-also loads on its own; the full wiring by hand (0.5.x style) still works, and `src/app.js` shows it in one place.
+(`adapter`, `commit`, `outbox`), or use `app.sync.parts` (hub, queue, stores, adapter, watchdog, registry). Each module
+also loads on its own; the full wiring by hand (0.5.x style) still works, and `src/app.sync.js` shows it in one place.
 Each module's header comment describes its options and contract in full.
 
 ### Held conflicts by field (0.6.3, opt-in)
 
 ```js
-const app = createApp({ …, device: 'Ward phone',
+sync({ …, device: 'Ward phone',
   backend: { held: true, edits: '_edits', mark: '_saves' } });   // or held: { items: { counters: ['qty'] } }
-app.status$(st => drawChip(st));                 // 'attention' while a held save is unanswered
-for (const c of app.conflicts()) {               // this phone's held saves only
-  const d = app.describe(c.key);                 // d.fields: [{ path, keys, mine, theirs }], each { value, when (SGT), by, device }
-  await app.resolve(c.key, await askUser(d));    // 'mine' | 'theirs' | { [path]: 'mine' | 'theirs' }
+app.sync.status$(st => drawChip(st));                 // 'attention' while a held save is unanswered
+for (const c of app.sync.conflicts()) {               // this phone's held saves only
+  const d = app.sync.describe(c.key);                 // d.fields: [{ path, keys, mine, theirs }], each { value, when (SGT), by, device }
+  await app.sync.resolve(c.key, await askUser(d));    // 'mine' | 'theirs' | { [path]: 'mine' | 'theirs' }
 }
 ```
 
@@ -275,9 +281,11 @@ Semantic versions, tagged `vX.Y.Z`; see [CHANGELOG.md](CHANGELOG.md). A tag is n
 exact version and upgrade on purpose after their own tests; a breaking change is a new major version. Every fix
 lands with a test that failed before it.
 
-## Stability (toward 1.0)
+## Stability
 
-- **API:** from 1.0, everything `index.js` names is kept until 2.0; 1.x only adds. A name deprecated in 1.x still
+- **API:** from 1.0, the module contract (`createApp({ config, modules })`, the module shape, `ctx`, the events), the
+  entry names and import-map names, the `.d.ts` types and everything `index.js` names are kept until 2.0; 1.x only
+  adds (CHANGELOG 1.0.0-rc.1 has the full list). A name deprecated in 1.x still
   works and is removed only in 2.0. `src/internal.js` carries no promise.
 - **Stored formats:** [FORMATS.md](FORMATS.md), promised from 0.8.0 (mixed versions share data).
 - **Core admission rule:** a new engine option or method goes in only if two or more apps (or the reference app)

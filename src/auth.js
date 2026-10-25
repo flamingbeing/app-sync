@@ -4,12 +4,16 @@
 // and send when the same account signs in again.
 //
 // auth({ claims, beforeSwitch, popupOnly, redirectFirst, fetch, nav, win })
-//   claims: as createApp's (url, entry, behind, when, watch + doc, onClaims): after sign-in and on refreshClaims(),
-//   when the role doc's v is ahead of the token's, POST url (Bearer token) once per uid:v, then refresh the token.
-//   watch: true reads the role doc (doc(user) -> its path) live with the SDK's F.onSnapshot and checks again when it
-//   changes; stopped at sign-out. A failure changes nothing (the rules fall back to reading the role doc).
+//   claims: { url, entry(user) -> the role doc { v } | null, behind(entry, tokenClaims), when(), watch, doc,
+//   onClaims }: after sign-in and on refreshClaims(), when the role doc's v is ahead of the token's, POST url (Bearer
+//   token) once per uid:v, then refresh the token. watch: true reads the role doc (doc(user) -> its path) live with the
+//   SDK's F.onSnapshot (entry defaults to it; nothing is asked before its first answer) and checks again when it
+//   changes; stopped at sign-out. onClaims({ asked, status }): after each check, whether new claims were asked and the
+//   HTTP status (0: not asked or no answer). A failure changes nothing (the rules fall back to reading the role doc).
 //   beforeSwitch({ from, to }): the app's own step before another account's sign-in wipes the last one's data.
-//   popupOnly, redirectFirst: as createApp's (a popup only; redirect first, default in an installed app).
+//   popupOnly: sign in with the popup only, never a redirect: for a page served from another domain than the auth
+//   domain, where a redirect sign-in can't finish; a blocked popup throws to the caller (ask for a tap).
+//   redirectFirst: sign in with a redirect first (default in an installed app). fetch, nav, win: the browser's, for tests.
 // events (ctx.emit): signin { user } | signout { user } | switch { from, to } | forget { user, force }
 //   The account whose data the device holds (its owner) is kept in ctx.storage(): `<name>:auth/owner` = { uid,
 //   email } (FORMATS.md). Another account signing in (a sign-in here, another tab, a reload) is a switch: the app's
@@ -37,7 +41,7 @@ const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-t
  * @typedef {import('./user.js').AppUser} AppUser
  * @typedef {{ uid: string, email: string }} Owner
  * @typedef {object} AuthOptions
- * @property {any} [claims] as createApp's claims (url, entry, behind, when, watch, doc, onClaims)
+ * @property {any} [claims] the claims check (url, entry, behind, when, watch, doc, onClaims; above)
  * @property {(r: { from: Owner, to: AppUser }) => any} [beforeSwitch] the app's step before another account's data replaces the last one's
  * @property {boolean} [popupOnly]
  * @property {() => boolean} [redirectFirst]

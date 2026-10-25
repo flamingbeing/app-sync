@@ -1,5 +1,5 @@
 // The module runner (0.9.0): createApp({ config, modules }) -> app, one key per module (its api, from start), plus
-// ready, stop() and status$. Loaded from app.js; the one-object createApp of index.js is deprecated (gone at 1.0).
+// ready, stop() and status$. Loaded from app.js (1.0.0-rc.1: the only createApp).
 //
 // module = { name, needs: ['auth'], start(ctx, deps) -> api | Promise<api>, stop() }
 //   Modules start one at a time in `needs` order (otherwise the order given) and stop in reverse; createApp throws at

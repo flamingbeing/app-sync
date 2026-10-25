@@ -1,12 +1,12 @@
 // The sync module (0.9.1): sync(options) -> a module for createApp({ config, modules }) (runner.js), needs auth. Loaded
-// from sync.js. The same sync as the one-object createApp (both are built on core.js): the device copy, the outbox and
-// queue, the watches, the watchdog, the status and the held conflicts. The stored formats are the same too (FORMATS.md:
+// from sync.js. Built on core.js: the device copy, the outbox and queue, the watches, the watchdog, the status and
+// the held conflicts, as the one-object createApp (0.6-0.9, removed in 1.0.0-rc.1) had them. Same stored formats (FORMATS.md:
 // device copy `<name>-sync:`, outbox `<name>-outbox`, the origin's outbox list), so an app moving to the modules keeps
 // what its phones hold, and two apps on one origin still wait for each other's saves.
 //
 // sync({ colls, path, kinds, scope, backend, adapter, commit, outbox, hub, stores, queue, onRefused, forget, report,
 //        device, outside, wake, watchEvery, nav, now, win, reload })
-//   As createApp's (app.js), less the sign-in ones (the auth module has them) and name, sdk, storage (config's).
+//   Documented in core.js (the sign-in ones are the auth module's; name, sdk, storage are config's).
 //   scope(user) -> the scope opened at each sign-in; without it the app calls open(scope).
 //   reload: () -> void, called once the SDK's offline cache was cleared by a wipe (the SDK instance can't be used
 //   again; default: location.reload()): after a switch, at the new account's sign-in; after forget(), straight away.
@@ -21,7 +21,7 @@
 // The scope last opened is kept in ctx.storage(): `<name>:sync/scope` (FORMATS.md), so a reload, signed out, still
 // counts its unsent saves (the auth module refuses a switch while there are any) and a switch wipes the right outbox.
 // -> api: open, watch, watchDoc, save, flush, track, conflicts, describe, resolve, reconnect, nudge, status$, facts,
-//    heard, idle, copyOf, lastSeen, unsentOutside, outsideSettled, relistens, queue, hub, parts: as createApp's.
+//    heard, idle, copyOf, lastSeen, unsentOutside, outsideSettled, relistens, queue, hub, parts: as core.js documents them.
 import { createSyncCore } from './core.js';
 import { forgetDevice } from './forget.js';
 
@@ -76,7 +76,7 @@ export function sync(options = {}) {
       // the last account's data: its outbox (the scope last opened; no sending: the queue's owner is not the open one),
       // the device copy and the SDK's cache, then the app's own lists
       // unless forced: refused (throws) while anything of that account is unsent, here, in another tab (the shared
-      // outbox) or in another app on the origin: the sign-out check of the one-object createApp (queue.flush())
+      // outbox) or in another app on the origin: the old one-object createApp's sign-out check (queue.flush())
       /** @param {boolean} force */
       const wipe = async force => {
         const last = store.get('scope') || '';

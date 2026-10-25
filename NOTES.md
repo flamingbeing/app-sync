@@ -25,7 +25,7 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
   and checks it against `versions.lock.json`; the Worker (`worker/`) serves only those files at
   `core.anawj.com/sync/<x.y.z>/` (one-year immutable cache, CORS `*`: public code, no credentials) and
   `/sync/versions.json` (5 min). A moved tag or edited released file fails the build, so a re-deploy cannot change a version.
-- Update module (`update/`): same hosting idea as sync, with its own lock (`update.lock.json`), tags (`update-vX.Y.Z`)
+- Update module (`update/`): same hosting idea as sync, with its own lock (`update.lock.json`), tags (`update-vX.Y.Z`; from 1.0.0-rc.1 the sync tag `vX.Y.Z`)
   and path (`core.anawj.com/update/<x.y.z>/`: `sw-core.js`, `register.js`). `register()` must not throw offline: with the
   network gone `serviceWorker.register` rejects, so it falls back to the installed registration. The page module is
   loaded from another site, so apps list its exact-pin address in their `SHELL` (cached as a pinned cross-origin file)

@@ -1,20 +1,12 @@
 // Run with: node --test test/modules.test.mjs
-// The createApp tests (app, held conflicts, model) again, on the modules: createApp({ config, modules: [auth(),
-// sync()] }) behind the same api (test/factory.mjs). Each test that is about the one-object createApp only (its
-// sign-out wipe, the reasons it gives) says so and is left out here; the modules' own: auth.test, runner.test.
-process.env.APP_SYNC_MODULES = '1';
-await import('./app.test.mjs');
-await import('./held.test.mjs');
-await import('./model.test.mjs');
-
-// The sync module's own: sign-out keeps the account's data, a switch wipes it, the reload owed after a wipe.
+// The sync module's own (the createApp tests run on the modules too: test/factory.mjs; auth.test, runner.test): sign-out keeps the account's data, a switch wipes it, the reload owed after a wipe.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../app.js';
 import { auth } from '../auth.js';
 import { sync } from '../sync.js';
 import { fakeServer } from './fake-server.mjs';
-const { settle, until, fakeUser, fakeAdapter, fakeNav, memOutbox, memStorage } = await import('./app.test.mjs');   // (after the env above)
+const { settle, until, fakeUser, fakeAdapter, fakeNav, memOutbox, memStorage } = await import('./app.test.mjs');
 
 let n = 0;
 // an auth SDK whose next popup signs in `next` (another account: a switch)
