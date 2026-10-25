@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 (2026-10-25)
+
+- `createApp({ popupOnly: true })`: sign in with the popup only, never a redirect (not when the popup is blocked, nor
+  in an installed app), for a page served from another domain than its auth domain, where a redirect sign-in can't
+  finish. A blocked popup throws to the caller (ask for a tap). Default unchanged. Test: `test/app.test.mjs`.
+
 ## 0.6.1 (2026-10-25)
 
 Model-based multi-device tests, and the bug they found. Nothing else changes for 0.6.0 callers.

@@ -3,7 +3,7 @@
 // No Firebase import here: the app passes its own SDK, already initialised.
 //
 // createApp({ name, colls, path, sdk, kinds, outbox, adapter, commit, backend, hub, stores, queue, scope, claims, onRefused,
-//             forget, report, redirectFirst, nav, storage, fetch, now, watchEvery, win })
+//             forget, report, redirectFirst, popupOnly, nav, storage, fetch, now, watchEvery, win })
 //   name: the app's id: device copy `<name>-sync:`, outbox `<name>-outbox`. colls: the collections synced.
 //   path(scope, coll) -> the collection's path segments. sdk: async () -> { A, F, auth, db, emulator }: the app's
 //   Firebase SDK (A: auth functions, F: Firestore functions), loaded once here (a failed load is tried again next time);
@@ -27,6 +27,8 @@
 //   report: the nothing-lost report (createReport), opt-in. storage: where the origin's outbox list is kept
 //   (default localStorage; null: no registry). nav, fetch, now, win: the browser's, for tests.
 //   watchEvery: ms between watchdog checks (0: only on nudge()).
+//   popupOnly: sign in with the popup only, never a redirect (0.6.2): for a page served from another domain than the
+//   auth domain, where a redirect sign-in can't finish; a blocked popup throws to the caller (ask for a tap).
 // -> { signIn, signOut, onUser, user, open, watch, save, flush, status$, refreshClaims, nudge, relistens, hub, queue, parts }
 //   signOut({ wait }) -> { ok, reason: 'unsent' | 'changed', reload, failed }: refuses while anything is unsent (this
 //   app's, another tab's, another registered app's on this origin), then forgets the device and signs out.
@@ -222,6 +224,7 @@ export function createApp(options = {}) {
     const { A, auth } = await load();
     const provider = new A.GoogleAuthProvider();
     provider.setCustomParameters?.({ prompt: 'select_account' });
+    if (options.popupOnly) return void await A.signInWithPopup(auth, provider);
     if (redirectFirst()) return A.signInWithRedirect(auth, provider);
     try { await A.signInWithPopup(auth, provider); }
     catch (e) { if (!REDIRECT_CODES.includes(e?.code)) throw e; await A.signInWithRedirect(auth, provider); }
