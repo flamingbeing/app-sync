@@ -812,6 +812,53 @@ test('reconnect: restarts the connection and resolves after it; never under an u
   assert.equal(await bare.reconnect(), false, 'an SDK without the network switch: false');
 });
 
+test('reconnect: an outside write started while the SDK loads still stops the restart (review, 0.8.3)', async () => {
+  const calls = [];
+  const F = { disableNetwork: async () => { calls.push('off'); }, enableNetwork: async () => { calls.push('on'); } };
+  const sdk = fakeAuthSdk();
+  let loaded; const gate = new Promise(r => { loaded = r; });
+  const { app } = makeApp({ sdkParts: sdk, options: { sdk: async () => { await gate; return { A: sdk.A, F, auth: sdk.auth, db: {} }; } } });
+  const asked = app.reconnect();
+  let done; app.track(new Promise(r => { done = r; }));
+  loaded();
+  assert.equal(await asked, false, 'checked again just before the switch');
+  assert.deepEqual(calls, []);
+  done(); await settle();
+  assert.equal(await app.reconnect(), true);
+});
+
+test('reconnect: a switch past the 4 s cap keeps the lock until it settles; no second switch over it (review, 0.8.3)', async () => {
+  const calls = [];
+  let off; const F = { disableNetwork: () => { calls.push('off'); return new Promise(r => { off = r; }); }, enableNetwork: async () => { calls.push('on'); } };
+  const sdk = fakeAuthSdk();
+  const { app } = makeApp({ sdkParts: sdk, options: { sdk: async () => ({ A: sdk.A, F, auth: sdk.auth, db: {} }) } });
+  assert.equal(await app.reconnect(), false, 'over 4 s: false');
+  const again = app.reconnect();
+  await settle(20);
+  assert.deepEqual(calls, ['off'], 'the first switch is still running: shared, not started again');
+  off(); await settle(400);
+  assert.equal(await again, false, 'it shares the running restart\'s answer');
+  assert.deepEqual(calls, ['off', 'on']);
+  const third = app.reconnect();
+  await settle(20); off();
+  assert.equal(await third, true, 'after it settled, a new restart');
+  assert.deepEqual(calls, ['off', 'on', 'off', 'on']);
+});
+
+test('signOut: doc and claims watches are stopped before the wipe and started again when it stops (review, 0.8.3)', async () => {
+  const srv = fakeServer(), feed = docFeed(), sdkParts = fakeAuthSdk();
+  const { app } = makeApp({ srv, sdkParts, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc } });
+  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+  app.watchDoc(['households', 'h1'], () => {});
+  await settle();
+  let live = -1;
+  const r = await app.signOut({ force: true, before: async () => { live = feed.live; sdkParts.auth.currentUser = fakeUser({ uid: 'u2', email: 'other@example.test' }); } });
+  assert.equal(live, 0, 'stopped before the hook and the wipe');
+  assert.equal(r.ok, false);
+  await settle();
+  assert.equal(feed.live, 1, 'sign-out stopped: listening again');
+});
+
 // a browser window: its listeners, a page that can be hidden
 function fakeWin() {
   const on = {}, doc = { visibilityState: 'visible', addEventListener: (t, f) => (on[t] ||= []).push(f), removeEventListener() {} };

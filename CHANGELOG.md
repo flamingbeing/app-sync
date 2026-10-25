@@ -15,16 +15,18 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 ## 0.8.3 (2026-10-25)
 
 One document, reconnect, wake and the claims watch. Additive; no stored format changes. Tests: `test/app.test.mjs`
-(+5), `test/firestore.emulator.mjs` (+1).
+(+8), `test/firestore.emulator.mjs` (+1).
 
 - **`app.watchDoc(path, cb, onError)`**: one document (path as segments or `'a/b'`), `cb(doc | null, meta)` when its
   copy changes. `null` ("gone") comes once, only when the server says the document is not there or the listener fails
   (then `onError(e)` too; that watch is finished), never from the device copy alone. It feeds `facts()`, the status
-  and the watchdog, which restarts it like the lists; sign-out stops it. The Firestore adapter gains `listenDoc`
+  and the watchdog, which restarts it like the lists; sign-out stops it (and the claims watch) before its `before`
+  hook and the wipe, and starts it again if the sign-out stops. The Firestore adapter gains `listenDoc`
   (an injected adapter needs one for `watchDoc`).
 - **`app.reconnect({ why })`**: restarts the connection (the SDK's network off and on, as the watchdog does) and
   resolves `true` after it, then sends what waits. `false` offline, without the switch, or while a write outside the
-  queue is unsent (a restart may send it twice). One restart at a time: a call during one shares it.
+  queue is unsent (a restart may send it twice), checked again just before the switch (the watchdog's restart too).
+  One restart at a time: a call during one shares it, until the switch itself settles (also one past the 4 s cap).
 - **`wake: true`** (createApp, default off): `online`, `pageshow` and the page shown again nudge the watchdog
   (`nudge('wake')`) and send what waits.
 - **Claims watch:** `claims: { watch: true, doc: user => path }` reads the role doc live (the default `entry`; nothing

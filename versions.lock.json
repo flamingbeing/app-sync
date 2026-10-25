@@ -383,7 +383,7 @@
     "NOTICE": "a4a91e7763c9b0d122fcb4c69fcfb4088427b73bd713f37d513669095430894c",
     "files.json": "2935cebcadb77e997abf45fad640fb69ed9ffc4b1a925861bf05f1296458a16d",
     "index.js": "a249eb5a98f2c6b9ee306c25c648109dda0a48f75d55c070982c5485aacbbfeb",
-    "src/app.js": "f7a93c5aea0122031a9eaaec7d455a711780252251ee0532af1adbadb854d4fd",
+    "src/app.js": "b7936a2ec0d0c8f81ab5c5139d8c045a239ff7dae321819d662ac719cab837e4",
     "src/cache.js": "a2e8a213041e5ab944e69e0a87292faed59f3337a7e468330e45ed9dd10c6b55",
     "src/conflict.js": "272198f956cb135d4597bb1b55d8ba5afab16f5fc6035e6a42dd5624f482badc",
     "src/firestore.js": "17e22e520d9f9dce8dc608eb8354e08cf1a9450fd1c8e247073ef874ab770f90",

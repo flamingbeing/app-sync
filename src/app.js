@@ -387,29 +387,36 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   const watchdog = createWatchdog({
     now, online, quiet: () => queue.pending() === 0 && unsentOutside() === 0,
     relisten: /** @param {string} why */ why => { console.warn('listeners replaced:', why); relistens++; stopWatches(); hub.stopAll().then(() => { startWatches(); tell(); }); },
-    cycle: /** @param {string} why */ why => { console.warn('connection restarted:', why); void cycleNet().finally(() => tell()); },
+    cycle: /** @param {string} why */ why => { console.warn('connection restarted:', why); void cycleNet(safe).finally(() => tell()); },
   });
-  // -> true once the network was switched off and on again (false: no switch in this SDK, it failed, or it took over
-  // 4 s); one restart at a time, a second call shares the running one
-  function cycleNet() {
-    return cycling ||= (async () => {
+  // -> true once the network was switched off and on again (false: no switch in this SDK, ok() said no once the SDK
+  // was loaded, it failed, or it took over 4 s); one restart at a time, a second call shares the running one, and the
+  // lock is held until the switch itself settles (one past the cap is still running)
+  /** @param {() => boolean} [ok] */
+  function cycleNet(ok = () => true) {
+    if (cycling) return cycling;
+    let switching = false;
+    return cycling = (async () => {
       try {
         const { F, db } = await load();
-        if (typeof F.disableNetwork !== 'function') return false;
+        if (typeof F.disableNetwork !== 'function' || !ok()) return false;
+        switching = true;
         const turn = (async () => { await F.disableNetwork(db); await new Promise(r => setTimeout(r, 300)); await F.enableNetwork(db); return true; })();
-        turn.catch(() => {});
+        turn.catch(() => {}).finally(() => { cycling = null; });
         return await Promise.race([turn, new Promise(r => setTimeout(r, 4000, false))]);
-      } catch (e) { console.warn('network restart', e?.code || e?.message); return false; } finally { cycling = null; }
+      } catch (e) { console.warn('network restart', e?.code || e?.message); return false; } finally { if (!switching) cycling = null; }
     })();
   }
+  // (review) checked again just before the switch: an outside write started while the SDK loaded stops it
+  const safe = () => online() && unsentOutside() === 0;
   // (0.8.3) the app's "Reconnect" (Sync now): restart the connection now, then send what waits. Not offline, and not
   // under an unsent outside write (a restart may send it again: an increment counted twice); the queue's own saves are
   // transactions, checked against the server's copy, so they are safe
   /** @param {{ why?: string }} [opts] @returns {Promise<boolean>} */
   async function reconnect({ why = 'asked' } = {}) {
-    if (!online() || unsentOutside() > 0) return false;
+    if (!safe()) return false;
     console.warn('connection restarted:', why);
-    const ok = await cycleNet();
+    const ok = await cycleNet(safe);
     queue.kick(); tell();
     return ok;
   }
@@ -533,6 +540,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
     let reason = '';
     let beforeFailed = false;
     const clear = !s.emulator && adapter.clearCache ? () => adapter.clearCache() : null;
+    stopWatches();   // (review, 0.8.3: the doc and claims watches too, before the hook and the wipe; started again if it stops)
     const r = await forgetDevice({
       hub, stores, queue, keep: forget.keep || [], clearBackendCache: clear, extra: forget.extra || null,
       proceed: async () => {
@@ -549,7 +557,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
       },
     });
     if (beforeFailed) r.failed.unshift('before');
-    if (!r.wiped) { stopWatches(); startWatches(); return { ok: false, reason, reload: false, failed: r.failed }; }
+    if (!r.wiped) { startWatches(); return { ok: false, reason, reload: false, failed: r.failed }; }
     stopClaimsWatch(); stopWatches(); watches.clear(); docWatches.clear(); scope = ''; heard = false; heardAt = 0; told.clear(); deleting.clear(); claimsAsked = ''; tracked.clear();
     if (clear) loaded = null;   // (the SDK instance was terminated: the page starts again)
     await s.A.signOut(s.auth);
