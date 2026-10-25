@@ -24,31 +24,45 @@ What it does:
   writes through `track`), then `forgetDevice` stops everything, checks again, and deletes every store but the
   account kept, the outbox, the SDK's offline cache (`clearCache`) and the app's own lists, in every tab.
 
-## The modules (0.9.0, the 1.0 shape)
+## The modules (0.9.x, the 1.0 shape)
 
 From 0.9.0 an app is a list of modules started by one runner; the one-object `createApp` below is deprecated (removed
-in 1.0.0-rc.1). 0.9.0 has the runner (`app.js`) and `auth` (`auth.js`); `sync` and `update` follow in 0.9.1.
+in 1.0.0-rc.1). 0.9.0 has the runner (`app.js`) and `auth` (`auth.js`); 0.9.1 adds `sync` (`sync.js`) and `update`
+(`update.js`).
 
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.9.0/app.js';
-import { auth } from 'https://core.anawj.com/sync/0.9.0/auth.js';
+import { createApp } from 'https://core.anawj.com/sync/0.9.1/app.js';
+import { auth } from 'https://core.anawj.com/sync/0.9.1/auth.js';
+import { sync } from 'https://core.anawj.com/sync/0.9.1/sync.js';
+import { update } from 'https://core.anawj.com/sync/0.9.1/update.js';
+import * as register from 'https://core.anawj.com/update/0.2.0/register.js';
 
-const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [auth()] });
+const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [
+  auth(),
+  sync({ colls: ['items'], path: (scope, coll) => ['spaces', scope, coll], scope: user => user.uid }),
+  update({ register, app: 'myapp', canReload: () => !sheetOpen() }),
+] });
 await app.ready;
 app.auth.onUser(user => show(user));
 await app.auth.signIn({ hint: lastEmail });   // { ok, reason: '' | 'redirect' | 'unsent' | 'wipe' }
+app.sync.watch(scope, 'items', list => draw(list));
+await app.sync.save('item', scope, { id, text });
 await app.auth.signOut();                     // keeps this device's data; the same account carries on
 await app.auth.forget();                      // wipes this device (refused while anything is unsent, unless force)
+await app.update.checkNow();                  // true once a new version took over
 ```
 
 A module is `{ name, needs, start(ctx, deps) -> api, stop() }`: started in `needs` order, stopped in reverse; `deps`
 holds only the apis it needs. `ctx` is small and frozen: `name, module, config, sdk(), user(), on(event, fn),
 emit(event, data), storage(ns), status, report(fact), ready` (every module started). Events: `signin { user }`, `signout { user }` (data kept),
-`switch { from, to }` (another account: the old data is wiped after `auth({ beforeSwitch })`), `forget { user }`.
+`switch { from, to }` (another account: the old data is wiped after `auth({ beforeSwitch })`), `forget { user, force }`.
 Another account's sign-in is refused while the last one has unsent saves (also one made during `beforeSwitch`) or
 when a module's wipe throws (the next sign-in tries again); `app.auth.blocked()` says which. Each tab switches its
-own data, even after another tab switched first. Details:
-the comments at the top of `src/runner.js` and `src/auth.js`.
+own data, even after another tab switched first. `sync` has the one-object `createApp`'s sync api (open, watch,
+watchDoc, save, flush, conflicts, status and the rest) and the same stored formats, so phones keep what they hold;
+`scope(user)` opens the account's scope at each sign-in. `update` registers the service worker with register.js
+(passed in) and holds the take-over reload while any module has unsent saves. Details: the comments at the top of
+`src/runner.js`, `src/auth.js`, `src/module-sync.js` and `src/module-update.js`.
 
 ## Modules
 

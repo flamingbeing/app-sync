@@ -10,7 +10,7 @@
 //   off, emit(event, data) -> the names of the modules whose handler threw, storage(ns), status, report(fact), ready
 //   (resolves once every module has started, rejects if one failed or the app stopped first; never awaited in start).
 // events: signin { user } | signout { user } (the device keeps its data) | switch { from, to } (another account:
-//   the old one's data is wiped) | forget { user } (wiped on purpose). Only the module named auth emits these four;
+//   the old one's data is wiped) | forget { user, force } (wiped on purpose). Only the module named auth emits these four;
 //   handlers run one at a time in start order and are awaited (a wipe is done when emit resolves). user() is set
 //   before the handlers run. Other event names are free for modules to share.
 // storage(ns): { name, get(key), set(key, value), remove(key) }, JSON values in config.storage (default

@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mergeHeld, mergeFields, clashingFields, whenText, describeConflict, resolvedRecord, mergeClashes, pathOf as fieldPath, keysOf } from '../src/conflict.js';
 import { createFirestoreBackend } from '../src/firestore.js';
-import { createApp } from '../src/app.js';
+import { createApp } from './factory.mjs';
 import { buildReport } from '../src/report.js';
 import { fakeServer } from './fake-server.mjs';
 import { memOutbox, sharedSdk } from './fake-sdk.mjs';
@@ -159,11 +159,12 @@ function phone(name, shared, srv, { held = { notes: true }, edits = '_edits', me
   const adapter = { listen, clearCache: async () => {},
     fetchOne: async (s, c, id) => { if (!dev.online) throw unavailable(); return srv.fetchOne(s, c, id); },
     commit: async (...a) => { if (!dev.online) throw unavailable(); return backend.commit(...a); } };
-  dev.app = createApp({ name: 'held-' + name + '-' + Math.random().toString(36).slice(2), colls: ['notes'], kinds: { note: 'notes' }, path: (s, c) => ['spaces', s, c],
+  dev.made = createApp({ name: 'held-' + name + '-' + Math.random().toString(36).slice(2), colls: ['notes'], kinds: { note: 'notes' }, path: (s, c) => ['spaces', s, c],
     sdk: async () => ({ A, F: {}, auth, db: {}, emulator: true }), adapter, backend: backendOptions, device: name,
     outbox: memOutbox(), nav: { get onLine() { return dev.online; }, storage: { persisted: async () => true, persist: async () => true } },
     storage: null, win: null, watchEvery: 0, queue: { delay: quick }, hub: { grace: 0 } });
-  dev.start = async () => { await dev.app.open(S); dev.app.watch(S, 'notes', list => { dev.view = list; }); dev.app.status$(st => dev.states.push(st.state)); await settle(20); };
+  dev.app = dev.made;
+  dev.start = async () => { dev.app = await dev.made; await dev.app.open(S); dev.app.watch(S, 'notes', list => { dev.view = list; }); dev.app.status$(st => dev.states.push(st.state)); await settle(20); };
   dev.offline = () => { dev.online = false; for (const s of dev.subs) { s.off?.(); s.off = null; } };
   dev.onlineAgain = () => { dev.online = true; for (const s of dev.subs) if (!s.off) s.off = srv.listen(...s.args); dev.app.queue.kick(); };
   dev.shown = id => dev.view.find(r => r.id === id) || null;

@@ -17,7 +17,7 @@ separately from the API, from 0.8.0 on:
 | Device copy list | localStorage `<prefix>registry` (the databases opened here); BroadcastChannel `<prefix>` for wipes | this app's tabs |
 | Outbox | IndexedDB database `<name>-outbox` (createApp), version 1, store `changes` (key `key`, index `owner`); fallback localStorage `<outbox name>:<job key>` with the same job | every app on the origin (sign-out check) |
 | Outbox list | localStorage `app-sync:outboxes` (`REGISTRY_KEY`): `[{ name, realm }]` | every app on the origin |
-| Module storage (0.9.0) | localStorage `<name>:<module>[:<ns>]/<key>`, a JSON value (the runner's `ctx.storage(ns)`). The auth module keeps `<name>:auth/owner` = `{ uid, email }`: the account whose data this device holds (kept at sign-out, removed by `forget()`) | this app's tabs |
+| Module storage (0.9.0) | localStorage `<name>:<module>[:<ns>]/<key>`, a JSON value (the runner's `ctx.storage(ns)`). The auth module keeps `<name>:auth/owner` = `{ uid, email }`: the account whose data this device holds (kept at sign-out, removed by `forget()`). The sync module (0.9.1) keeps `<name>:sync/scope` = the scope last opened, a string (so, signed out, its unsent saves are still counted, and a switch wipes that scope's outbox; removed by the wipe); its device copy and outbox are the ones above, same names | this app's tabs |
 | Offline cache step | localStorage `app-sync-cache` (`CACHE_KEY`): `'multi'`, `'single'` or `'memory'` | this origin |
 
 ### A job (one save in the outbox)

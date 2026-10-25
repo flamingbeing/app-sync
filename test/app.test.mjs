@@ -4,7 +4,7 @@
 // adapter over the fake server (the real adapter: test/firestore.emulator.mjs). Made-up data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp } from '../src/app.js';
+import { createApp, onModules } from './factory.mjs';
 import { ESCALATE_MS } from '../src/watchdog.js';
 import { checkWrite, recordSignature } from '../src/conflict.js';
 import { fakeServer } from './fake-server.mjs';
@@ -75,13 +75,13 @@ function memOutbox(name, realm = 'default', records = new Map()) {
 function memStorage() { const m = new Map(); return { getItem: k => m.has(k) ? m.get(k) : null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; }
 
 // an app as a cloud.js would make it: only config
-function makeApp(over = {}) {
+async function makeApp(over = {}) {
   const srv = over.srv || fakeServer();
   const sdk = over.sdkParts || fakeAuthSdk();
   const adapter = over.adapter || fakeAdapter(srv);
   const nav = over.nav || fakeNav();
   const name = over.name || uniq();
-  const app = createApp({
+  const app = await createApp({
     name, colls: ['items'], path: (scope, coll) => ['spaces', scope, coll],
     sdk: async () => ({ A: sdk.A, F: {}, auth: sdk.auth, db: {} }),
     kinds: { item: 'items' }, adapter, nav, storage: memStorage(), outbox: memOutbox(name + '-outbox'), watchEvery: 0,
@@ -98,32 +98,32 @@ test('createApp says which required option is missing', () => {
 });
 
 test('sign-in: popup first; a blocked popup falls back to redirect; an installed app goes straight to redirect', async () => {
-  const a = makeApp();
+  const a = await makeApp();
   await a.app.signIn();
   assert.deepEqual(a.sdk.calls.filter(c => c !== 'redirect-result'), ['popup']);
-  const b = makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-blocked' }) });
+  const b = await makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-blocked' }) });
   await b.app.signIn();
   assert.deepEqual(b.sdk.calls.filter(c => c !== 'redirect-result'), ['popup', 'redirect']);
-  const c = makeApp({ options: { redirectFirst: () => true } });
+  const c = await makeApp({ options: { redirectFirst: () => true } });
   await c.app.signIn();
   assert.deepEqual(c.sdk.calls.filter(c => c !== 'redirect-result'), ['redirect']);
   // any other popup error is the caller's (cancelled by the person, network)
-  const d = makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-closed-by-user' }) });
+  const d = await makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-closed-by-user' }) });
   await assert.rejects(d.app.signIn(), e => e.code === 'auth/popup-closed-by-user');
 });
 
 test('sign-in with popupOnly: never a redirect, even blocked or installed (a page served away from the auth domain)', async () => {
-  const a = makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-blocked' }), options: { popupOnly: true, redirectFirst: () => true } });
+  const a = await makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-blocked' }), options: { popupOnly: true, redirectFirst: () => true } });
   await assert.rejects(a.app.signIn(), e => e.code === 'auth/popup-blocked');
   assert.deepEqual(a.sdk.calls.filter(c => c !== 'redirect-result'), ['popup']);
-  const b = makeApp({ options: { popupOnly: true } });
+  const b = await makeApp({ options: { popupOnly: true } });
   await b.app.signIn();
   assert.deepEqual(b.sdk.calls.filter(c => c !== 'redirect-result'), ['popup']);
   assert.equal(b.app.user()?.uid, 'u1');
 });
 
 test('user: the account as the app needs it (email lower-cased), heard through onUser; a redirect sign-in is finished on load', async () => {
-  const { app, sdk } = makeApp();
+  const { app, sdk } = await makeApp();
   const seen = [];
   const off = await app.onUser(u => seen.push(u));
   assert.ok(sdk.calls.includes('redirect-result'), 'getRedirectResult on load');
@@ -135,7 +135,7 @@ test('user: the account as the app needs it (email lower-cased), heard through o
 
 test('the storage guard is asked at sign-in, and its answer feeds the status (at-risk offline)', async () => {
   const nav = fakeNav({ online: false, persisted: false });
-  const { app } = makeApp({ nav });
+  const { app } = await makeApp({ nav });
   await app.onUser(() => {});
   assert.equal(nav.asked, 0, 'not before sign-in');
   await app.signIn();
@@ -152,7 +152,7 @@ test('claims: asked once when the role doc\'s v is ahead of the token, then the 
   const posts = [];
   const fetch = async (url, init) => { posts.push({ url, auth: init.headers.Authorization }); return { ok: true }; };
   let entry = { role: 'admin', v: 2 };
-  const { app } = makeApp({ sdkParts: fakeAuthSdk({ user }), options: { fetch, claims: { url: '/api/claims', entry: async () => entry } } });
+  const { app } = await makeApp({ sdkParts: fakeAuthSdk({ user }), options: { fetch, claims: { url: '/api/claims', entry: async () => entry } } });
   await app.onUser(() => {});
   await app.signIn();
   assert.ok(await until(() => user.refreshed === 1), 'token refreshed after the Worker answered');
@@ -173,7 +173,7 @@ test('claims: asked once when the role doc\'s v is ahead of the token, then the 
 test('claims: a Worker that fails changes nothing and never throws into the app', async () => {
   const user = fakeUser();
   const fetch = async () => { throw new Error('offline'); };
-  const { app } = makeApp({ sdkParts: fakeAuthSdk({ user }), options: { fetch, claims: { url: '/api/claims', entry: async () => ({ v: 1 }) } } });
+  const { app } = await makeApp({ sdkParts: fakeAuthSdk({ user }), options: { fetch, claims: { url: '/api/claims', entry: async () => ({ v: 1 }) } } });
   await app.onUser(() => {});
   await app.signIn();
   await assert.doesNotReject(app.refreshClaims());
@@ -182,7 +182,7 @@ test('claims: a Worker that fails changes nothing and never throws into the app'
 
 test('watch: the device copy and the server, with this device\'s unsent saves laid over, engine fields left out', async () => {
   const nav = fakeNav();
-  const { app, srv } = makeApp({ nav });
+  const { app, srv } = await makeApp({ nav });
   srv.set('items', { id: 'a', text: 'Fake server', updatedAt: Date.now(), serverAt: 1, _saves: ['x'] });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   let list = [];
@@ -196,7 +196,7 @@ test('watch: the device copy and the server, with this device\'s unsent saves la
 });
 
 test('save: a record\'s saves go out one at a time in the order made, and the status says saving, then synced once the server is heard', async () => {
-  const { app, srv, adapter } = makeApp();
+  const { app, srv, adapter } = await makeApp();
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const states = [];
   app.status$(st => states.push(st.state));
@@ -216,7 +216,7 @@ test('status: unknown, not synced, until the server has answered once since the 
   let answer = false;
   const listen = (scope, c, o, cb) => srv.listen(scope, c, o, s => { if (answer) cb(s); else cb({ ...s, fromCache: true }); });
   const adapter = { ...fakeAdapter(srv), listen };
-  const { app } = makeApp({ srv, adapter });
+  const { app } = await makeApp({ srv, adapter });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const states = [];
   app.status$(st => states.push(st.state));
@@ -231,7 +231,7 @@ test('status: unknown, not synced, until the server has answered once since the 
 test('a save the server refuses: onRefused hears it with its code; "archive" sets it aside, kept until Retry or Discard (0.8.2: the gate stays shut)', async () => {
   const srv = fakeServer();
   const refused = [];
-  const { app } = makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: {
+  const { app } = await makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: {
     onRefused: (err, entry) => { refused.push({ code: err.code, kind: entry.kind, id: entry.record.id }); return 'archive'; },
   } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
@@ -247,7 +247,7 @@ test('a save the server refuses: onRefused hears it with its code; "archive" set
 
 test('a refused save with no onRefused stays failed and keeps the sign-out shut (never dropped silently)', async () => {
   const srv = fakeServer();
-  const { app } = makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }) });
+  const { app } = await makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }) });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   await assert.rejects(app.save('item', 's1', { id: 'r1', text: 'Fake' }), /kept/, 'the caller hears of it');
   await settle(50);
@@ -260,7 +260,7 @@ test('a refused save with no onRefused stays failed and keeps the sign-out shut 
 test('sign-out refuses while a save is unsent and deletes nothing; once sent it wipes the device and signs out', async () => {
   const nav = fakeNav({ online: false });
   const extra = [];
-  const { app, sdk, adapter, srv } = makeApp({ nav, options: { forget: { extra: async () => extra.push('extra') } } });
+  const { app, sdk, adapter, srv } = await makeApp({ nav, options: { forget: { extra: async () => extra.push('extra') } } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   let list = [];
   app.watch('s1', 'items', l => { list = l; });
@@ -285,9 +285,9 @@ test('sign-out refuses while a save is unsent and deletes nothing; once sent it 
   assert.equal((await st.load('items')).docs.length, 0, 'the device copy is gone');
 });
 
-test('sign-out stops when someone else signed in meanwhile (another tab): nothing deleted, listeners back', async () => {
+test('sign-out stops when someone else signed in meanwhile (another tab): nothing deleted, listeners back', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test switch/forget' }, async () => {
   const sdkParts = fakeAuthSdk();
-  const { app, srv, adapter } = makeApp({ sdkParts });
+  const { app, srv, adapter } = await makeApp({ sdkParts });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   let list = [];
   app.watch('s1', 'items', l => { list = l; });
@@ -303,7 +303,7 @@ test('sign-out stops when someone else signed in meanwhile (another tab): nothin
 test('the emulator keeps its SDK cache (clearCache is skipped) and the page need not reload', async () => {
   const sdkParts = fakeAuthSdk();
   const srv = fakeServer(), adapter = fakeAdapter(srv);
-  const { app } = makeApp({ srv, adapter, sdkParts, options: { sdk: async () => ({ A: sdkParts.A, F: {}, auth: sdkParts.auth, db: {}, emulator: true }) } });
+  const { app } = await makeApp({ srv, adapter, sdkParts, options: { sdk: async () => ({ A: sdkParts.A, F: {}, auth: sdkParts.auth, db: {}, emulator: true }) } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const r = await app.signOut();
   assert.equal(r.ok, true);
@@ -313,7 +313,7 @@ test('the emulator keeps its SDK cache (clearCache is skipped) and the page need
 
 test('the outbox is named in the origin-wide list, so another app on this origin waits for its saves at sign-out', async () => {
   const storage = memStorage();
-  const { app, name } = makeApp({ options: { storage } });
+  const { app, name } = await makeApp({ options: { storage } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const list = JSON.parse(storage.getItem('app-sync:outboxes') || '[]');
   assert.ok(list.some(x => x.name === name + '-outbox'), JSON.stringify(list));
@@ -321,7 +321,7 @@ test('the outbox is named in the origin-wide list, so another app on this origin
 
 test('escape hatch: commit replaces the adapter\'s write (an app\'s own transactions), the rest stays wired', async () => {
   const mine = [];
-  const { app, srv, adapter } = makeApp({ options: { commit: async (scope, kind, record) => { mine.push([scope, kind, record.id]); return { at: Date.now() }; } } });
+  const { app, srv, adapter } = await makeApp({ options: { commit: async (scope, kind, record) => { mine.push([scope, kind, record.id]); return { at: Date.now() }; } } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   await app.save('roster', 's1', { id: 'd1', body: 'Fake' });
   assert.equal(await app.flush(1000), true);
@@ -331,7 +331,7 @@ test('escape hatch: commit replaces the adapter\'s write (an app\'s own transact
 });
 
 test('the parts are exported for anything the facade does not cover', async () => {
-  const { app } = makeApp();
+  const { app } = await makeApp();
   for (const k of ['hub', 'queue', 'stores', 'adapter', 'watchdog']) assert.ok(app.parts[k], k);
   assert.equal(app.hub, app.parts.hub);
   assert.equal(app.queue, app.parts.queue);
@@ -342,7 +342,7 @@ test('watchdog: a listener stuck on the device copy while online is replaced, an
   let stuck = true, now = Date.now();
   const listen = (scope, c, o, cb) => srv.listen(scope, c, o, s => cb(stuck ? { ...s, fromCache: true } : s));
   const adapter = { ...fakeAdapter(srv), listen };
-  const { app } = makeApp({ srv, adapter, options: { now: () => now } });
+  const { app } = await makeApp({ srv, adapter, options: { now: () => now } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   let list = [];
   app.watch('s1', 'items', l => { list = l; });
@@ -363,7 +363,7 @@ test('a record deleted on this device leaves its list once the delete is done, t
     onCommit: ({ before, after, at }) => before && !after ? [{ path: ['spaces', S, 'bin', 'task:' + before.id], data: { id: 'task:' + before.id, kind: 'task', data: before, deletedAt: at } }] : [] });
   const user = fakeUser(), auth = { currentUser: user };
   const A = { onAuthStateChanged: (_a, cb) => { cb(user); return () => {}; } };
-  const app = createApp({ name: uniq(), colls: ['tasks'], kinds: { task: 'tasks' }, path: (s, c) => ['spaces', s, c], sdk: async () => ({ A, F: {}, auth, db: {} }),
+  const app = await createApp({ name: uniq(), colls: ['tasks'], kinds: { task: 'tasks' }, path: (s, c) => ['spaces', s, c], sdk: async () => ({ A, F: {}, auth, db: {} }),
     adapter: { listen: srv.listen, fetchOne: srv.fetchOne, commit: (...a) => backend.commit(...a), clearCache: async () => {} },
     outbox: sharedOutbox(), storage: null, win: null, watchEvery: 0, nav: fakeNav(), queue: { delay: ms => settle(ms === 180 ? 5 : 10) }, hub: { grace: 0 } });
   await app.open(S);
@@ -388,7 +388,7 @@ test('quiet: the watchdog never restarts the connection while the app says its o
     const srv = fakeServer();
     let now = Date.now();
     const listen = (scope, c, o, cb) => srv.listen(scope, c, o, s => cb({ ...s, fromCache: true }));
-    const { app } = makeApp({ srv, adapter: { ...fakeAdapter(srv), listen }, options: { now: () => now, ...(quiet ? { quiet } : {}) } });
+    const { app } = await makeApp({ srv, adapter: { ...fakeAdapter(srv), listen }, options: { now: () => now, ...(quiet ? { quiet } : {}) } });
     await app.onUser(() => {}); await app.signIn(); await app.open('s1');
     app.watch('s1', 'items', () => {});
     await settle(20);
@@ -406,7 +406,7 @@ test('quiet: the watchdog never restarts the connection while the app says its o
 test('facts: persisted, confirmed and when the server was last heard, reset at sign-out (0.7.3)', async () => {
   const nav = fakeNav({ persisted: false });
   let now = 1000;
-  const { app, srv } = makeApp({ nav, options: { now: () => now } });
+  const { app, srv } = await makeApp({ nav, options: { now: () => now } });
   await app.onUser(() => {});
   assert.deepEqual(app.facts(), { persisted: true, confirmed: false, heardAt: 0 });
   await app.signIn(); await app.open('s1');
@@ -426,7 +426,7 @@ test('flush(ms) waits ms in all, not ms for the saves being stored and ms again 
   const box = memOutbox(uniq() + '-outbox'), put = box.put.bind(box);
   let slow = false;
   box.put = async x => { if (slow) await settle(400); return put(x); };   // a slow outbox write (a busy phone)
-  const { app } = makeApp({ srv, adapter, options: { outbox: box } });
+  const { app } = await makeApp({ srv, adapter, options: { outbox: box } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   slow = true;
   void app.save('item', 's1', { id: 'f1', text: 'Fake' }).catch(() => {});
@@ -442,7 +442,7 @@ test('flush(ms) waits ms in all, not ms for the saves being stored and ms again 
 
 test('track: a write made outside the queue counts as unsent until it settles: status, idle, flush and the sign-out gate (0.8.1)', async () => {
   const extra = [];
-  const { app, sdk, adapter } = makeApp({ options: { forget: { extra: async () => extra.push('extra') } } });
+  const { app, sdk, adapter } = await makeApp({ options: { forget: { extra: async () => extra.push('extra') } } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   let st = null;
   app.status$(s => { st = s; });
@@ -472,7 +472,7 @@ test('track: a write made outside the queue counts as unsent until it settles: s
 });
 
 test('track: a write that fails stops counting (the app has its answer); outsideSettled waits for it (0.8.1)', async () => {
-  const { app } = makeApp();
+  const { app } = await makeApp();
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const bad = app.track(new Promise((_, no) => setTimeout(() => no(new Error('fake refused')), 20)));
   assert.equal(app.unsentOutside(), 1);
@@ -484,14 +484,14 @@ test('track: a write that fails stops counting (the app has its answer); outside
 
 test('outside: the app\'s own sync count (writes it knows of outside track) joins unsentOutside; quiet stays a deprecated alias (0.8.1)', async () => {
   let n = 2;
-  const { app } = makeApp({ options: { outside: () => n } });
+  const { app } = await makeApp({ options: { outside: () => n } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   assert.equal(app.unsentOutside(), 2);
   assert.equal(await app.flush(30), false);
   n = 0;
   assert.equal(app.unsentOutside(), 0);
   assert.equal(await app.flush(200), true);
-  const q = makeApp({ options: { quiet: () => false } });
+  const q = await makeApp({ options: { quiet: () => false } });
   assert.equal(q.app.unsentOutside(), 1, 'quiet() false: one write not acknowledged');
 });
 
@@ -499,7 +499,7 @@ test('track: the watchdog never restarts the connection under a tracked write (0
   const srv = fakeServer();
   let now = Date.now();
   const listen = (scope, c, o, cb) => srv.listen(scope, c, o, s => cb({ ...s, fromCache: true }));
-  const { app } = makeApp({ srv, adapter: { ...fakeAdapter(srv), listen }, options: { now: () => now } });
+  const { app } = await makeApp({ srv, adapter: { ...fakeAdapter(srv), listen }, options: { now: () => now } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   app.watch('s1', 'items', () => {});
   void app.track(new Promise(() => {}));
@@ -513,7 +513,7 @@ test('track: the watchdog never restarts the connection under a tracked write (0
 
 test('heard: a read or listener the app runs itself confirms the status and feeds the watchdog (0.8.1)', async () => {
   let now = 1000;
-  const { app } = makeApp({ options: { now: () => now } });
+  const { app } = await makeApp({ options: { now: () => now } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   app.heard({ fromCache: true });
   assert.equal(app.facts().confirmed, false, 'the device copy is not the server');
@@ -527,7 +527,7 @@ test('heard: a read or listener the app runs itself confirms the status and feed
 
 test('idle: false while a save is being stored or is in the queue (0.8.1)', async () => {
   const nav = fakeNav({ online: false });
-  const { app } = makeApp({ nav });
+  const { app } = await makeApp({ nav });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const p = app.save('item', 's1', { id: 'i1', text: 'Fake' });
   assert.equal(app.idle(), false, 'being stored');
@@ -539,26 +539,26 @@ test('idle: false while a save is being stored or is in the queue (0.8.1)', asyn
 });
 
 test('signIn({ hint, popupOnly, redirectFirst }) per call: hint reaches login_hint (0.8.1)', async () => {
-  const a = makeApp();
+  const a = await makeApp();
   let provider = null;
   const Popup = a.sdk.A.signInWithPopup;
   a.sdk.A.signInWithPopup = async (auth, p) => { provider = p; return Popup(auth, p); };
   await a.app.signIn({ hint: 'fake.person@example.test' });
   assert.deepEqual(provider.params, { prompt: 'select_account', login_hint: 'fake.person@example.test' });
-  const b = makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-blocked' }) });
+  const b = await makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-blocked' }) });
   await assert.rejects(b.app.signIn({ popupOnly: true }), e => e.code === 'auth/popup-blocked');
   assert.deepEqual(b.sdk.calls.filter(c => c !== 'redirect-result'), ['popup']);
-  const c = makeApp();
+  const c = await makeApp();
   await c.app.signIn({ redirectFirst: true });
   assert.deepEqual(c.sdk.calls.filter(c => c !== 'redirect-result'), ['redirect']);
-  const d = makeApp({ options: { redirectFirst: () => true } });
+  const d = await makeApp({ options: { redirectFirst: () => true } });
   await d.app.signIn({ redirectFirst: false });
   assert.deepEqual(d.sdk.calls.filter(c => c !== 'redirect-result'), ['popup']);
 });
 
 test('signOut reason \'refused\': a save the server refused waits for the user (0.8.1)', async () => {
   const srv = fakeServer();
-  const { app } = makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }) });
+  const { app } = await makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }) });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   await app.save('item', 's1', { id: 'r1', text: 'Fake' }).catch(() => {});
   assert.ok(await until(() => app.parts.queue.entries().some(x => x.state === 'failed')));
@@ -568,7 +568,7 @@ test('signOut reason \'refused\': a save the server refused waits for the user (
 
 test('signOut({ force }): unsent saves and tracked writes are forgotten, the device is wiped (0.8.1)', async () => {
   const nav = fakeNav({ online: false });
-  const { app, sdk } = makeApp({ nav });
+  const { app, sdk } = await makeApp({ nav });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   await app.save('item', 's1', { id: 'r1', text: 'Fake unsent' });
   void app.track(new Promise(() => {}));
@@ -579,9 +579,9 @@ test('signOut({ force }): unsent saves and tracked writes are forgotten, the dev
   assert.equal(app.unsentOutside(), 0, 'forgotten with the device');
 });
 
-test('signOut({ force }) still stops when someone else signed in meanwhile (0.8.1)', async () => {
+test('signOut({ force }) still stops when someone else signed in meanwhile (0.8.1)', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test forget' }, async () => {
   const sdkParts = fakeAuthSdk();
-  const { app, adapter } = makeApp({ sdkParts });
+  const { app, adapter } = await makeApp({ sdkParts });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const flush = app.parts.queue.flush;
   app.parts.queue.flush = async ms => { sdkParts.auth.currentUser = fakeUser({ uid: 'u2', email: 'other@example.test' }); return flush(ms); };
@@ -590,9 +590,9 @@ test('signOut({ force }) still stops when someone else signed in meanwhile (0.8.
   assert.equal(adapter.cleared, 0);
 });
 
-test('signOut({ before }): runs after the listeners stop and before the wipe; a throw is named in failed (0.8.1)', async () => {
+test('signOut({ before }): runs after the listeners stop and before the wipe; a throw is named in failed (0.8.1)', { skip: onModules() && 'one-object order; modules: auth.test forget order' }, async () => {
   const order = [];
-  const { app } = makeApp({ options: { forget: { extra: async () => order.push('extra') } } });
+  const { app } = await makeApp({ options: { forget: { extra: async () => order.push('extra') } } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const stopAll = app.parts.hub.stopAll, wipe = app.parts.stores.wipeStores;
   app.parts.hub.stopAll = async () => { order.push('stopAll'); return stopAll(); };
@@ -601,7 +601,7 @@ test('signOut({ before }): runs after the listeners stop and before the wipe; a 
   assert.equal(r.ok, true);
   assert.deepEqual(order, ['stopAll', 'before', 'wipe', 'extra']);
   assert.deepEqual(r.failed, ['before']);
-  const b = makeApp();
+  const b = await makeApp();
   await b.app.onUser(() => {}); await b.app.signIn(); await b.app.open('s1');
   let ran = 0;
   void b.app.track(new Promise(() => {}));
@@ -617,8 +617,8 @@ test('one gate over every registered outbox: another app\'s unsent save on this 
   const nameA = uniq(), nameB = uniq();
   const sdkParts = fakeAuthSdk();
   const extra = [];
-  const a = makeApp({ sdkParts, name: nameA, options: { storage, outbox: box(nameA + '-outbox'), queue: { registry }, forget: { extra: async () => extra.push('drafts deleted') } } });
-  const b = makeApp({ sdkParts, name: nameB, nav: fakeNav({ online: false }), options: { storage, outbox: box(nameB + '-outbox'), queue: { registry } } });
+  const a = await makeApp({ sdkParts, name: nameA, options: { storage, outbox: box(nameA + '-outbox'), queue: { registry }, forget: { extra: async () => extra.push('drafts deleted') } } });
+  const b = await makeApp({ sdkParts, name: nameB, nav: fakeNav({ online: false }), options: { storage, outbox: box(nameB + '-outbox'), queue: { registry } } });
   await a.app.onUser(() => {}); await b.app.onUser(() => {});
   await a.app.signIn(); await a.app.open('s1'); await b.app.open('s1');
   await b.app.save('item', 's1', { id: 'b1', text: 'Fake unsent in the other app' });
@@ -629,7 +629,7 @@ test('one gate over every registered outbox: another app\'s unsent save on this 
 
 test('flush: a save made while outside writes settle keeps the gate shut (review, 0.8.1)', async () => {
   const nav = fakeNav({ online: false });
-  const { app } = makeApp({ nav });
+  const { app } = await makeApp({ nav });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   void app.track(new Promise(r => setTimeout(r, 40)));
   setTimeout(() => { void app.save('item', 's1', { id: 'late', text: 'Fake' }); }, 10);
@@ -638,21 +638,21 @@ test('flush: a save made while outside writes settle keeps the gate shut (review
   assert.equal(r.ok, false);
 });
 
-test('signOut({ before }): someone else signed in during before stops the wipe; signed out (none) goes on (review, 0.8.1)', async () => {
+test('signOut({ before }): someone else signed in during before stops the wipe; signed out (none) goes on (review, 0.8.1)', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test forget' }, async () => {
   const sdkParts = fakeAuthSdk();
-  const { app, adapter } = makeApp({ sdkParts });
+  const { app, adapter } = await makeApp({ sdkParts });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const r = await app.signOut({ force: true, before: async () => { sdkParts.auth.currentUser = fakeUser({ uid: 'u2', email: 'other@example.test' }); } });
   assert.deepEqual({ ok: r.ok, reason: r.reason }, { ok: false, reason: 'changed' });
   assert.equal(adapter.cleared, 0);
-  const b = makeApp();
+  const b = await makeApp();
   await b.app.onUser(() => {}); await b.app.signIn(); await b.app.open('s1');
   const r2 = await b.app.signOut({ before: async () => { await b.sdk.A.signOut(b.sdk.auth); } });
   assert.equal(r2.ok, true, 'the app\'s own Auth sign-out in before');
 });
 
 test('a tracked write that settles applies deletes held for its record (review, 0.8.1)', async () => {
-  const { app } = makeApp();
+  const { app } = await makeApp();
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   let settled = 0;
   const s = app.hub.settle;
@@ -665,11 +665,11 @@ test('a tracked write that settles applies deletes held for its record (review, 
 // 0.8.2: refused saves after a reload, the watch change info, the device copy read
 test('a refused save found after a reload: onRefused hears its code from the job; app.queue.refused() keeps it set aside (0.8.2)', async () => {
   const srv = fakeServer(), name = uniq(), records = new Map();
-  const one = makeApp({ srv, name, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { outbox: memOutbox(name + '-outbox', 'default', records) } });
+  const one = await makeApp({ srv, name, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { outbox: memOutbox(name + '-outbox', 'default', records) } });
   await one.app.onUser(() => {}); await one.app.signIn(); await one.app.open('s1');
   await assert.rejects(one.app.save('item', 's1', { id: 'r1', text: 'Fake' }), /kept/);
   const heard = [];
-  const two = makeApp({ srv, name, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { outbox: memOutbox(name + '-outbox', 'default', records),
+  const two = await makeApp({ srv, name, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { outbox: memOutbox(name + '-outbox', 'default', records),
     onRefused: (err, entry) => { heard.push([err.code, entry.record.id]); return 'archive'; } } });
   await two.app.onUser(() => {}); await two.app.signIn(); await two.app.open('s1');
   assert.ok(await until(() => heard.length === 1));
@@ -680,7 +680,7 @@ test('a refused save found after a reload: onRefused hears its code from the job
 });
 
 test('watch meta says what changed and what was removed; copyOf and lastSeen read the last delivered copy (0.8.2)', async () => {
-  const { app, srv } = makeApp();
+  const { app, srv } = await makeApp();
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   srv.set('items', { id: 'a', text: 'Fake A', updatedAt: 5, serverAt: 5, _saves: ['k'] });
   srv.set('items', { id: 'b', text: 'Fake B', updatedAt: 6, serverAt: 6, _saves: ['k'] });
@@ -715,8 +715,8 @@ test('a refused save set aside in another registered outbox keeps this app\'s si
   const box = name => { if (!boxes.has(name)) boxes.set(name, memOutbox(name)); return boxes.get(name); };
   const registry = createOutboxRegistry({ storage, open: name => box(name) });
   const nameA = uniq(), nameB = uniq(), sdkParts = fakeAuthSdk();
-  const one = makeApp({ sdkParts, srv, name: nameA, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { storage, outbox: box(nameA + '-outbox'), queue: { registry }, onRefused: () => 'archive' } });
-  const two = makeApp({ sdkParts, srv, name: nameB, options: { storage, outbox: box(nameB + '-outbox'), queue: { registry } } });
+  const one = await makeApp({ sdkParts, srv, name: nameA, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { storage, outbox: box(nameA + '-outbox'), queue: { registry }, onRefused: () => 'archive' } });
+  const two = await makeApp({ sdkParts, srv, name: nameB, options: { storage, outbox: box(nameB + '-outbox'), queue: { registry } } });
   await one.app.onUser(() => {}); await two.app.onUser(() => {});
   await one.app.signIn(); await one.app.open('s1'); await two.app.open('s1');
   await one.app.save('item', 's1', { id: 'r1', text: 'Fake' }).catch(() => {});   // (set aside at once: no throw)
@@ -742,7 +742,7 @@ function docFeed() {
 
 test('watchDoc: "gone" only when the server says so or the listener fails, never from the device copy (0.8.3)', async () => {
   const srv = fakeServer(), feed = docFeed();
-  const { app } = makeApp({ srv, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc } });
+  const { app } = await makeApp({ srv, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc } });
   const seen = [], errors = [];
   const off = app.watchDoc(['households', 'h1'], (d, m) => seen.push([d, m.fromCache]), e => errors.push(e.code));
   await settle();
@@ -773,7 +773,7 @@ test('watchDoc: "gone" only when the server says so or the listener fails, never
 test('watchDoc: the watchdog restarts a doc watch stuck on the device copy; sign-out stops it (0.8.3)', async () => {
   const srv = fakeServer(), feed = docFeed();
   let now = Date.now();
-  const { app } = makeApp({ srv, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc }, options: { now: () => now } });
+  const { app } = await makeApp({ srv, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc }, options: { now: () => now } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   const seen = [];
   app.watchDoc(['households', 'h1'], d => seen.push(d));
@@ -795,7 +795,7 @@ test('reconnect: restarts the connection and resolves after it; never under an u
   const calls = [];
   const F = { disableNetwork: async () => { calls.push('off'); }, enableNetwork: async () => { calls.push('on'); } };
   const sdk = fakeAuthSdk();
-  const { app, nav } = makeApp({ sdkParts: sdk, options: { sdk: async () => ({ A: sdk.A, F, auth: sdk.auth, db: {} }) } });
+  const { app, nav } = await makeApp({ sdkParts: sdk, options: { sdk: async () => ({ A: sdk.A, F, auth: sdk.auth, db: {} }) } });
   assert.equal(await app.reconnect({ why: 'Sync now' }), true);
   assert.deepEqual(calls, ['off', 'on'], 'resolved after the network was off and on again');
   let done; app.track(new Promise(r => { done = r; }));
@@ -808,7 +808,7 @@ test('reconnect: restarts the connection and resolves after it; never under an u
   const both = await Promise.all([app.reconnect(), app.reconnect()]);
   assert.deepEqual(both, [true, true]);
   assert.equal(calls.length, 4, 'one restart at a time: the second call waits for the first');
-  const { app: bare } = makeApp();
+  const { app: bare } = await makeApp();
   assert.equal(await bare.reconnect(), false, 'an SDK without the network switch: false');
 });
 
@@ -817,7 +817,7 @@ test('reconnect: an outside write started while the SDK loads still stops the re
   const F = { disableNetwork: async () => { calls.push('off'); }, enableNetwork: async () => { calls.push('on'); } };
   const sdk = fakeAuthSdk();
   let loaded; const gate = new Promise(r => { loaded = r; });
-  const { app } = makeApp({ sdkParts: sdk, options: { sdk: async () => { await gate; return { A: sdk.A, F, auth: sdk.auth, db: {} }; } } });
+  const { app } = await makeApp({ sdkParts: sdk, options: { sdk: async () => { await gate; return { A: sdk.A, F, auth: sdk.auth, db: {} }; } } });
   const asked = app.reconnect();
   let done; app.track(new Promise(r => { done = r; }));
   loaded();
@@ -831,7 +831,7 @@ test('reconnect: a switch past the 4 s cap keeps the lock until it settles; no s
   const calls = [];
   let off; const F = { disableNetwork: () => { calls.push('off'); return new Promise(r => { off = r; }); }, enableNetwork: async () => { calls.push('on'); } };
   const sdk = fakeAuthSdk();
-  const { app } = makeApp({ sdkParts: sdk, options: { sdk: async () => ({ A: sdk.A, F, auth: sdk.auth, db: {} }) } });
+  const { app } = await makeApp({ sdkParts: sdk, options: { sdk: async () => ({ A: sdk.A, F, auth: sdk.auth, db: {} }) } });
   assert.equal(await app.reconnect(), false, 'over 4 s: false');
   const again = app.reconnect();
   await settle(20);
@@ -845,9 +845,9 @@ test('reconnect: a switch past the 4 s cap keeps the lock until it settles; no s
   assert.deepEqual(calls, ['off', 'on', 'off', 'on']);
 });
 
-test('signOut: doc and claims watches are stopped before the wipe and started again when it stops (review, 0.8.3)', async () => {
+test('signOut: doc and claims watches are stopped before the wipe and started again when it stops (review, 0.8.3)', { skip: onModules() && 'one-object sign-out restarts watches; modules: sign-out keeps watches' }, async () => {
   const srv = fakeServer(), feed = docFeed(), sdkParts = fakeAuthSdk();
-  const { app } = makeApp({ srv, sdkParts, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc } });
+  const { app } = await makeApp({ srv, sdkParts, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   app.watchDoc(['households', 'h1'], () => {});
   await settle();
@@ -869,7 +869,7 @@ test('wake: true nudges the watchdog when the page comes back (online, pageshow,
   const run = async wake => {
     const srv = fakeServer(), win = fakeWin();
     let now = Date.now();
-    const { app } = makeApp({ srv, options: { now: () => now, win, ...(wake ? { wake } : {}) } });
+    const { app } = await makeApp({ srv, options: { now: () => now, win, ...(wake ? { wake } : {}) } });
     await app.onUser(() => {}); await app.signIn(); await app.open('s1');
     app.watch('s1', 'items', () => {});
     await settle(20);
@@ -886,12 +886,12 @@ test('wake: true nudges the watchdog when the page comes back (online, pageshow,
   assert.equal(visible, 2, 'visible again after the throttle: listen again');
 });
 
-test('claims.watch: the role doc is listened to, the claims refreshed when it moves, onClaims told the status (0.8.3)', async () => {
+test('claims.watch: the role doc is listened to, the claims refreshed when it moves, onClaims told the status (0.8.3)', { skip: onModules() && 'one-object reads the role doc through the injected adapter; auth module uses the SDK (auth.test)' }, async () => {
   const user = fakeUser({ claims: { v: 1, g: { _: 'viewer' } } });
   const srv = fakeServer(), feed = docFeed(), posts = [], told = [];
   let status = 200;
   const fetch = async (url, o) => { posts.push(url); if (status === 200) user.claims = { v: 2, g: { _: 'admin' } }; return { ok: status === 200, status }; };
-  const { app } = makeApp({ srv, sdkParts: fakeAuthSdk({ user }), adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc },
+  const { app } = await makeApp({ srv, sdkParts: fakeAuthSdk({ user }), adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc },
     options: { fetch, claims: { url: '/api/claims', watch: true, doc: u => ['members', u.uid], onClaims: x => told.push(x) } } });
   await app.onUser(() => {}); await app.signIn();
   await settle(10);
@@ -917,3 +917,6 @@ test('claims.watch: the role doc is listened to, the claims refreshed when it mo
   assert.equal(r.ok, true);
   assert.equal(feed.live, 0, 'sign-out stops the role doc listener');
 });
+
+// (for test/modules.test.mjs's module-only tests)
+export { settle, until, fakeUser, fakeAdapter, fakeNav, memOutbox, memStorage };

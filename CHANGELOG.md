@@ -14,6 +14,33 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 0.9.1 (2026-10-25)
+
+The sync and update modules. Additive; the one-object `createApp(options)` is unchanged and still deprecated. Stored
+formats only gain one key (FORMATS.md). Tests: `test/modules.test.mjs` (new: the createApp tests again, on
+`createApp({ config, modules: [auth(), sync()] })`, plus the sync module's own), `test/update-module.test.mjs` (new).
+
+- **`sync.js`** (new entry): `sync({ colls, path, kinds, scope, backend, adapter, ... })`, needs auth: the one-object
+  createApp's sync (the device copy, the outbox and queue, watch, watchDoc, save, flush, track, conflicts, describe,
+  resolve, reconnect, wake, status, facts), built on the same code (`src/core.js`, moved out of `src/app.js`) and the
+  same stored names (`<name>-sync:`, `<name>-outbox`), so phones keep what they hold when an app moves over.
+  `scope(user)` opens the account's scope at each sign-in. Sign-out keeps the device copy, the outbox and the watches,
+  and nothing sends until the same account is back (then its kept saves send at once); a switch or `forget()` wipes
+  the last account's device copy, outbox (in every outbox on the origin) and the SDK's cache, and throws when that
+  fails (the auth module then refuses the switch), or while that account has unsent saves anywhere on the device
+  (this tab, another tab's in the shared outbox, another app's on the origin: the one-object sign-out check; reason
+  `'wipe'`; `forget({ force })` wipes anyway, the `forget` event now carries `force`). A save counts as unsent in the
+  status from the moment it is made. After a wipe cleared the SDK's cache the page reloads (`reload`
+  option): after a switch at the new account's sign-in, after `forget()` straight away. The scope last opened is kept
+  (`<name>:sync/scope`), so a reload, signed out, still counts its unsent saves and a switch waits for them.
+- **`update.js`** (new entry): `update({ register, app, sw, every, canReload, beforeReload, retryOn })` wraps the update
+  core's page side (register.js, passed in; the update module still releases on its own). The take-over reload and
+  `forceLatest()` wait while any module has unsent saves, as well as for the app's `canReload` (checked again after it); `retryOn` names events
+  after which the owed reload is tried again; `checkNow({ wait })` looks for a new version now and resolves true once it
+  takes over, false when none is found or it is still held. The worker is registered after start (app.ready never
+  waits on the network).
+- `tools/check.mjs`: the `src/` budget is 272000 bytes (was 262000): the two modules.
+
 ## 0.9.0 (2026-10-25)
 
 The module runner and the auth module: the 1.0 shape, `createApp({ config, modules })`. Additive; the one-object

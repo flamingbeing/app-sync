@@ -10,7 +10,7 @@
 // can still differ a little between runs. Made-up data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp } from '../src/app.js';
+import { createApp } from './factory.mjs';
 import { createFirestoreBackend } from '../src/firestore.js';
 import { fakeServer } from './fake-server.mjs';
 import { memOutbox, sharedSdk } from './fake-sdk.mjs';
@@ -54,7 +54,7 @@ function device(name, shared, srv, clock, { held = false } = {}) {
     commit: async (...a) => { if (!dev.online) throw unavailable(); return backend.commit(...a); },
   };
   dev.start = async () => {
-    dev.app = createApp({ name: 'model-' + name, colls: ['notes', 'tasks'], kinds: { note: 'notes', task: 'tasks' }, path: (s, c) => ['spaces', s, c],
+    dev.app = await createApp({ name: 'model-' + name, colls: ['notes', 'tasks'], kinds: { note: 'notes', task: 'tasks' }, path: (s, c) => ['spaces', s, c],
       sdk: async () => ({ A, F: {}, auth, db: {}, emulator: true }), adapter, outbox, nav, storage: null, win: null, device: name,
       ...(held ? { backend: { mark: '_saves', merge: { notes: true }, ...heldOptions } } : {}), now: () => Date.now() + clock, watchEvery: 0, queue: { delay: quick }, hub: { grace: 0, binKinds: { task: 'tasks' } } });
     await dev.app.open(S);
