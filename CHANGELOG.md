@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.0 (2026-10-25)
+
+Nothing-lost report, opt-in. Nothing changes for callers that leave `report` out. Tests: `test/report.test.mjs`
+(nothing from a record, its id, path, email or an error message can get into a report) and
+`worker/test/report.test.mjs` (the endpoint).
+
+- `createReport({ app, version, … })` (`src/report.js`; from `index.js` with this engine's version filled in): at most
+  once an hour, and when the page is hidden, sends `{ v: 1, app, version, sync, unconfirmed, refused, conflicts,
+  errors }` to `core.anawj.com/report`: saves still waiting for the server after an hour, saves the server refused,
+  saves that met a change made elsewhere, and sync errors by code since the last report. Counts, short error codes and
+  versions only. `buildReport` is the pure part.
+- Write queue `report`: counts the queue's saves and each failed send by its error code (`outbox-write` when the
+  outbox could not be written). A report that throws never stops a save.
+- Worker: `POST /report` (our sites only, 2 KB, 20 a ten minutes per address) keeps per-app daily counts in D1;
+  `GET /report/digest` (token) gives the day's digest for the owner's daily message.
+
 ## 0.4.2 (2026-10-25)
 
 Several apps on one origin. Nothing changes for 0.4.1 callers that leave the new options out, except the fix below.

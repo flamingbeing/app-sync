@@ -3,7 +3,7 @@
 // expires and never blocks a later save made on the version shown; another window on the device sharing the outbox
 // is taken into account before anything is sent again.
 //
-// createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels, otherPending, registry })
+// createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels, otherPending, registry, report })
 //   store: the outbox ({ put, list, get, remove, forget }). backend(owner, kind, record, base) -> result; throws
 //   { code: 'write-conflict', remote } (conflict.js checkWrite), a transient error ('unavailable',
 //   'deadline-exceeded', 'aborted': stays pending, retried with backoff) or any other error (failed). sendTimeout: a
@@ -12,6 +12,8 @@
 //   server yet; it keeps the sign-out check (flush) shut, as does a throw (can't tell). registry: the origin's outbox
 //   registry (registry.js), for apps that share sign-in on one origin: flush also refuses while another registered
 //   outbox has unsent saves for this user, and forget forgets this user in all of them.
+//   report: the nothing-lost report (report.js), opt-in: the queue's entries are counted and each failed send counts
+//   one error by its code (only the code; nothing else of the error or the save).
 // save(kind, owner, record, base, { ops }): ops (optional) describe the change for a backend that applies changes by
 //   field (a last-write-wins collection: increments, keyed updates). They are stored with the save and handed on as
 //   backend(owner, kind, record, base, { key, ops: [ops, …] }), key the save's own id (a backend can use it to apply
@@ -26,7 +28,7 @@ const KEEP = 100;   // finished saves kept in the device history (the app's hist
 // same record won the race ('aborted'): the job stays pending and tries again
 const transient = error => error?.code === 'unavailable' || error?.code === 'deadline-exceeded' || error?.code === 'aborted';
 export const SEND_TIMEOUT = 30000;
-export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null }) {
+export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
   const recover = labels.recover || 'Recover';
   const failure = job => new Error(new RegExp('in ' + recover + '\\b').test(job.error) ? job.error : job.error + ' — a copy is kept in ' + recover);
@@ -89,12 +91,13 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
           if (!current(email, gen)) return;
           // set aside while it was being sent (a save made on the other copy took its place): it stays so, the next goes
           if (job.state === 'archived') continue;
+          if (report) { try { report.error(error?.code); } catch { /* a report never stops a save */ } }
           if (transient(error)) { job.error = 'Waiting for the connection'; retryLater(id, email, gen); notify(); break; }
           job.state = error.code === 'write-conflict' ? 'conflict' : 'failed';
           job.error = error.message || 'Could not save';
           if (error.remote !== undefined) job.remote = copy(error.remote);
         }
-        try { await persist(job); } catch (error) { storageError = error.message; }
+        try { await persist(job); } catch (error) { storageError = error.message; if (report) { try { report.error('outbox-write'); } catch { /* never stops a save */ } } }
         notify();
         if (job.state !== 'synced') break;
         waits.delete(id);
@@ -235,7 +238,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (registry) { try { await registry.forget(old, { except: store }); } catch (e) { error ||= e; } }
     if (error) throw error;
   }
-  return { activate, save, restore, overlay, retry, archive, forget, kick,
+  const api = { activate, save, restore, overlay, retry, archive, forget, kick,
     configure(config) { if (config.backend) backend = config.backend; if (config.getOwner) getOwner = config.getOwner; if (config.normalize) normalize = config.normalize; if (config.notice) notice = config.notice; },
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     entries: () => copy(ordered()).reverse(),
@@ -274,4 +277,6 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     jobKey(kind, id) { return [...ordered()].reverse().find(x => x.kind === kind && x.record.id === id)?.key || ''; },
     stateOf(key) { return jobs.find(x => x.key === key)?.state || ''; },
   };
+  if (report) { try { report.watch(api); } catch { /* a report never stops the queue */ } }
+  return api;
 }

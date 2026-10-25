@@ -1,7 +1,9 @@
 // The Cloudflare Worker for this repo's addresses. It serves the repo's files (the static assets, bound as ASSETS)
-// and decides which folder an address may see (routes.js). No data, no storage: just files.
+// and decides which folder an address may see (routes.js). Files only, except /report (report.js): per-app daily
+// counts of the nothing-lost report, in D1.
 // wrangler.jsonc: "run_worker_first" sends every request here.
 import { resolve } from './routes.js';
+import { handleReport } from './report.js';
 
 const NOINDEX = 'noindex, nofollow';
 // a released version's files never change: browsers and the CDN may keep them for a year. The list of versions can.
@@ -12,6 +14,8 @@ const CORS = { 'Access-Control-Allow-Origin': '*', 'Cross-Origin-Resource-Policy
 
 export default {
   async fetch(request, env) {
+    const path = new URL(request.url).pathname;
+    if (path === '/report' || path.startsWith('/report/')) return handleReport(request, env);
     if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405, headers: { Allow: 'GET, HEAD' } });
     const url = new URL(request.url);
     if (!LISTING.includes(url.pathname) && !VERSIONED.test(url.pathname)) return notFound();   // no folder listings, no other files
