@@ -13,7 +13,7 @@ export function createWriteQueue({ store, backend, getOwner, normalize, online, 
     }) => Promise<void>;
     discard: (key: string) => Promise<void>;
     forget: () => Promise<void>;
-    kick: () => void;
+    kick: () => Promise<void>;
     /** @param {Partial<QueueOptions>} config */
     configure(config: Partial<QueueOptions>): void;
     /** @param {() => void} fn */

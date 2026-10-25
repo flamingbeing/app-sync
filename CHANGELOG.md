@@ -14,6 +14,17 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.2.2 (2026-10-26)
+
+Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is inside
+`src/writes.js` (a page not using the queue bundles none of it).
+
+- **A second window's saves are noticed**: the write queue read the outbox once, when the account opened, so a save
+  stored by another tab that then closed (offline) was never sent by the tab left open, and a held or refused save
+  that the other tab had already settled stayed "waiting" here, shutting the sign-out check and the update reload until
+  a reload. `kick()` (online, wake, `flush()`) now reads the outbox again: saves it had not seen are sent, settled ones
+  are cleared. `kick()` returns a promise (it returned nothing).
+
 ## 1.2.1 (2026-10-26)
 
 Fix, no API, module contract or stored-format change; modular: yes, shaken: no source change in `src/` or the entries.

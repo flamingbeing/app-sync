@@ -203,11 +203,35 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     loading = (async () => {
       try { const found = await store.list(email); if (current(email, gen)) jobs = found; }
       catch (error) { if (current(email, gen)) storageError = error.message; }
-      if (current(email, gen)) { notify(); kick(); }
+      if (current(email, gen)) { notify(); sendAll(); }
     })();
     return loading;
   }
-  function kick() { for (const wait of waits.values()) wait.timer = null; if (owner && getOwner() === owner) for (const id of new Set(jobs.map(keyOf))) void drain(id).catch(error => { storageError = error.message; notify(); }); }
+  function sendAll() { if (owner && getOwner() === owner) for (const id of new Set(jobs.map(keyOf))) void drain(id).catch(error => { storageError = error.message; notify(); }); }
+  // The store is read once, when the account opens. Another window may have stored saves since (and closed), or moved a
+  // held or refused one on: read it again, so those are sent or cleared here too. A save being stored here is not added
+  // twice (its own call adds it). -> true when something changed
+  /** @returns {Promise<boolean>} */
+  async function rescan() {
+    const email = owner, gen = generation;
+    if (!email) return false;
+    let stored;
+    try { stored = await store.list(email); } catch { return false; }
+    if (!current(email, gen)) return false;
+    const known = new Set(jobs.map(x => x.key)), added = stored.filter(x => !known.has(x.key) && !inflight.has(keyOf(x)));
+    jobs.push(...added);
+    let moved = added.length > 0;
+    for (const job of jobs.filter(x => x.state === 'conflict' || x.state === 'failed')) moved = await refresh(job) || moved;
+    if (moved && current(email, gen)) notify();
+    return moved && current(email, gen);
+  }
+  // sends what waits, then what the store shows that this window had not seen
+  /** @returns {Promise<void>} */
+  function kick() {
+    for (const wait of waits.values()) wait.timer = null;
+    sendAll();
+    return rescan().then(moved => { if (moved) sendAll(); }).catch(error => { storageError = error.message; notify(); });
+  }
   /**
    * @param {string} kind
    * @param {string} email
@@ -385,7 +409,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       return Promise.race([idle(), delay(ms).then(() => false)]);
     },
     async flush(ms = 4000) {
-      kick(); await Promise.race([Promise.all([...running.values()]), delay(ms)]);
+      await Promise.race([kick().then(() => Promise.all([...running.values()])), delay(ms)]);
       // (0.8.2) a refused save set aside is not given up either: kept until the person retries or discards it
       if (jobs.some(x => !terminal.has(x.state) || x.refused)) return false;
       // writes the app sends another way (straight to the SDK) and not yet on the server

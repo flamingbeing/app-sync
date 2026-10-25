@@ -26,5 +26,9 @@
   "1.2.1": {
     "sw-core.js": "3fcedaf3da4b418e5caa79e2f1c1a209cd4ae105b58e218fffc3186113349309",
     "register.js": "f39860dd6db0b3bfbb46aec91e2caa3e030206b78e6c7fed424d938dbdd74fe8"
+  },
+  "1.2.2": {
+    "sw-core.js": "1411807d4e698fc5fd57fda05b51e408a7c6e5c008580ee62e157e4e9e26eeca",
+    "register.js": "17407d888a6fc7514fb233a9d6d560387087279c9b6f7eafc17b135806b5448b"
   }
 }

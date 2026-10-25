@@ -1,2 +1,2 @@
 export { createApp } from "./src/runner.js";
-export const VERSION: "1.2.1";
+export const VERSION: "1.2.2";

@@ -93,7 +93,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
             }) => Promise<void>;
             discard: (key: string) => Promise<void>;
             forget: () => Promise<void>;
-            kick: () => void;
+            kick: () => Promise<void>;
             configure(config: Partial<QueueOptions>): void;
             onChange(fn: () => void): () => boolean;
             entries: () => import("./types.js").Job[];
@@ -138,7 +138,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
                 }) => Promise<void>;
                 discard: (key: string) => Promise<void>;
                 forget: () => Promise<void>;
-                kick: () => void;
+                kick: () => Promise<void>;
                 configure(config: Partial<QueueOptions>): void;
                 onChange(fn: () => void): () => boolean;
                 entries: () => import("./types.js").Job[];
@@ -219,7 +219,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         }) => Promise<void>;
         discard: (key: string) => Promise<void>;
         forget: () => Promise<void>;
-        kick: () => void;
+        kick: () => Promise<void>;
         configure(config: Partial<QueueOptions>): void;
         onChange(fn: () => void): () => boolean;
         entries: () => import("./types.js").Job[];
