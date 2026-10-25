@@ -302,7 +302,7 @@ test('stopAll waits for an engine that was already stopping (its late writes mus
   await wipeStores();
 });
 
-test('a record read to check it left the query never replaces a newer copy that arrived meanwhile', async () => {
+test('a record read to check it left the query never replaces a copy that a snapshot changed meanwhile', async () => {
   const { openStore, wipeStores } = createStores({ prefix: 'fix-b3b:', colls: ['items'] });
   const doc = v => ({ id: 'a', updatedAt: T0 + v * 1000, v });
   let snap = null;
@@ -320,5 +320,38 @@ test('a record read to check it left the query never replaces a newer copy that 
   assert.equal(last.find(d => d.id === 'a')?.v, 3);
   gate(); await settle(20); await hub.flush();
   assert.equal(last.find(d => d.id === 'a')?.v, 3, 'the older read does not win');
+  off(); await hub.stopAll(); await wipeStores();
+});
+
+test('a check read that finds the copy unchanged still wins over this device\'s refused copy (its stamp is higher)', async () => {
+  const { openStore, wipeStores } = createStores({ prefix: 'fix-b3c:', colls: ['items'] });
+  const doc = (v, at) => ({ id: 'a', updatedAt: T0 + at, v });
+  let snap = null;
+  const listen = (_s, _c, _o, onSnap) => { snap = onSnap; return () => {}; };
+  const hub = createSyncHub({ openStore, listen, fetchOne: async () => doc(1, 1000), now: () => T0 + H, grace: 0, bin: null });
+  let last = [];
+  const off = hub.watch(S, 'items', l => { last = l; });
+  await settle();
+  snap({ changes: [{ type: 'added', id: 'a', doc: doc(2, 5000) }], fromCache: false, hasPendingWrites: false, full: true, docs: [doc(2, 5000)] }); await settle();
+  snap({ changes: [{ type: 'removed', id: 'a', doc: null }], fromCache: true, hasPendingWrites: false }); await settle(20);
+  assert.equal(last.find(d => d.id === 'a')?.v, 1, 'the read of the server\'s copy replaces it');
+  off(); await hub.stopAll(); await wipeStores();
+});
+
+test('a check read does not win over a copy that arrived with the same stamp', async () => {
+  const { openStore, wipeStores } = createStores({ prefix: 'fix-b3d:', colls: ['items'] });
+  const doc = v => ({ id: 'a', updatedAt: T0 + 1000, v });
+  let snap = null;
+  const listen = (_s, _c, _o, onSnap) => { snap = onSnap; return () => {}; };
+  let gate; const slow = new Promise(r => { gate = r; });
+  const hub = createSyncHub({ openStore, listen, fetchOne: async () => { await slow; return doc(1); }, now: () => T0 + H, grace: 0, bin: null });
+  let last = [];
+  const off = hub.watch(S, 'items', l => { last = l; });
+  await settle();
+  snap({ changes: [{ type: 'added', id: 'a', doc: doc(0) }], fromCache: false, hasPendingWrites: false, full: true, docs: [doc(0)] }); await settle();
+  snap({ changes: [{ type: 'removed', id: 'a', doc: null }], fromCache: true, hasPendingWrites: false }); await settle();
+  snap({ changes: [{ type: 'modified', id: 'a', doc: doc(2) }], fromCache: false, hasPendingWrites: false }); await settle();
+  gate(); await settle(20); await hub.flush();
+  assert.equal(last.find(d => d.id === 'a')?.v, 2, 'the older read does not win');
   off(); await hub.stopAll(); await wipeStores();
 });

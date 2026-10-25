@@ -16,12 +16,12 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 
 ## 1.3.3 (2026-10-26)
 
-Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is two lines
+Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is three lines
 in `src/sync.js` (the collection engine).
 
 - **A check read never replaces a newer copy**: a record that left a query without a known deletion is read once to see
   whether it still exists; if a snapshot brought a newer copy of it while that read was out, the older answer replaced
-  the newer one in the lists and the device copy. The read is now ignored when the copy held is newer.
+  the newer one in the lists and the device copy. The read is now ignored when a snapshot changed the record while it was out.
 
 ## 1.3.2 (2026-10-26)
 
