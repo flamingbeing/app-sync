@@ -15,4 +15,4 @@ import { createReport as createReportOf } from './src/report.js';
 export { buildReport, errorCode, REPORT_ENDPOINT, REPORT_EVERY, UNCONFIRMED_MS, MAX_CODES } from './src/report.js';
 // the nothing-lost report, with this engine's version filled in
 export const createReport = options => createReportOf({ sync: VERSION, ...options });
-export const VERSION = '0.6.0';
+export const VERSION = '0.6.1';

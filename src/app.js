@@ -159,10 +159,17 @@ export function createApp(options = {}) {
     } catch (e) { console.warn('network restart', e?.code || e?.message); } finally { cycling = false; }
   }
 
-  // refused saves: told once each, and set aside when the app says so
-  const told = new Set();
+  // refused saves: told once each, and set aside when the app says so. A delete made on this page, once done, leaves
+  // the device copy too: its bin entry may have come while the delete was still being sent, when the engine keeps a
+  // record with unsent saves, and a delta listener never hears the record go (0.6.1)
+  const told = new Set(), deleting = new Set();
   queue.onChange(() => {
     for (const x of queue.entries()) {
+      if (x.record?._deleted && x.state !== 'synced' && x.state !== 'archived') deleting.add(x.key);
+      else if (deleting.has(x.key) && x.state === 'synced') {
+        deleting.delete(x.key);
+        if (queue.jobKey(x.kind, x.record.id) === x.key) void hub.drop(x.owner, collOf(x.kind), [x.record.id]);
+      }
       if (x.state !== 'failed' || told.has(x.key) || !onRefused) continue;
       told.add(x.key);
       let answer;
@@ -239,7 +246,7 @@ export function createApp(options = {}) {
       },
     });
     if (!r.wiped) { stopWatches(); startWatches(); return { ok: false, reason, reload: false, failed: r.failed }; }
-    stopWatches(); watches.clear(); scope = ''; heard = false; told.clear(); codes.clear(); claimsAsked = '';
+    stopWatches(); watches.clear(); scope = ''; heard = false; told.clear(); deleting.clear(); codes.clear(); claimsAsked = '';
     if (clear) loaded = null;   // (the SDK instance was terminated: the page starts again)
     await s.A.signOut(s.auth);
     current = null;

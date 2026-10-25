@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { checkWrite } from '../src/conflict.js';
 import { fakeServer } from './fake-server.mjs';
+import { createFirestoreBackend } from '../src/firestore.js';
+import { memOutbox as sharedOutbox, sharedSdk } from './fake-sdk.mjs';
 
 const settle = (ms = 5) => new Promise(r => setTimeout(r, ms));
 const until = async (ok, ms = 2000) => { const end = Date.now() + ms; while (!ok()) { if (Date.now() > end) return false; await settle(5); } return true; };
@@ -334,4 +336,31 @@ test('watchdog: a listener stuck on the device copy while online is replaced, an
   stuck = false; srv.set('items', { id: 'w', text: 'Fake', updatedAt: Date.now() });
   assert.ok(await until(() => list.some(d => d.id === 'w')));
   assert.ok(app.relistens() >= 1);
+});
+
+// 0.6.1, found by the model test (test/model.test.mjs): the delete's bin entry came while the delete was still being
+// sent, so the engine kept the record (unsent saves), and a delta listener never hears an old record go
+test('a record deleted on this device leaves its list once the delete is done, though its bin entry came while it was sent', async () => {
+  const S = 'fake-space', srv = fakeServer(), shared = sharedSdk({ srv });
+  shared.meddle(`spaces/${S}/tasks/t1`, { id: 't1', text: 'Fake task', updatedAt: 1 });
+  const backend = createFirestoreBackend({ sdk: shared.device().sdk, path: (s, c) => ['spaces', s, c],
+    onCommit: ({ before, after, at }) => before && !after ? [{ path: ['spaces', S, 'bin', 'task:' + before.id], data: { id: 'task:' + before.id, kind: 'task', data: before, deletedAt: at } }] : [] });
+  const user = fakeUser(), auth = { currentUser: user };
+  const A = { onAuthStateChanged: (_a, cb) => { cb(user); return () => {}; } };
+  const app = createApp({ name: uniq(), colls: ['tasks'], kinds: { task: 'tasks' }, path: (s, c) => ['spaces', s, c], sdk: async () => ({ A, F: {}, auth, db: {} }),
+    adapter: { listen: srv.listen, fetchOne: srv.fetchOne, commit: (...a) => backend.commit(...a), clearCache: async () => {} },
+    outbox: sharedOutbox(), storage: null, win: null, watchEvery: 0, nav: fakeNav(), queue: { delay: ms => settle(ms === 180 ? 5 : 10) }, hub: { grace: 0 } });
+  await app.open(S);
+  let view = [];
+  app.watch(S, 'tasks', l => { view = l; });
+  await settle(30);
+  await app.hub.stopAll();   // opened again: the listener now reads only what changed since (not the old record)
+  app.watch(S, 'tasks', l => { view = l; });
+  await settle(30);
+  assert.deepEqual(view.map(x => x.id), ['t1']);
+  await app.save('task', S, { id: 't1', text: 'Fake task', _deleted: true }, { id: 't1', text: 'Fake task' });
+  assert.equal(await app.flush(2000), true);
+  assert.ok(await until(() => view.length === 0), 'the deleted record left the list');
+  assert.equal(shared.docs.has(`spaces/${S}/tasks/t1`), false);
+  await app.hub.stopAll();
 });
