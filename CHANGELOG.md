@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 (2026-10-25)
+
+Two adapter calls, so apps stop reaching past the adapter for them. Nothing changes for 0.5.0 callers. Tests:
+`test/create.test.mjs` (failed before) and the emulator test.
+
+- Adapter `create(scope, coll, record)`: a new record written without a read inside the transaction, for rules that
+  can't answer a read of a document that isn't there yet. A copy already on the server (an earlier send whose answer
+  was lost) is returned and nothing is written; a refused read counts as not there; a write refused with
+  `permission-denied` looks again and returns the copy if that earlier send landed. Stamped as `commit` stamps
+  (`serverAt` too in server mode); offline it throws `unavailable`, so the queue keeps the save.
+- Adapter `existing(scope, coll, ids)`: the ids the server has, 30 a query and four queries at once, from the server
+  only (throws offline), reads counted as billed. For a restore that adds only what is missing.
+
 ## 0.5.0 (2026-10-25)
 
 Nothing-lost report, opt-in. Nothing changes for callers that leave `report` out. Tests: `test/report.test.mjs`

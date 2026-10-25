@@ -16,6 +16,7 @@
 1. A multi-device soak test (offline devices, same-record edits, skewed clocks) in real browsers.
 
 ## Recently done
+- 2026-10-25: 0.5.1 adapter `create` (no read in the transaction) and `existing` (ids the server has), for apmes evals and the logbook restore.
 - 2026-10-25: 0.4.1 fault-injection tests and the tombstone fix (see CHANGELOG).
 - 2026-10-25: 0.4.0 safety pack and update 0.2.0 (see CHANGELOG).
 - 2026-10-24: 0.3.0 server-stamp mode, leave feeds and the hourly re-plan (see CHANGELOG).
