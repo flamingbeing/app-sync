@@ -8,6 +8,7 @@ import { createFirestoreBackend } from '../src/firestore.js';
 import { createSyncHub, leaveEntry } from '../src/sync.js';
 import { createWriteQueue, watchSaved } from '../src/writes.js';
 import { createStores } from '../src/store.js';
+import { resolvedRecord, mergeFields, pathOf } from '../src/conflict.js';
 
 const HOST = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8085').split(':');
 const settle = (ms = 300) => new Promise(r => setTimeout(r, ms));
@@ -323,6 +324,33 @@ assert.deepEqual([...have].sort(), Array.from({ length: 40 }, (_, i) => 'm' + (i
   assert.equal(e.code, 'write-conflict'); assert.deepEqual(e.fields, ['place']); assert.equal(e.remote.place, 'Fridge');
   assert.equal((await H1.backend.fetchOne(SH, 'stock', 's1')).place, 'Fridge', 'held: nothing overwritten');
   await Promise.all([H1, H2].map(d => F.terminate(d.db)));
+}
+
+// ---- 0.7.4: a held clash under a map keyed by an email (a '.' inside a key), whole record and merge collection ----
+{
+  const EMAIL = 'a.b@example.test';
+  for (const merge of [{}, { people: true }]) {
+    const tag = merge.people ? 'merge' : 'held';
+    const dev = name => {
+      const app = initializeApp({ projectId: 'demo-app-sync', apiKey: 'fake-key' }, 'dotted-' + tag + '-' + name);
+      const db = F.getFirestore(app);
+      F.connectFirestoreEmulator(db, HOST[0], Number(HOST[1]));
+      return { db, backend: createFirestoreBackend({ sdk: async () => ({ db, F }), path: (scope, coll) => ['spaces', scope, coll], merge,
+        held: { people: true }, mark: '_saves', edits: '_edits', editor: () => ({ by: 'Fake Person', device: name }) }) };
+    };
+    const D1 = dev('d1'), D2 = dev('d2'), SD = S + '-dotted-' + tag;
+    const base = await D1.backend.commit(SD, 'people', { id: 'p1', names: { [EMAIL]: 'Fake', 'c@x': 'Other' } }, null, { key: 'd0' });
+    const was = { id: 'p1', names: { [EMAIL]: 'Fake', 'c@x': 'Other' } };
+    await D1.backend.commit(SD, 'people', { ...was, names: { ...was.names, [EMAIL]: 'Fake A' } }, base, { key: 'd1' });
+    const mine = { ...was, names: { ...was.names, [EMAIL]: 'Fake B' }, title: 'Fake B' };
+    const e = await D2.backend.commit(SD, 'people', mine, base, { key: 'd2' }).catch(x => x);
+    assert.equal(e.code, 'write-conflict', tag); assert.deepEqual(e.fields, [pathOf(['names', EMAIL])], tag);
+    const theirs = resolvedRecord({ record: mine, base, remote: e.remote }, 'theirs', merge.people ? { merge: mergeFields } : {});
+    await D2.backend.commit(SD, 'people', theirs, e.remote, { key: 'd3' });
+    const now = await D1.backend.fetchOne(SD, 'people', 'p1');
+    assert.deepEqual([now.names, now.title, now._edits.names.device], [{ [EMAIL]: 'Fake A', 'c@x': 'Other' }, 'Fake B', 'd1'], tag);
+    await Promise.all([D1, D2].map(d => F.terminate(d.db)));
+  }
 }
 
 await Promise.all([A, B, OLD].map(d => F.terminate(d.db)));

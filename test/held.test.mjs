@@ -4,7 +4,7 @@
 // status chip, and the report's counts by kind. Made-up data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeHeld, clashingFields, whenText, describeConflict, resolvedRecord, mergeClashes } from '../src/conflict.js';
+import { mergeHeld, mergeFields, clashingFields, whenText, describeConflict, resolvedRecord, mergeClashes, pathOf as fieldPath, keysOf } from '../src/conflict.js';
 import { createFirestoreBackend } from '../src/firestore.js';
 import { createApp } from '../src/app.js';
 import { buildReport } from '../src/report.js';
@@ -349,6 +349,63 @@ test('two phones, merge collection: increments both land; a set clash is held on
   assert.deepEqual([end.place, end.title, end.count], ['Fridge', 'Fake B', 4], 'theirs kept, my other set and my later increment land once');
   assert.equal(b.app.conflicts().length, 0);
   await until(() => a.shown('n1')?.count === 4);
+});
+
+// ---- fix 0.7.4: a map keyed by something with '.' in it (an email) ----
+
+const EMAIL = 'a.b@example.test', P = 'names.a\\.b@example\\.test';
+
+test('fix 0.7.4: a clash under a dotted key is one path, escaped; describe shows its values and resolve writes it there', () => {
+  const base = { id: 'r1', names: { [EMAIL]: 'Fake', 'c@x': 'Other' } };
+  const remote = { ...base, names: { ...base.names, [EMAIL]: 'Fake A' }, updatedAt: 5 };
+  const record = { ...base, names: { ...base.names, [EMAIL]: 'Fake B' } };
+  assert.deepEqual(clashingFields(remote, record, base), [P]);
+  const d = describeConflict({ record, base, remote, at: 1 });
+  assert.deepEqual(d.fields.map(f => [f.path, f.keys, f.mine.value, f.theirs.value]), [[P, ['names', EMAIL], 'Fake B', 'Fake A']]);
+  for (const choice of ['theirs', { [P]: 'theirs' }]) {
+    const out = resolvedRecord({ record, base, remote }, choice);
+    assert.deepEqual(out.names, { [EMAIL]: 'Fake A', 'c@x': 'Other' }, 'no nested junk keys');
+  }
+  assert.deepEqual(resolvedRecord({ record, base, remote }, { [P]: 'mine' }).names, { [EMAIL]: 'Fake B', 'c@x': 'Other' });
+  // a merge collection: the same, through the merge function
+  const opts = { merge: mergeFields };
+  assert.deepEqual(describeConflict({ record, base, remote, at: 1 }, opts).fields.map(f => [f.path, f.mine.value, f.theirs.value]), [[P, 'Fake B', 'Fake A']]);
+  assert.deepEqual(resolvedRecord({ record, base, remote }, 'theirs', opts).names, { [EMAIL]: 'Fake A', 'c@x': 'Other' });
+  assert.deepEqual(resolvedRecord({ record, base, remote }, { [P]: 'mine' }, opts).names, { [EMAIL]: 'Fake B', 'c@x': 'Other' });
+  assert.deepEqual(mergeClashes(remote, record, record, base), [P]);
+});
+
+test('fix 0.7.4: pathOf and keysOf round-trip keys with dots and backslashes; plain paths read as before', () => {
+  for (const keys of [['title'], ['names', EMAIL], ['a\\b', 'c.d.', '.'], ['x', '']]) assert.deepEqual(keysOf(fieldPath(keys)), keys);
+  assert.equal(fieldPath(['names', EMAIL]), P);
+  assert.deepEqual(keysOf('place.shelf'), ['place', 'shelf']);
+});
+
+test('fix 0.7.4: two phones, a dotted key held (whole record and merge collection): popup values right, theirs and mine land in place', async () => {
+  for (const opts of [undefined, { held: { notes: true }, merge: { notes: true } }]) {
+    const { shared, a, b } = await twoPhones(opts);
+    const base0 = strip(a.shown('n1'));
+    await a.app.save('note', S, { ...base0, names: { [EMAIL]: 'Fake', 'c@x': 'Other' } }, base0);
+    await a.app.flush(2000);
+    await until(() => b.shown('n1')?.names);
+    const base = strip(b.shown('n1'));
+    a.offline(); b.offline();
+    await a.app.save('note', S, { ...base, names: { ...base.names, [EMAIL]: 'Fake A' } }, base).catch(() => {});
+    await b.app.save('note', S, { ...base, names: { ...base.names, [EMAIL]: 'Fake B' }, title: 'Fake B' }, base).catch(() => {});
+    a.onlineAgain(); await a.app.flush(2000);
+    b.onlineAgain(); await b.app.flush(2000);
+    await until(() => b.app.conflicts().length === 1);
+    const [c] = b.app.conflicts();
+    const d = b.app.describe(c.key);
+    assert.deepEqual(d.fields.map(f => [f.path, f.keys, f.mine.value, f.theirs.value, f.theirs.device]), [[P, ['names', EMAIL], 'Fake B', 'Fake A', 'Phone A']], opts ? 'merge' : 'held');
+    await b.app.resolve(c.key, 'theirs');
+    await b.app.flush(2000);
+    await until(() => b.app.conflicts().length === 0);
+    const doc = shared.docs.get(pathOf('notes', 'n1'));
+    assert.deepEqual([doc.names, doc.title], [{ [EMAIL]: 'Fake A', 'c@x': 'Other' }, 'Fake B']);
+    assert.equal(doc.names.a, undefined, 'no nested junk keys');
+    assert.equal(doc._edits.names.device, 'Phone A', '_edits keys stay top-level field names');
+  }
 });
 
 // ---- the report ----

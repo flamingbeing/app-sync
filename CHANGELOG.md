@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.4 (2026-10-25)
+
+Fix: held conflicts on a map keyed by something with a '.' in it (an email: `names['a.b@example.com']`). A clash's
+path joined its keys with '.' and was split on '.' again, so `describe()` showed the wrong values (nothing) and
+`resolve` with theirs on a merge collection wrote junk nested keys (`names.a.{ b@example: { com } }`). Tests:
+`test/held.test.mjs` (+3), `test/model.test.mjs` (dotted keys in tasks and in the merge collection's own fields,
+answers per field).
+
+- A path now has a backslash before each '.' or backslash inside a key: `names.a\.b@example\.com`. Paths whose keys
+  have neither read exactly as before, so `describe` / `resolve` / `error.fields` keep their shape; an app that
+  builds a path itself for a dotted key (a choice object, `held` counters) escapes it with `pathOf`.
+- `describe()` fields also carry `keys` (the path as its keys, for labels); `pathOf(keys)` and `keysOf(path)` are
+  exported.
+- Unchanged: `_edits` keys are top-level field names, stored as they are (a dotted top-level name included).
+- Documented, unchanged: `conflicts()` lists each record's first held save (its key is the one describe/resolve
+  take); the newest save behind it is "mine".
+
 ## 0.7.3 (2026-10-25)
 
 createApp gaps found moving apps onto it. Additive, except `flush()`, which now keeps to its time and answers truly.
