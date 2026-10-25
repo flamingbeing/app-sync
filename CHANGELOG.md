@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.4 (2026-10-25)
+
+Additive: nothing changes for an app that doesn't call the new helper. Tests: `test/cache.test.mjs` (47, with seeds).
+
+- `src/cache.js firestoreCache(F, { app, settings, report, storage })`: the SDK's offline cache for this device,
+  multi-tab first, stepping down to one tab and then memory on the quota or "Unexpected state" error, remembered per
+  device, with report codes `cache-quota`, `cache-state`, `cache-single`, `cache-memory`. Also `cacheFailure`.
+- README: what the listener watchdog covers (silent stalls) and does not (SDK #8696, #8305).
+
 ## 0.6.3 (2026-10-25)
 
 Held conflicts by field, opt-in (`backend: { held }`); nothing changes for an app that doesn't set it. Tests:
