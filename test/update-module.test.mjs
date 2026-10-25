@@ -108,3 +108,10 @@ test('update: checkNow: false when the new one waits (unsent saves) past wait; i
   await a.update.retryUpdate();
   assert.equal(f.reg.waiting, null, 'its go once the saves were sent');
 });
+
+test('update: a save made while the app\'s canReload is answering still holds the reload (review)', async () => {
+  const f = fakeCore(), data = fakeData();
+  const { app } = make(f, { canReload: async () => { data.unsent(1); return true; } }, data);
+  await app.ready; await settle();
+  assert.equal(await f.core.given.canReload(), false);
+});

@@ -55,7 +55,7 @@ await app.update.checkNow();                  // true once a new version took ov
 A module is `{ name, needs, start(ctx, deps) -> api, stop() }`: started in `needs` order, stopped in reverse; `deps`
 holds only the apis it needs. `ctx` is small and frozen: `name, module, config, sdk(), user(), on(event, fn),
 emit(event, data), storage(ns), status, report(fact), ready` (every module started). Events: `signin { user }`, `signout { user }` (data kept),
-`switch { from, to }` (another account: the old data is wiped after `auth({ beforeSwitch })`), `forget { user }`.
+`switch { from, to }` (another account: the old data is wiped after `auth({ beforeSwitch })`), `forget { user, force }`.
 Another account's sign-in is refused while the last one has unsent saves (also one made during `beforeSwitch`) or
 when a module's wipe throws (the next sign-in tries again); `app.auth.blocked()` says which. Each tab switches its
 own data, even after another tab switched first. `sync` has the one-object `createApp`'s sync api (open, watch,

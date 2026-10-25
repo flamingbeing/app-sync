@@ -10,7 +10,7 @@
 //   changes; stopped at sign-out. A failure changes nothing (the rules fall back to reading the role doc).
 //   beforeSwitch({ from, to }): the app's own step before another account's sign-in wipes the last one's data.
 //   popupOnly, redirectFirst: as createApp's (a popup only; redirect first, default in an installed app).
-// events (ctx.emit): signin { user } | signout { user } | switch { from, to } | forget { user }
+// events (ctx.emit): signin { user } | signout { user } | switch { from, to } | forget { user, force }
 //   The account whose data the device holds (its owner) is kept in ctx.storage(): `<name>:auth/owner` = { uid,
 //   email } (FORMATS.md). Another account signing in (a sign-in here, another tab, a reload) is a switch: the app's
 //   beforeSwitch, then switch (the modules wipe the old data), then signin. While the old account has unsent saves
@@ -177,7 +177,7 @@ export function auth(options = {}) {
     if (!force && unsent() > 0) return { ok: false, reason: 'unsent', failed };   // (a save made during the app's step)
     const user = current ? { uid: current.uid, email: current.email } : owner();
     if (x?.auth.currentUser) { await x.A.signOut(x.auth); await chain; }
-    failed.push(...await ctx.emit('forget', { user }));
+    failed.push(...await ctx.emit('forget', { user, force }));
     store.remove('owner');
     held = null;
     blocked = null;

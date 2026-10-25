@@ -27,12 +27,15 @@ formats only gain one key (FORMATS.md). Tests: `test/modules.test.mjs` (new: the
   `scope(user)` opens the account's scope at each sign-in. Sign-out keeps the device copy, the outbox and the watches,
   and nothing sends until the same account is back (then its kept saves send at once); a switch or `forget()` wipes
   the last account's device copy, outbox (in every outbox on the origin) and the SDK's cache, and throws when that
-  fails (the auth module then refuses the switch). After a wipe cleared the SDK's cache the page reloads (`reload`
+  fails (the auth module then refuses the switch), or while that account has unsent saves anywhere on the device
+  (this tab, another tab's in the shared outbox, another app's on the origin: the one-object sign-out check; reason
+  `'wipe'`; `forget({ force })` wipes anyway, the `forget` event now carries `force`). A save counts as unsent in the
+  status from the moment it is made. After a wipe cleared the SDK's cache the page reloads (`reload`
   option): after a switch at the new account's sign-in, after `forget()` straight away. The scope last opened is kept
   (`<name>:sync/scope`), so a reload, signed out, still counts its unsent saves and a switch waits for them.
 - **`update.js`** (new entry): `update({ register, app, sw, every, canReload, beforeReload, retryOn })` wraps the update
   core's page side (register.js, passed in; the update module still releases on its own). The take-over reload and
-  `forceLatest()` wait while any module has unsent saves, as well as for the app's `canReload`; `retryOn` names events
+  `forceLatest()` wait while any module has unsent saves, as well as for the app's `canReload` (checked again after it); `retryOn` names events
   after which the owed reload is tried again; `checkNow({ wait })` looks for a new version now and resolves true once it
   takes over, false when none is found or it is still held. The worker is registered after start (app.ready never
   waits on the network).

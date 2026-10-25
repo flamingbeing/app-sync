@@ -16,7 +16,8 @@
 //     carry on at its next sign-in). The status still counts the unsent saves of the scope last opened.
 //   switch, forget: the last account's device copy, outbox (in every registered outbox on the origin) and the SDK's
 //     cache are wiped, then forget.extra(); the watches end. A wipe that fails throws (the auth module then refuses
-//     the switch: the old account's data stays and so does its owner).
+//     the switch: the old account's data stays and so does its owner), and so does one while that account has unsent
+//     saves anywhere on the device (this tab, another tab, another app on the origin; forget({ force }) wipes anyway).
 // The scope last opened is kept in ctx.storage(): `<name>:sync/scope` (FORMATS.md), so a reload, signed out, still
 // counts its unsent saves (the auth module refuses a switch while there are any) and a switch wipes the right outbox.
 // -> api: open, watch, watchDoc, save, flush, track, conflicts, describe, resolve, reconnect, nudge, status$, facts,
@@ -74,10 +75,16 @@ export function sync(options = {}) {
       const open = async s => { store.set('scope', s); await api.open(s); tell(); };
       // the last account's data: its outbox (the scope last opened; no sending: the queue's owner is not the open one),
       // the device copy and the SDK's cache, then the app's own lists
-      const wipe = async () => {
+      // unless forced: refused (throws) while anything of that account is unsent, here, in another tab (the shared
+      // outbox) or in another app on the origin: the sign-out check of the one-object createApp (queue.flush())
+      /** @param {boolean} force */
+      const wipe = async force => {
         const last = store.get('scope') || '';
         c.close();
-        if (last) void c.queue.activate(last);
+        if (last) {
+          await c.queue.activate(last);
+          if (!force && (c.saving.size || !(await c.queue.flush(0)))) { tell(); throw new Error('sync: unsent saves, nothing wiped'); }
+        }
         let s = null;
         try { s = await ctx.sdk(); } catch (e) { console.warn('sync: no SDK for the wipe', /** @type {any} */ (e)?.message); }
         const clear = s && !s.emulator && c.adapter.clearCache ? () => c.adapter.clearCache() : null;
@@ -96,10 +103,13 @@ export function sync(options = {}) {
           c.startWatches(); tell();
         }),
         ctx.on('signout', async () => { const last = c.scope() || store.get('scope') || ''; c.close(); await countStored(last); }),
-        ctx.on('switch', async () => { owed = await wipe(); }),
-        ctx.on('forget', async () => { if (await wipe()) setTimeout(reload, 0); }),
+        ctx.on('switch', async () => { owed = await wipe(false); }),
+        ctx.on('forget', async ({ force }) => { if (await wipe(!!force)) setTimeout(reload, 0); }),
       );
-      return { ...api, open };
+      // (a save counts as unsent from the moment it is made, before it is stored)
+      /** @type {typeof api.save} */
+      const save = (...a) => { const p = api.save(...a); tell(); p.then(tell, tell); return p; };
+      return { ...api, open, save };
     },
     async stop() {
       stopped = true;

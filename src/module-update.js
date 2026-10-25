@@ -29,7 +29,8 @@ export function update(options = {}) {
     name: 'update', needs: [],
     start(ctx) {
       // the reload waits for the app's own answer and for every module's unsent saves
-      const allows = async () => ctx.status.get().unsent === 0 && (!canReload || !!(await canReload()));
+      const none = () => ctx.status.get().unsent === 0;
+      const allows = async () => none() && (!canReload || !!(await canReload())) && none();   // (again: a save made meanwhile)
       /** @type {Promise<any>} */
       const reg = Promise.resolve()
         .then(() => core.register({ ...rest, canReload: allows }))

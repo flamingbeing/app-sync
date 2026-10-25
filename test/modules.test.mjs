@@ -105,3 +105,29 @@ test('sync module: signed out after a reload, the stored unsent saves still refu
   assert.ok(await until(() => b.reloads.length === 1), 'the cache was cleared: the page starts again');
   await b.app.stop();
 });
+
+test('sync module: another tab\'s unsent save in the shared outbox refuses the switch (the wipe would delete it) (review)', async () => {
+  const name = 'modtest-tabs-' + Date.now(), records = new Map(), srv = fakeServer();
+  const outbox = () => memOutbox(name + '-outbox', 'default', records);
+  const b = await modulesApp({ name, srv, nav: fakeNav({ online: false }), outbox: outbox() });
+  await b.app.auth.signIn();
+  const a = await modulesApp({ name, srv, nav: fakeNav({ online: false }), outbox: outbox() });   // (another tab)
+  await a.app.auth.signIn();
+  await a.app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake from the other tab' });
+  assert.equal(records.size, 1);
+  b.sdk.next = fakeUser({ uid: 'u2', email: 'other.fake@example.test' });
+  const r = await b.app.auth.signIn();
+  assert.equal(r.ok, false, 'refused');
+  assert.equal(records.size, 1, 'the other tab\'s save is still there');
+  await a.app.stop(); await b.app.stop();
+});
+
+test('sync module: a save counts as unsent in the app\'s status from the moment it is made (review)', async () => {
+  const t = await modulesApp({ nav: fakeNav({ online: false }) });
+  await t.app.auth.signIn();
+  let st = null; const off = t.app.status$(x => { st = x; });
+  const p = t.app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake' });
+  assert.equal(st.unsent, 1, 'before it is stored');
+  await p; off();
+  await t.app.stop();
+});
