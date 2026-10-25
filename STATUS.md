@@ -16,6 +16,7 @@
 1. A multi-device soak test (offline devices, same-record edits, skewed clocks) in real browsers.
 
 ## Recently done
+- 2026-10-25: 0.6.3 held conflicts by field, opt-in (`backend: { held, edits }`): different fields merge, same value asks nothing, counters add up, a same-field clash is held on the phone that sent it second with a side-by-side popup (`conflicts`, `describe`, `resolve`); report counts held saves by kind (Worker too).
 - 2026-10-25: 0.6.1 model-based multi-device tests (`test/model.test.mjs`, seeded) and the fix they found: a record deleted on this device left its list only at the weekly full read.
 - 2026-10-25: 0.6.0 `createApp` (the safe path in one call), with the unreleased 0.5.2 fixes folded in: `watchSaved` (the server's copy heard while a save was sent shows once it is done) and one report per page hide (see CHANGELOG).
 - 2026-10-25: 0.5.1 adapter `create` (no read in the transaction) and `existing` (ids the server has), for apmes evals and the logbook restore.
@@ -27,6 +28,7 @@
 - 2026-10-24: repo created; 0.1.0 extracted with five fixes (see CHANGELOG).
 
 ## Decisions (dated, one line each)
+- 2026-10-25: held conflicts are opt-in per app (`backend.held`), switched on at each app's bump; a held save lives only on the phone that sent it second, so only that phone answers (no shared marker on the server).
 - 2026-10-25: 0.4.0 keeps every 0.3.0 call working; the stamp rule (`max(now, prev + 1)`) is a fix, so it applies by default (an app's own `stamp` function is untouched).
 - 2026-10-24: server stamps are a new field (`serverAt`) beside `updatedAt`, opt-in; writers switch first, readers after the backfill and the rules.
 - 2026-10-24: the update module lives in this repo under `update/` with its own tags (`update-vX.Y.Z`), lock and path; sync code and its tags are untouched.

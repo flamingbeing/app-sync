@@ -29,7 +29,19 @@
 //   watchEvery: ms between watchdog checks (0: only on nudge()).
 //   popupOnly: sign in with the popup only, never a redirect (0.6.2): for a page served from another domain than the
 //   auth domain, where a redirect sign-in can't finish; a blocked popup throws to the caller (ask for a tap).
-// -> { signIn, signOut, onUser, user, open, watch, save, flush, status$, refreshClaims, nudge, relistens, hub, queue, parts }
+//   device: this device's name as people know it ('Ward phone'), shown in conflict popups with held conflicts (0.6.3).
+//   Held conflicts (0.6.3, opt-in): backend: { held, edits, mark } (firestore.js). A same-field clash holds the save
+//   on the phone that made it, and only there: the server never has it, so other phones have nothing to answer (and
+//   two phones can't choose different versions); the held phone's status$ says attention until it is answered.
+// -> { signIn, signOut, onUser, user, open, watch, save, flush, status$, refreshClaims, nudge, relistens, conflicts,
+//      describe, resolve, hub, queue, parts }
+//   conflicts(kind?) -> this device's held saves, one per record: [{ key, kind, id, at }] (key: for describe/resolve).
+//   describe(key, { timeZone }) -> what the popup shows, side by side (conflict.js describeConflict): the clashing
+//   fields, each with this device's value and the server's, when each changed (SGT by default) and who (signed-in
+//   name, device). null when that save is no longer held.
+//   resolve(key, choice) -> the saved version: choice 'mine' | 'theirs' | { [path]: 'mine' | 'theirs' } (a field not
+//   named stays theirs); this device's changes that don't clash are kept either way (conflict.js resolvedRecord), then
+//   saved over the server's copy (queue.restore). Nothing is overwritten without this answer.
 //   signOut({ wait }) -> { ok, reason: 'unsent' | 'changed', reload, failed }: refuses while anything is unsent (this
 //   app's, another tab's, another registered app's on this origin), then forgets the device and signs out.
 import { createSyncHub, replanOnWake } from './sync.js';
@@ -41,6 +53,7 @@ import { createWatchdog } from './watchdog.js';
 import { persistGuard } from './persist.js';
 import { syncStatus, attentionCount } from './status.js';
 import { forgetDevice } from './forget.js';
+import { describeConflict, resolvedRecord } from './conflict.js';
 import { createFirestoreBackend } from './firestore.js';
 
 const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported', 'auth/cancelled-popup-request'];
@@ -63,7 +76,8 @@ export function createApp(options = {}) {
   const collOf = kind => kinds[kind] || kind;
   const kindOf = coll => Object.keys(kinds).find(k => kinds[k] === coll) || coll;
   const online = () => nav?.onLine !== false;
-  const engineFields = [backendOptions.mark || '_saves', backendOptions.serverField || 'serverAt'];
+  const engineFields = [backendOptions.mark || '_saves', backendOptions.serverField || 'serverAt', ...(backendOptions.edits ? [backendOptions.edits] : [])];
+  const heldOn = !!backendOptions.held, device = String(options.device || '');
   const strip = d => { if (!d || !engineFields.some(f => f in d)) return d; const out = { ...d }; for (const f of engineFields) delete out[f]; return out; };
 
   // the SDK, once a page (every caller shares one promise; a failed load is tried again next time)
@@ -84,7 +98,8 @@ export function createApp(options = {}) {
   const meta = new Set();
   const adapter = options.adapter || createFirestoreBackend({
     sdk: async () => { const { F, db } = await load(); return { F, db }; }, path,
-    onSnapshotMeta: (coll, m) => { for (const fn of meta) fn(coll, m); }, ...backendOptions,
+    onSnapshotMeta: (coll, m) => { for (const fn of meta) fn(coll, m); },
+    editor: () => ({ by: current?.name || current?.email || '', device }), ...backendOptions,
   });
   const stores = createStores({ prefix: name + '-sync:', colls, ...options.stores });
   let registry = null;
@@ -93,7 +108,7 @@ export function createApp(options = {}) {
   let scope = '';
   const codes = new Map();   // a failed save's code, by its key (the queue keeps the message only)
   const queue = createWriteQueue({
-    store: outbox, getOwner: () => scope || null, online, registry, report, ...options.queue,
+    store: outbox, getOwner: () => scope || null, online, registry, report, ...(heldOn ? { ignore: engineFields } : {}), ...options.queue,
     backend: async (owner, kind, record, base, extra) => {
       try { return await (commit ? commit(owner, kind, record, base, extra) : adapter.commit(owner, collOf(kind), record, base, extra)); }
       catch (e) { if (extra?.key) codes.set(extra.key, e?.code || ''); throw e; }
@@ -256,10 +271,42 @@ export function createApp(options = {}) {
     return { ok: true, reason: '', reload: !!clear, failed: r.failed };
   }
 
+  // held conflicts (0.6.3): this device's own, one per record (the first held save; later ones on this device's own
+  // version wait behind it, and the newest of them is "mine")
+  const heldOf = key => {
+    const all = queue.entries().reverse(), first = all.find(x => x.key === key && x.state === 'conflict');
+    if (!first) return null;
+    const chain = all.filter(x => x.kind === first.kind && x.record.id === first.record.id && x.state === 'conflict');
+    return { first, held: { record: chain.at(-1).record, base: first.base ?? null, remote: first.remote ?? null, at: chain.at(-1).at } };
+  };
+  const countersOf = kind => { const h = backendOptions.held, c = h && h !== true ? h[collOf(kind)] : null; return c && c !== true ? c.counters || [] : []; };
+  const skip = [...engineFields, backendOptions.field || 'updatedAt'];
+  function conflicts(kind = '') {
+    const seen = new Set(), out = [];
+    for (const x of queue.entries().reverse()) {
+      const k = x.kind + ':' + x.record.id;
+      if (x.state !== 'conflict' || (kind && x.kind !== kind) || seen.has(k)) continue;
+      seen.add(k); out.push({ key: x.key, kind: x.kind, id: x.record.id, at: x.at });
+    }
+    return out;
+  }
+  function describe(key, { timeZone } = {}) {
+    const h = heldOf(key);
+    if (!h) return null;
+    return { key, kind: h.first.kind, id: h.first.record.id, ...describeConflict(h.held, { counters: countersOf(h.first.kind), skip, edits: backendOptions.edits || null, me: { by: current?.name || current?.email || '', device }, timeZone }) };
+  }
+  async function resolve(key, choice) {
+    const h = heldOf(key);
+    if (!h) throw new Error('This save is no longer waiting for a choice');
+    if (choice !== 'mine' && choice !== 'theirs' && (!choice || typeof choice !== 'object')) throw new Error("resolve: choice is 'mine', 'theirs' or { [field]: 'mine' | 'theirs' }");
+    const record = resolvedRecord(h.held, choice, { counters: countersOf(h.first.kind), skip });
+    return queue.restore(h.first.kind, h.first.owner, record);
+  }
+
   const nudge = (event = '') => { if (!watches.size) return false; const a = event ? watchdog.event() : watchdog.check(); return !!(a.relisten || a.cycle); };
   const parts = { hub, queue, stores, adapter, watchdog, registry, outbox };
   return {
     signIn, signOut, onUser, user: () => current, open, watch, save, flush, status$, refreshClaims, nudge,
-    relistens: () => relistens, hub, queue, parts,
+    relistens: () => relistens, conflicts, describe, resolve, hub, queue, parts,
   };
 }

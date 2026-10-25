@@ -23,6 +23,17 @@
 //   leaves it out (only the content and the usual stamp count). Rules can then require serverAt == request.time.
 //   writeId: false leaves the id field out of the document written (the id is the document's id; reads add it), for
 //   rules that whitelist fields without id.
+//   held (0.6.3, opt-in): true (every collection not in merge) or { [coll]: true | { counters: [field, …] } }: those
+//   collections are saved with held conflicts by field (conflict.js mergeHeld) instead of the whole-record check: a
+//   field changed only on this device, or only elsewhere, merges on its own; one changed on both sides to the same
+//   value is no conflict; counters take each device's change as an increment (they need mark, so a resend counts
+//   once); a field changed on both sides to different values throws { code: 'write-conflict', remote, fields } and the
+//   queue holds the save for the user (nothing is written, nothing overwritten). A delete meets any change made
+//   elsewhere as a conflict, and an edit of a record deleted elsewhere is one too (remote null), as with checkWrite.
+//   edits (0.6.3, opt-in, with held): a field name (e.g. '_edits'): each write also records who changed each top-level
+//   field and when, edits[field] = { by, device, at } (at: ms), for the conflict popup (conflict.js describeConflict).
+//   A data-shape change: rules that whitelist fields must allow it. editor() -> { by, device }: who this device's
+//   writes are by (createApp passes the signed-in name and its device option).
 //   onCommit({ scope, coll, before, after, at, fields, key, ops }) -> [{ path, data, merge } | { path, delete: true }]:
 //   more writes in the same transaction as a record's write (e.g. a leave entry with a lock, so no device ever sees
 //   one without the other). before: the server's copy (null: none); after: what is written (null: a delete); at: its
@@ -55,7 +66,7 @@
 //   SDK instance can't be used afterwards, so the app reloads (or builds a new one) before reading again. Clearing
 //   waits while another tab of the origin still uses the cache: after timeout ms it throws { code:
 //   'deadline-exceeded' } (the cache stays until those tabs close), so sign-out can go on and reload.
-import { checkWrite, mergeFields, recordSignature } from './conflict.js';
+import { checkWrite, mergeFields, mergeHeld, recordSignature } from './conflict.js';
 
 const plain = v => JSON.parse(JSON.stringify(v));
 
@@ -63,11 +74,13 @@ const MARKS = 20;
 export const CLEAR_TIMEOUT = 3000;   // ms clearCache waits for the offline cache to clear
 const timeOf = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;   // save keys kept on a merged record (mark)
 
-export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', writeId = true, onCommit = null, onSnapshotMeta = () => {}, onRead = () => {} }) {
+export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', writeId = true, held = false, edits = null, editor = null, onCommit = null, onSnapshotMeta = () => {}, onRead = () => {} }) {
   if (typeof sdk !== 'function' || typeof path !== 'function') throw new Error('createFirestoreBackend needs sdk and path');
   if (time !== 'ms' && time !== 'iso') throw new Error("createFirestoreBackend: time is 'ms' or 'iso'");
   if (stampMode !== 'client' && stampMode !== 'server') throw new Error("createFirestoreBackend: stampMode is 'client' or 'server'");
   const server = stampMode === 'server';
+  const heldOf = coll => { if (mergeOf(coll) || !held) return null; const h = held === true ? {} : Object.hasOwn(held, coll) && held[coll]; return h ? (h === true ? {} : h) : null; };
+  if (held && held !== true && Object.values(held).some(h => h?.counters?.length) && !mark) throw new Error('createFirestoreBackend: held counters need mark (a resend would count twice)');
   // server mode: the server's stamp as ms (a Timestamp; null while pending), never part of the conflict check
   const read = data => {
     if (!server || !data || !Object.hasOwn(data, serverField)) return data;
@@ -135,6 +148,8 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   async function commit(scope, coll, record, base, { key = '', ops } = {}) {
     const merging = mergeOf(coll);
     if (merging) return commitMerged(scope, coll, record, base, merging, key, ops);
+    const holding = heldOf(coll);
+    if (holding) return commitHeld(scope, coll, record, base, holding, key, ops);
     const deleted = record && record._deleted === true;
     const stamped = deleted ? { id: String(record.id), _deleted: true } : unstampServer(plain(stampDoc(plain(record), coll)));
     const canon = v => v ? canonical(coll, v) : null;
@@ -169,6 +184,46 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
       tx.set(ref, withServer(F, stored(merged)));
       extra(F, db, tx, { scope, coll, before: current, after: merged, key, ops });
       return merged;
+    });
+  }
+
+  // held conflicts by field (0.6.3): the server's copy now with this device's changes since base merged in; a field
+  // changed on both sides to different values is held for the user (mergeHeld throws), never overwritten
+  async function commitHeld(scope, coll, record, base, { counters = [] }, key, ops) {
+    const id = String(record.id), deleted = record._deleted === true;
+    const skip = [stampField, serverField, mark, edits].filter(Boolean);
+    const without = v => { if (!v) return null; const out = { ...v }; for (const f of skip) delete out[f]; return out; };
+    const bare = v => v ? canonical(coll, without(v)) : null;
+    const { db, F } = await sdk();
+    const ref = F.doc(colRef(db, F, scope, coll), id);
+    return F.runTransaction(db, async tx => {
+      const snap = await tx.get(ref);
+      const current = snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
+      if (mark && key && Array.isArray(current?.[mark]) && current[mark].includes(key)) return current;   // applied already
+      if (deleted) {
+        if (!checkWrite(bare(current), null, bare(base))) return { id, _deleted: true };
+        tx.delete(ref); extra(F, db, tx, { scope, coll, before: current, after: null, key, ops });
+        return { id, _deleted: true };
+      }
+      if (base && !current) { const e = new Error('This record was deleted elsewhere; both versions are kept'); e.code = 'write-conflict'; e.remote = null; e.fields = []; throw e; }
+      const was = without(plain(base)), rec = without(plain(record));
+      let merged;
+      try { merged = { ...mergeHeld(current ? without(plain(current)) : null, rec, was, { counters }), id }; }
+      catch (e) { if (e.code === 'write-conflict') e.remote = current; throw e; }   // (the whole copy: who changed what)
+      if (current && recordSignature(bare(current)) === recordSignature(bare(merged))) return current;   // nothing changed
+      const doc = forward(unstampServer(plain(stampDoc(merged, coll))), current);
+      if (mark) { if (key) doc[mark] = [...(Array.isArray(current?.[mark]) ? current[mark] : []), key].slice(-MARKS); else if (current?.[mark]) doc[mark] = current[mark]; }
+      if (edits) {
+        const who = (editor && editor()) || {}, at = Date.now(), log = { ...(current?.[edits] || {}) }, from = was || {};
+        for (const k of new Set([...Object.keys(rec), ...Object.keys(from)])) {
+          if (k === 'id' || k === 'updatedAt' || recordSignature(rec[k] ?? null) === recordSignature(from[k] ?? null) && k in rec === k in from) continue;
+          log[k] = { by: String(who.by || ''), device: String(who.device || ''), at };
+        }
+        doc[edits] = log;
+      }
+      tx.set(ref, withServer(F, stored(doc)));
+      extra(F, db, tx, { scope, coll, before: current, after: doc, key, ops });
+      return doc;
     });
   }
 

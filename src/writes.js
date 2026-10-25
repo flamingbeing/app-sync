@@ -14,6 +14,8 @@
 //   outbox has unsent saves for this user, and forget forgets this user in all of them.
 //   report: the nothing-lost report (report.js), opt-in: the queue's entries are counted and each failed send counts
 //   one error by its code (only the code; nothing else of the error or the save).
+//   ignore: top-level fields left out when this queue compares versions (0.6.3; default none), for the engine's own
+//   fields an app's copies don't carry (createApp passes them with held conflicts: who changed what, save keys).
 // save(kind, owner, record, base, { ops }): ops (optional) describe the change for a backend that applies changes by
 //   field (a last-write-wins collection: increments, keyed updates). They are stored with the save and handed on as
 //   backend(owner, kind, record, base, { key, ops: [ops, …] }), key the save's own id (a backend can use it to apply
@@ -27,15 +29,17 @@
 import { recordSignature } from './conflict.js';
 const copy = value => JSON.parse(JSON.stringify(value));
 const keyOf = job => job.kind + ':' + job.record.id;
-const same = (a, b) => recordSignature(a) === recordSignature(b);
 const terminal = new Set(['synced', 'archived']);
 const KEEP = 100;   // finished saves kept in the device history (the app's history view)
 // the network dropped mid-save (Firestore: 'unavailable', 'deadline-exceeded'), or another device's transaction on the
 // same record won the race ('aborted'): the job stays pending and tries again
 const transient = error => error?.code === 'unavailable' || error?.code === 'deadline-exceeded' || error?.code === 'aborted';
 export const SEND_TIMEOUT = 30000;
-export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null }) {
+export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null, ignore = [] }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
+  const bare = v => { if (!ignore.length || !v || typeof v !== 'object') return v; const out = { ...v }; for (const f of ignore) delete out[f]; return out; };
+  const signature = v => recordSignature(bare(v));
+  const same = (a, b) => signature(a) === signature(b);
   const recover = labels.recover || 'Recover';
   const failure = job => new Error(new RegExp('in ' + recover + '\\b').test(job.error) ? job.error : job.error + ' — a copy is kept in ' + recover);
   // a backend call that never settles counts as a dropped connection after sendTimeout (it may still land: sending
@@ -207,11 +211,11 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
         // (not the stale copy found at the conflict). That copy shows only while
         // the list still has this device's own unsynced version, or the very one it started from (a stale cached list;
         // the same content saved again elsewhere, as by a restore, has a newer stamp), or its delete took it off.
-        const cur = result.get(id), sig = recordSignature(cur || null);
-        const started = x => recordSignature(x.base) === sig && (x.base?.updatedAt ?? null) === (cur.updatedAt ?? null);
-        if (cur ? group.some(x => recordSignature(x.record) === sig || started(x)) : group.some(x => x.record._deleted)) {
+        const cur = result.get(id), sig = signature(cur || null);
+        const started = x => signature(x.base) === sig && (x.base?.updatedAt ?? null) === (cur.updatedAt ?? null);
+        if (cur ? group.some(x => signature(x.record) === sig || started(x)) : group.some(x => x.record._deleted)) {
           const { remote } = conflicts[0]; if (remote) result.set(id, remote); else result.delete(id);
-        } else if (cur) for (const x of conflicts) if (recordSignature(x.remote) !== sig) x.remote = copy(cur);   // the conflict's other copy
+        } else if (cur) for (const x of conflicts) if (signature(x.remote) !== sig) x.remote = copy(cur);   // the conflict's other copy
       } else { const latest = group.filter(x => x.accepted).at(-1); if (latest) { if (latest.record._deleted) result.delete(id); else result.set(id, latest.record); } }
     }
     return [...result.values()];

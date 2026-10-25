@@ -1,9 +1,11 @@
 // The nothing-lost report endpoint (src/report.js sends to it): core.anawj.com/report.
 //
-// POST /report          one report from an app: { v: 1, app, version, sync, unconfirmed, refused, conflicts, errors }.
+// POST /report          one report from an app: { v: 1, app, version, sync, unconfirmed, refused, conflicts, errors,
+//                       held? }; held (0.6.3, optional): the conflicts by save kind ({ kind: n }, kind a short word).
 //                       At most MAX_BODY bytes, from a browser on one of OUR_SITES only (CORS), RATE reports per address
 //                       per ten minutes (per Worker instance). Stored as per-app daily counts in D1 (binding REPORTS):
-//                       the highest unconfirmed / refused / conflicts any device reported that day, and errors summed.
+//                       the highest unconfirmed / refused / conflicts any device reported that day (and per kind of
+//                       conflict), and errors summed.
 // GET  /report/digest   the owner's digest of yesterday (SGT): needs "Authorization: Bearer <REPORT_TOKEN>" (a Worker
 //                       secret). -> { send, text, day, apps }: send is true when a count is non-zero, and on Mondays
 //                       ("all clear") so silence means the check still runs.
@@ -18,6 +20,8 @@ export const OUR_SITES = ['anawj.com', 'anantf.com', 'flamingbeing.com'];
 const APP = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,39}$/;
 const CODE = /^[a-z][a-z0-9-]{0,39}$/;
+const KIND = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
+const MAX_KINDS = 20;
 const COUNT = n => Number.isInteger(n) && n >= 0 && n <= 1e6;
 
 export function ourOrigin(origin) {
@@ -34,7 +38,7 @@ export function parseReport(text) {
   let x;
   try { x = JSON.parse(text); } catch { return null; }
   if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
-  const keys = ['v', 'app', 'version', 'sync', 'unconfirmed', 'refused', 'conflicts', 'errors'];
+  const keys = ['v', 'app', 'version', 'sync', 'unconfirmed', 'refused', 'conflicts', 'errors', 'held'];
   if (Object.keys(x).some(k => !keys.includes(k))) return null;
   if (x.v !== 1 || !APP.test(x.app) || !LABEL.test(x.version) || !LABEL.test(x.sync)) return null;
   if (![x.unconfirmed, x.refused, x.conflicts].every(COUNT)) return null;
@@ -42,7 +46,11 @@ export function parseReport(text) {
   if (!errors || typeof errors !== 'object' || Array.isArray(errors)) return null;
   const codes = Object.entries(errors);
   if (codes.length > MAX_CODES + 1 || codes.some(([c, n]) => !CODE.test(c) || !COUNT(n))) return null;
-  return { app: x.app, version: x.version, sync: x.sync, unconfirmed: x.unconfirmed, refused: x.refused, conflicts: x.conflicts, errors: Object.fromEntries(codes.filter(([, n]) => n > 0)) };
+  const held = x.held ?? {};
+  if (!held || typeof held !== 'object' || Array.isArray(held)) return null;
+  const kinds = Object.entries(held);
+  if (kinds.length > MAX_KINDS || kinds.some(([k, n]) => !KIND.test(k) || !COUNT(n))) return null;
+  return { app: x.app, version: x.version, sync: x.sync, unconfirmed: x.unconfirmed, refused: x.refused, conflicts: x.conflicts, errors: Object.fromEntries(codes.filter(([, n]) => n > 0)), ...(kinds.some(([, n]) => n > 0) ? { held: Object.fromEntries(kinds.filter(([, n]) => n > 0)) } : {}) };
 }
 
 // the SGT calendar day of a time, 'YYYY-MM-DD'
@@ -55,7 +63,8 @@ export function digestText({ day, apps, monday }) {
     const parts = [];
     if (a.unconfirmed) parts.push(`${a.unconfirmed} unconfirmed > 1 h`);
     if (a.refused) parts.push(`${a.refused} refused`);
-    if (a.conflicts) parts.push(`${a.conflicts} conflicts`);
+    const kinds = Object.entries(a.held || {}).sort((p, q) => q[1] - p[1]).map(([k, n]) => `${k} ${n}`).join(', ');
+    if (a.conflicts) parts.push(`${a.conflicts} conflicts${kinds ? ` (${kinds})` : ''}`);
     const errs = Object.entries(a.errors).sort((p, q) => q[1] - p[1]).map(([c, n]) => `${c} ${n}`).join(', ');
     if (errs) parts.push(`errors: ${errs}`);
     return `- ${a.app} (${a.version}, sync ${a.sync}, ${a.reports} reports): ${parts.join('; ')}`;
@@ -66,6 +75,7 @@ export function digestText({ day, apps, monday }) {
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, app TEXT NOT NULL, reports INTEGER NOT NULL DEFAULT 0, unconfirmed INTEGER NOT NULL DEFAULT 0, refused INTEGER NOT NULL DEFAULT 0, conflicts INTEGER NOT NULL DEFAULT 0, version TEXT, sync TEXT, PRIMARY KEY (day, app))',
   'CREATE TABLE IF NOT EXISTS errors (day TEXT NOT NULL, app TEXT NOT NULL, code TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, app, code))',
+  'CREATE TABLE IF NOT EXISTS held (day TEXT NOT NULL, app TEXT NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, app, kind))',
 ];
 // made once per database binding and Worker instance (CREATE … IF NOT EXISTS writes no rows when they exist)
 const ready = new WeakMap();
@@ -83,6 +93,9 @@ export async function store(db, report, now = Date.now()) {
   for (const [code, n] of Object.entries(r.errors)) {
     statements.push(db.prepare('INSERT INTO errors (day, app, code, n) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (day, app, code) DO UPDATE SET n = n + excluded.n').bind(day, r.app, code, n));
   }
+  for (const [kind, n] of Object.entries(r.held || {})) {
+    statements.push(db.prepare('INSERT INTO held (day, app, kind, n) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (day, app, kind) DO UPDATE SET n = max(n, excluded.n)').bind(day, r.app, kind, n));
+  }
   await db.batch(statements);
 }
 
@@ -90,7 +103,11 @@ export async function readDay(db, day) {
   await schema(db);
   const apps = (await db.prepare('SELECT app, reports, unconfirmed, refused, conflicts, version, sync FROM daily WHERE day = ?1 ORDER BY app').bind(day).all()).results || [];
   const errs = (await db.prepare('SELECT app, code, n FROM errors WHERE day = ?1').bind(day).all()).results || [];
-  return apps.map(a => ({ ...a, errors: Object.fromEntries(errs.filter(e => e.app === a.app && e.n > 0).map(e => [e.code, e.n])) }));
+  const held = (await db.prepare('SELECT app, kind, n FROM held WHERE day = ?1').bind(day).all()).results || [];
+  return apps.map(a => {
+    const kinds = held.filter(h => h.app === a.app && h.n > 0);
+    return { ...a, errors: Object.fromEntries(errs.filter(e => e.app === a.app && e.n > 0).map(e => [e.code, e.n])), ...(kinds.length ? { held: Object.fromEntries(kinds.map(h => [h.kind, h.n])) } : {}) };
+  });
 }
 
 const hits = new Map();

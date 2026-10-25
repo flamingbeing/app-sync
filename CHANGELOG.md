@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.6.3 (2026-10-25)
+
+Held conflicts by field, opt-in (`backend: { held }`); nothing changes for an app that doesn't set it. Tests:
+`test/held.test.mjs`, the model test run again with held conflicts (`test/model.test.mjs`), Worker report test.
+
+- `conflict.js mergeHeld`: a 3-way merge per field. Different fields merge; the same field changed to the same value
+  is no conflict; counters (`held: { coll: { counters: [...] } }`, need `mark`) add each side's change; a field
+  changed on both sides to different values throws `write-conflict` with `fields` (the clashing paths) and nothing is
+  written. Also `clashingFields`, `describeConflict` (the popup's data: both versions side by side, when each changed
+  in SGT and who, signed-in name and device), `resolvedRecord` (the answer, keeping this device's other changes) and
+  `whenText`.
+- Firestore adapter: `held` (true or per collection; `merge` collections stay as they are), `edits` (a field that
+  records `{ by, device, at }` per changed top-level field: a data-shape change, so rules that whitelist fields must
+  allow it) and `editor()`. A delete meeting a change elsewhere, or an edit of a record deleted elsewhere, is held too.
+- `createApp`: `device` (the device's name), and `conflicts()`, `describe(key)`, `resolve(key, choice)`. A held save
+  exists only on the phone that sent it second, so only that phone answers; `status$` stays on attention until it does.
+- Write queue: `ignore` (fields left out when comparing versions; createApp passes the engine's fields with `held`).
+- Report: `createReport({ byKind: true })` adds `held: { kind: n }` when there are conflicts; the Worker accepts and
+  stores it (new D1 table `held`, the day's highest per kind) and the digest lists conflicts by kind.
+
 ## 0.6.2 (2026-10-25)
 
 - `createApp({ popupOnly: true })`: sign in with the popup only, never a redirect (not when the popup is blocked, nor
