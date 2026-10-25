@@ -3,7 +3,8 @@
 // path, an email or an error message: buildReport copies nothing else from what it is given.
 //
 // createReport({ app, version, sync, endpoint, every, storage, send, now, onError }) -> { watch, error, payload, due, flush, start, stop }
-//   app: the app's id (lower case letters, digits, "-"). version: the app's own version (e.g. the service worker's).
+//   app: the app's id (lower case letters, digits, "-"). version: the app's own version (e.g. the service worker's), or
+//   a function giving it when a report is made (a version learned later); one that is not a short label reads unknown.
 //   sync: this engine's version (index.js fills it in with VERSION).
 //   endpoint: where to POST (default REPORT_ENDPOINT). every: the least time between two reports (default an hour).
 //   storage: localStorage or alike, keeps the error counts and the last send across page loads (none: memory only).
@@ -61,7 +62,9 @@ function defaultSend(url, body) {
 }
 
 export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOINT, every = REPORT_EVERY, storage = null, send = defaultSend, now = () => Date.now(), onError = () => {} } = {}) {
-  buildReport({ app, version });   // checks app and version now, not an hour later
+  const versionNow = () => { try { const v = typeof version === 'function' ? version() : version; return LABEL.test(String(v)) ? String(v) : 'unknown'; } catch { return 'unknown'; } };
+  if (typeof version !== 'function') buildReport({ app, version });   // checks app and version now, not an hour later
+  else buildReport({ app, version: 'unknown' });
   const KEY = 'app-sync-report:' + app;
   const queues = new Set();
   let memory = { last: 0, errors: {} }, timer = null, hide = null;
@@ -72,7 +75,7 @@ export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOI
   };
   const keep = state => { memory = state; if (storage) { try { storage.setItem(KEY, JSON.stringify(state)); } catch { /* memory only */ } } };
   const entries = () => [...queues].flatMap(q => { try { return q.entries(); } catch { return []; } });
-  const payload = () => buildReport({ app, version, sync, entries: entries(), errors: load().errors, now: now() });
+  const payload = () => buildReport({ app, version: versionNow(), sync, entries: entries(), errors: load().errors, now: now() });
   const due = () => now() - load().last >= every;
   async function flush({ force = false } = {}) {
     if (!force && !due()) return false;

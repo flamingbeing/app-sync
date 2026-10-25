@@ -29,6 +29,17 @@ test('an app id or version that could carry data is refused; a bad sync version 
   assert.equal(buildReport({ app: 'demo', version: 'v1', sync: SECRET[1] }).sync, 'unknown');
 });
 
+test('version may be a function, read when the report is made; a bad answer reads unknown', () => {
+  let v = 'unknown';
+  const r = createReport({ app: 'demo', version: () => v });
+  assert.equal(r.payload().version, 'unknown');
+  v = 'demo-2026-10-25-ab12cd34';
+  assert.equal(r.payload().version, v);
+  v = 'people/' + SECRET[0];
+  assert.equal(r.payload().version, 'unknown');
+  assert.equal(createReport({ app: 'demo', version: () => { throw new Error('x'); } }).payload().version, 'unknown');
+});
+
 test('error codes: short lower-case words kept, the rest is other, at most MAX_CODES', () => {
   assert.equal(errorCode('deadline-exceeded'), 'deadline-exceeded');
   assert.equal(errorCode(undefined), 'unknown');

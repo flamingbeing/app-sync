@@ -171,7 +171,7 @@ dropped connection, never shown as needing the user.
 **Nothing-lost report (0.5.0, opt-in).** So that a save stuck on a phone is noticed without anyone looking:
 
 ```js
-const report = S.createReport({ app: 'my-app', version: SW_VERSION, storage: localStorage });
+const report = S.createReport({ app: 'my-app', version: () => swVersion, storage: localStorage });   // a string, or a function
 const queue = S.createWriteQueue({ ...options, report });
 report.start();   // a check every few minutes (sends at most once an hour) and on page hide
 ```

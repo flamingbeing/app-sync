@@ -97,7 +97,7 @@
     "src/outbox.js": "06bf8e938ed3e0a640af3c514da1a27f4d80c25022c4a41084de1328551db45b",
     "src/persist.js": "b0a27f138ace730446c9be9e45aae4cce549339636304041f18c69d9cd59ee1a",
     "src/registry.js": "dc174df62e0c419f54acae68d7ffc796b6e99c62fb4264f7de9e2031c6b67767",
-    "src/report.js": "bebf6e8ee63bf463bc82392c2c81bf4174229daa622fbb48a67c9c987be8b473",
+    "src/report.js": "cd531ee300e1c2d8a59b6266b69a013fc90d2552d7f5efbce7d22241985a51c3",
     "src/status.js": "36f5018c2ce3064cc77fd7a36776bab20d5581efe8f4992eb0a86861609fe995",
     "src/store.js": "a523a13391a247d8c6c57627e9b9194a1b95e69af99e90ac12000d6e4f7fe162",
     "src/sync.js": "926376c68a4bbfa5629a437bd46309241b9880f69b6072ac99da5f65bf2f5520",
