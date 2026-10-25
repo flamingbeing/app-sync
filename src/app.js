@@ -31,7 +31,7 @@
 //   signOut({ wait }) -> { ok, reason: 'unsent' | 'changed', reload, failed }: refuses while anything is unsent (this
 //   app's, another tab's, another registered app's on this origin), then forgets the device and signs out.
 import { createSyncHub, replanOnWake } from './sync.js';
-import { createWriteQueue } from './writes.js';
+import { createWriteQueue, watchSaved } from './writes.js';
 import { createStores } from './store.js';
 import { createOutbox } from './outbox.js';
 import { createOutboxRegistry } from './registry.js';
@@ -126,18 +126,15 @@ export function createApp(options = {}) {
   const onSnap = m => { watchdog.heard(m); if (!m?.fromCache && !heard) { heard = true; } tell(); };
   if (!options.adapter) meta.add((_coll, m) => watchdog.heard(m));
 
-  // watches: each one's list (device copy, then the server) with this device's unsent saves laid over it
+  // watches: each one's list (device copy, then the server) with this device's unsent saves laid over it, again when
+  // either changes (watchSaved); only what the listener hears feeds the status and the watchdog
   const watches = new Set();
-  const start = w => { w.off = hub.watch(w.scope, w.coll, (list, m) => { w.list = list; if (m) onSnap(m); deliver(w, m); }); };
-  const deliver = (w, m) => {
-    const out = queue.overlay(kindOf(w.coll), w.scope, w.list || []).map(strip), sig = JSON.stringify(out);
-    if (sig === w.sig) return;
-    w.sig = sig; w.cb(out, m || {});
-  };
+  const heardHub = { watch: (s, coll, fn) => hub.watch(s, coll, (list, m) => { if (m) onSnap(m); fn(list, m); }) };
+  const start = w => { w.off = watchSaved({ hub: heardHub, queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll) }, (list, m) => w.cb(list.map(strip), m || {})); };
   const stopWatches = () => { for (const w of watches) { w.off?.(); w.off = null; } };
   const startWatches = () => { for (const w of watches) if (!w.off) start(w); };
   function watch(s, coll, cb) {
-    const w = { scope: s, coll, cb, off: null, list: null, sig: '' };
+    const w = { scope: s, coll, cb, off: null };
     watches.add(w); start(w);
     if (watchEvery > 0 && !timer) { timer = setInterval(() => watchdog.check(), watchEvery); timer.unref?.(); }
     return () => { w.off?.(); watches.delete(w); };
@@ -172,7 +169,6 @@ export function createApp(options = {}) {
       try { answer = onRefused({ code: codes.get(x.key) || '', message: x.error }, x); } catch (e) { console.warn('onRefused', e); }
       if (answer === 'archive') void queue.archive(x.key);
     }
-    for (const w of watches) if (w.list) deliver(w);
     tell();
   });
 

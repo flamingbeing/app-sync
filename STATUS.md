@@ -16,6 +16,7 @@
 1. A multi-device soak test (offline devices, same-record edits, skewed clocks) in real browsers.
 
 ## Recently done
+- 2026-10-25: 0.6.0 `createApp` (the safe path in one call), with the unreleased 0.5.2 fixes folded in: `watchSaved` (the server's copy heard while a save was sent shows once it is done) and one report per page hide (see CHANGELOG).
 - 2026-10-25: 0.5.1 adapter `create` (no read in the transaction) and `existing` (ids the server has), for apmes evals and the logbook restore.
 - 2026-10-25: 0.4.1 fault-injection tests and the tombstone fix (see CHANGELOG).
 - 2026-10-25: 0.4.0 safety pack and update 0.2.0 (see CHANGELOG).

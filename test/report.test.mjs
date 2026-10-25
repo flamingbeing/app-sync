@@ -103,6 +103,37 @@ test('page hide sends; start and stop leave no listener behind', async () => {
   } finally { delete globalThis.document; }
 });
 
+test('page hide fires visibilitychange and pagehide together: one report, each error counted once (0.5.2)', async () => {
+  const handlers = new Map(), sent = [];
+  globalThis.document = { visibilityState: 'visible', addEventListener: (n, f) => handlers.set(n, f), removeEventListener: n => handlers.delete(n) };
+  const hadAdd = Object.hasOwn(globalThis, 'addEventListener'), add = globalThis.addEventListener, remove = globalThis.removeEventListener;
+  globalThis.addEventListener = (n, f) => handlers.set('window:' + n, f);
+  globalThis.removeEventListener = n => handlers.delete('window:' + n);
+  let r = null;
+  try {
+    let t = 50 * HOUR;
+    r = createReport({ app: 'demo', version: 'v1', now: () => t, send: async (_u, b) => { sent.push(b); return true; } });
+    r.error('unavailable');
+    r.start();
+    document.visibilityState = 'hidden';
+    handlers.get('visibilitychange')({ type: 'visibilitychange' });
+    handlers.get('window:pagehide')({ type: 'pagehide' });
+    await new Promise(res => setTimeout(res, 0));
+    assert.equal(sent.length, 1, 'one report for one page hide');
+    assert.deepEqual(JSON.parse(sent[0]).errors, { unavailable: 1 });
+    // a flush asked while one is being sent gets that one's answer and sends nothing more
+    t += 2 * HOUR;
+    const [a, b] = await Promise.all([r.flush(), r.flush()]);
+    assert.equal(sent.length, 2);
+    assert.equal(a, true); assert.equal(b, true);
+    assert.deepEqual(JSON.parse(sent[1]).errors, {}, 'errors sent once are not sent again');
+  } finally {
+    r?.stop();
+    delete globalThis.document;
+    if (hadAdd) { globalThis.addEventListener = add; globalThis.removeEventListener = remove; } else { delete globalThis.addEventListener; delete globalThis.removeEventListener; }
+  }
+});
+
 test('the write queue counts its entries and each failed send by code only (opt-in)', async () => {
   const records = new Map();
   const store = { async put(x) { records.set(x.key, structuredClone(x)); }, async list(o) { return [...records.values()].filter(x => x.owner === o); }, async get(k) { return records.get(k) || null; }, async remove(k) { records.delete(k); }, async forget() {} };

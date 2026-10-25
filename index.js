@@ -1,6 +1,6 @@
 // app-sync: everything in one import. Each module also loads on its own (src/<name>.js).
 export { plan, applyChanges, replaceAll, applyTombs, dropTombs, pruneGone, binTombs, expireDocs, timeOf, eachSettled, createCollectionSync, createTombFeed, createSyncHub, replanOnWake, planServer, leaveEntry, SKEW, FULL_EVERY, GONE_KEEP, GRACE, REPLAN_EVERY } from './src/sync.js';
-export { createWriteQueue, SEND_TIMEOUT } from './src/writes.js';
+export { createWriteQueue, watchSaved, SEND_TIMEOUT } from './src/writes.js';
 export { recordSignature, checkWrite, mergeFields } from './src/conflict.js';
 export { createStores, OPEN_WAIT } from './src/store.js';
 export { createOutbox } from './src/outbox.js';

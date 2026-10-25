@@ -11,8 +11,8 @@
 //   send(url, body) -> truthy when handed over (default navigator.sendBeacon as text/plain, else fetch keepalive).
 // watch(queue): a write queue (writes.js) whose entries are counted; createWriteQueue({ report }) does it itself.
 // error(code): one sync error of that code (the write queue counts its own; an app may add a listener's).
-// flush({ force }): send now if due (force: even if not); -> true when sent. start(): a check every few minutes and on
-//   page hide; stop() undoes it.
+// flush({ force }): send now if due (force: even if not); -> true when sent. A flush asked while one is being sent
+//   gets that one's answer (0.5.2). start(): a check every few minutes and on page hide; stop() undoes it.
 //
 // Payload: { v: 1, app, version, sync, unconfirmed, refused, conflicts, errors: { code: n } }
 //   unconfirmed: saves still waiting for the server after UNCONFIRMED_MS; refused: saves the server refused (failed);
@@ -77,7 +77,17 @@ export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOI
   const entries = () => [...queues].flatMap(q => { try { return q.entries(); } catch { return []; } });
   const payload = () => buildReport({ app, version: versionNow(), sync, entries: entries(), errors: load().errors, now: now() });
   const due = () => now() - load().last >= every;
-  async function flush({ force = false } = {}) {
+  // one report at a time: page hide fires visibilitychange and pagehide together, and a second flush started before the
+  // first is handed over would send the same counts again; it gets the first one's answer instead (0.5.2)
+  let sending = null;
+  function flush(opts) {
+    if (sending) return sending;
+    const p = sendNow(opts);
+    sending = p;
+    p.finally(() => { if (sending === p) sending = null; });
+    return p;
+  }
+  async function sendNow({ force = false } = {}) {
     if (!force && !due()) return false;
     let body;
     try { body = JSON.stringify(payload()); } catch (error) { onError(error); return false; }
