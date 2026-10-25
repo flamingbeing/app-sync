@@ -1398,7 +1398,7 @@
     "src/registry.js": "3a9c89c5b4fbc5e9f923ebf20e1bb20bc003cfa3531bbfca4ebd494053e9fb81",
     "src/replace.js": "5ece7d9fb912474c99a2294a776fd702a51d36132333f6e36592fa5165d1d955",
     "src/report.js": "8cc9919204054698d6a8a53701ef67944d564add106068a83fc51502be8aff44",
-    "src/runner.js": "cd410fd428d7c00becfcba021d42f1a0cf713199fd60cf53c8a339fe9f02b3d6",
+    "src/runner.js": "215e43ff647e1cb49d388fce2b5c31032e5be9cfc89e622fea659baed783803b",
     "src/signin/anonymous.js": "dca1847cb78021b8a18822aaaa42aed1b8510a128e0feae2a70cc0ce88d55dd7",
     "src/signin/email-link.js": "6d008cc497df2235d1dfcd785a4a22bb2b63e520151d8ece9f365e8f4f8c92fe",
     "src/signin/passcode.js": "b6308a4cc23c440ac6e46f5bf86e13eaadcd1d6c33f343a669323ac270a665fe",

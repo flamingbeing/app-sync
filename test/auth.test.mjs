@@ -584,3 +584,24 @@ test('a slow module stop: a switch the stop cut short does not make the new acco
   assert.deepEqual(device.rows, [{ id: 'kept' }]);
   assert.match([...storage.m.values()].join(), /"uid":"u1"/);
 });
+
+test('a stop that clears a later module\'s handlers mid-switch: the owner stays (its wipe did not run)', async () => {
+  let release, gate;
+  const slow = { name: 'slow', needs: ['auth'], start(ctx) { ctx.on('switch', () => new Promise(r => { gate = r; })); return {}; }, stop() { return new Promise(r => { release = r; }); } };
+  const storage = memStorage(), sdk = fakeSdk(), device = { rows: [], unsent: 0 }, log = [];
+  const app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), slow, fakeData(device, log)] });
+  await app.ready;
+  await app.auth.signIn();
+  device.rows.push({ id: 'kept' });
+  await app.auth.signOut();
+  sdk.auth.set(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  await settle();
+  const stopping = app.stop();
+  await settle();
+  gate();
+  await settle();
+  release();
+  await stopping;
+  assert.deepEqual(device.rows, [{ id: 'kept' }]);
+  assert.match([...storage.m.values()].join(), /"uid":"u1"/);
+});

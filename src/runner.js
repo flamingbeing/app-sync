@@ -111,10 +111,13 @@ export function createApp({ config, modules } = /** @type {any} */ ({})) {
     else if (event === 'signout' || event === 'forget') current = null;
     /** @type {string[]} */
     const failed = [];
+    // (the app stopped: nothing more runs, the modules not reached are named as if their handler threw; checked
+    // before each module too, as stop clears a module's handlers)
+    const cut = (/** @type {number} */ i) => [...new Set([...failed, ...order.slice(i).map(n => n.name)])];
     for (const [i, m] of order.entries()) {
+      if (stopped) return cut(i);
       for (const fn of [...handlers.get(m.name)?.get(event) || []]) {
-        // (the app stopped: nothing more runs, the modules not reached are named as if their handler threw)
-        if (stopped) return [...new Set([...failed, ...order.slice(i).map(n => n.name)])];
+        if (stopped) return cut(i);
         try { await fn(d); } catch (e) { if (!failed.includes(m.name)) failed.push(m.name); console.warn(`${m.name}: ${event}`, e?.message || e); }
       }
     }
