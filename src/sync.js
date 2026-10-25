@@ -425,6 +425,8 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     try { doc = fetchOne ? await fetchOne(scope, coll, id) : undefined; } catch { doc = undefined; }
     if (stopped) return;
     const gone = meta.gone || {};
+    const cur = docs.get(id);
+    if (doc && cur && stamp(cur) > stamp(doc)) return;   // a newer copy arrived while this read was out
     if (!(doc && !(gone[id] != null && stamp(doc) <= gone[id])) && holding(id)) { left(id); return; }
     if (doc && !(gone[id] != null && stamp(doc) <= gone[id])) {
       if (same(docs.get(id), doc)) return;

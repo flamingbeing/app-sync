@@ -38,5 +38,9 @@
   "1.3.2": {
     "sw-core.js": "f1019886bfe67886066e6f91b1adb6ae6b41a6a7299faa6dec98b4bf327ac81b",
     "register.js": "341ac23566d9024b6bf34d4b8ba887dadc2dc1e249823b4d8de6d35530097b69"
+  },
+  "1.3.3": {
+    "sw-core.js": "bda7925cd2239379fab61c3d204d240d3b2a19259291ad946728cde194b319af",
+    "register.js": "f47aae0d81a1fd58c10df2e1fa366fb7bc00ce24eac1a397ec5eb437108a535c"
   }
 }
