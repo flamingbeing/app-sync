@@ -2,7 +2,7 @@
 // by owner, and a localStorage fallback when IndexedDB refuses. A completed transaction (or a successful fallback
 // write) is required before an editor may discard its input.
 //
-// createOutbox({ name, realm = 'default' }) -> { put, list, get, remove, forget }
+// createOutbox({ name, realm = 'default' }) -> { name, realm, put, list, get, remove, forget }
 //   name: the database name (also the localStorage key prefix). realm: keeps two modes apart on one origin.
 
 export function createOutbox({ name, realm = 'default' }) {
@@ -41,6 +41,7 @@ export function createOutbox({ name, realm = 'default' }) {
     .map(k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } })
     .filter(x => x && x.owner === owner);
   return {
+    name, realm,
     async put(record) {
       const copy = { ...JSON.parse(JSON.stringify(record)), realm };
       try {

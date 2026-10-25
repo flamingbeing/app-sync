@@ -2,21 +2,29 @@
 // (another tab may have signed in meanwhile), delete this device's copies except the account kept, the outbox, the
 // SDK's own offline cache, then the app's own lists. Call it after the sign-out check (queue.flush()) said yes.
 //
-// forgetDevice({ hub, stores, queue, proceed, keep, clearBackendCache, extra })
+// forgetDevice({ hub, stores, queue, proceed, keep, clearBackendCache, extra, timeout })
 //   hub: createSyncHub (stopAll). stores: createStores (wipeStores). queue: createWriteQueue (forget). proceed:
 //   async () -> false to stop here (nothing deleted). keep: scopes whose stores stay (an array, or a function called
 //   after proceed; e.g. the account signed in now in another tab). clearBackendCache: e.g. the adapter's clearCache
-//   (the app reloads afterwards). extra: async (), the app's own (lists in localStorage, caches).
+//   (the app reloads afterwards); it counts as failed after timeout ms (default 3000: clearing waits while another
+//   tab uses the cache), so extra still runs. extra: async (), the app's own (lists in localStorage, caches, reload).
+//   A queue with an outbox registry forgets this user in every registered outbox (registry.js).
 // -> { wiped, failed }: wiped false when proceed said no (nothing deleted, but the hub stays stopped: the app watches
 // again); failed names the steps that threw (the others still ran).
-export async function forgetDevice({ hub, stores, queue, proceed = async () => true, keep = [], clearBackendCache = null, extra = null } = {}) {
+export const FORGET_TIMEOUT = 3000;
+const within = (ms, fn) => {
+  let timer;
+  const late = new Promise((_, reject) => { timer = setTimeout(() => { const e = new Error('Did not finish in time'); e.code = 'deadline-exceeded'; reject(e); }, ms); });
+  return Promise.race([Promise.resolve().then(fn), late]).finally(() => clearTimeout(timer));
+};
+export async function forgetDevice({ hub, stores, queue, proceed = async () => true, keep = [], clearBackendCache = null, extra = null, timeout = FORGET_TIMEOUT } = {}) {
   const failed = [];
   const step = async (name, fn) => { try { await fn(); } catch (e) { failed.push(name); console.warn('forgetDevice: ' + name, e); } };
   if (hub) await step('stopAll', () => hub.stopAll());
   if ((await proceed()) === false) return { wiped: false, failed };
   if (stores) await step('wipeStores', async () => stores.wipeStores(typeof keep === 'function' ? await keep() : keep));
   if (queue) await step('forget', () => queue.forget());
-  if (clearBackendCache) await step('clearBackendCache', () => clearBackendCache());
+  if (clearBackendCache) await step('clearBackendCache', () => within(timeout, clearBackendCache));
   if (extra) await step('extra', () => extra());
   return { wiped: true, failed };
 }

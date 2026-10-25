@@ -3,13 +3,15 @@
 // expires and never blocks a later save made on the version shown; another window on the device sharing the outbox
 // is taken into account before anything is sent again.
 //
-// createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels, otherPending })
+// createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels, otherPending, registry })
 //   store: the outbox ({ put, list, get, remove, forget }). backend(owner, kind, record, base) -> result; throws
 //   { code: 'write-conflict', remote } (conflict.js checkWrite), a transient error ('unavailable',
 //   'deadline-exceeded', 'aborted': stays pending, retried with backoff) or any other error (failed). sendTimeout: a
 //   backend call that doesn't settle in this time counts as transient, so one stuck call never holds a record's saves
 //   for good. otherPending: async () -> truthy while writes sent another way (not through this queue) are not on the
-//   server yet; it keeps the sign-out check (flush) shut, as does a throw (can't tell).
+//   server yet; it keeps the sign-out check (flush) shut, as does a throw (can't tell). registry: the origin's outbox
+//   registry (registry.js), for apps that share sign-in on one origin: flush also refuses while another registered
+//   outbox has unsent saves for this user, and forget forgets this user in all of them.
 // save(kind, owner, record, base, { ops }): ops (optional) describe the change for a backend that applies changes by
 //   field (a last-write-wins collection: increments, keyed updates). They are stored with the save and handed on as
 //   backend(owner, kind, record, base, { key, ops: [ops, …] }), key the save's own id (a backend can use it to apply
@@ -24,7 +26,7 @@ const KEEP = 100;   // finished saves kept in the device history (the app's hist
 // same record won the race ('aborted'): the job stays pending and tries again
 const transient = error => error?.code === 'unavailable' || error?.code === 'deadline-exceeded' || error?.code === 'aborted';
 export const SEND_TIMEOUT = 30000;
-export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null }) {
+export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
   const recover = labels.recover || 'Recover';
   const failure = job => new Error(new RegExp('in ' + recover + '\\b').test(job.error) ? job.error : job.error + ' — a copy is kept in ' + recover);
@@ -227,7 +229,11 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   }
   async function forget() {
     const old = owner; owner = null; ++generation; loading = null; jobs = []; running.clear(); waits.clear(); storageError = ''; notify();
-    if (old) await store.forget(old);
+    if (!old) return;
+    let error = null;
+    try { await store.forget(old); } catch (e) { error = e; }
+    if (registry) { try { await registry.forget(old, { except: store }); } catch (e) { error ||= e; } }
+    if (error) throw error;
   }
   return { activate, save, restore, overlay, retry, archive, forget, kick,
     configure(config) { if (config.backend) backend = config.backend; if (config.getOwner) getOwner = config.getOwner; if (config.normalize) normalize = config.normalize; if (config.notice) notice = config.notice; },
@@ -253,6 +259,9 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       if (jobs.some(x => !terminal.has(x.state))) return false;
       // writes the app sends another way (straight to the SDK) and not yet on the server
       if (otherPending) { try { if (await otherPending()) return false; } catch { return false; } }
+      // the other apps on this origin (they share sign-in): their unsent saves for this user
+      const who = owner || getOwner();
+      if (registry && who) { try { if (await registry.unsent(who, { except: store })) return false; } catch { return false; } }
       // changes another tab (or the home-screen app) has not synced yet are in the same store: signing out deletes them
       if (!owner) return true;
       // (the shared outbox can't be read: not known to be empty, so the sign-out gate stays shut)

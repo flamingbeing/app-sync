@@ -36,13 +36,16 @@
 //   alike); with prev (the record's stamp before this write), max(now, prev + 1).
 //   stampFields(prev) -> Promise of the fields to add to such a write: { [field]: stamp(prev) } and, in server mode,
 //   { [serverField]: serverTimestamp() } (bin entries and leave entries too).
-//   clearCache() -> terminates the SDK and clears its offline cache (sign-out on a shared device); the SDK instance
-//   can't be used afterwards, so the app reloads (or builds a new one) before reading again.
+//   clearCache({ timeout = 3000 }) -> terminates the SDK and clears its offline cache (sign-out on a shared device); the
+//   SDK instance can't be used afterwards, so the app reloads (or builds a new one) before reading again. Clearing
+//   waits while another tab of the origin still uses the cache: after timeout ms it throws { code:
+//   'deadline-exceeded' } (the cache stays until those tabs close), so sign-out can go on and reload.
 import { checkWrite, mergeFields, recordSignature } from './conflict.js';
 
 const plain = v => JSON.parse(JSON.stringify(v));
 
 const MARKS = 20;
+export const CLEAR_TIMEOUT = 3000;   // ms clearCache waits for the offline cache to clear
 const timeOf = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;   // save keys kept on a merged record (mark)
 
 export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', onCommit = null, onSnapshotMeta = () => {}, onRead = () => {} }) {
@@ -157,10 +160,11 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return withServer(F, { [stampField]: next(prev) });
   }
 
-  async function clearCache() {
-    const { db, F } = await sdk();
-    await F.terminate(db);
-    await F.clearIndexedDbPersistence(db);
+  async function clearCache({ timeout = CLEAR_TIMEOUT } = {}) {
+    let timer;
+    const late = new Promise((_, reject) => { timer = setTimeout(() => { const e = new Error('The offline cache could not be cleared in time (another tab still uses it)'); e.code = 'deadline-exceeded'; reject(e); }, timeout); });
+    const clear = async () => { const { db, F } = await sdk(); await F.terminate(db); await F.clearIndexedDbPersistence(db); };
+    return Promise.race([clear(), late]).finally(() => clearTimeout(timer));
   }
 
   return { listen, fetchOne, commit, stamp: prev => next(prev), stampFields, clearCache };

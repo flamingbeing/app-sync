@@ -44,7 +44,7 @@ What it does:
 ```js
 import * as F from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
 import { createSyncHub, createWriteQueue, createStores, createOutbox, createFirestoreBackend, replanOnWake,
-  persistGuard, syncStatus, attentionCount, forgetDevice } from 'https://core.anawj.com/sync/0.4.1/index.js';
+  persistGuard, syncStatus, attentionCount, forgetDevice } from 'https://core.anawj.com/sync/0.4.2/index.js';
 
 const fs = createFirestoreBackend({ sdk: async () => ({ db, F }), path: (space, coll) => ['spaces', space, coll] });
 const stores = createStores({ prefix: 'myapp-store:', colls: ['items'] });
@@ -135,6 +135,24 @@ without the entry (or the other way round), and its `deletedAt` is after the loc
 its bin or leave entry arrives) is kept here, and the
 hub's `onLeave(scope, coll, id, doc)` says so (pass `unsent: (scope, coll, id) => queue.unsent(kind, id)`), so the
 save meets the server's answer instead of vanishing with the record.
+
+**Several apps on one origin (0.4.2).** Apps served from one address share Firebase sign-in, so signing out in one
+signs out all of them, and each may have its own outbox with saves not sent yet. Register every app's outbox in the
+origin's registry and give each queue the registry: `queue.flush()` then also refuses while any registered outbox
+has unsent saves for this user (one that can't be read or doesn't answer in 3 s counts as unsent), and
+`forgetDevice` (through `queue.forget()`) forgets this user in all of them. Opt-in: an app that doesn't register, or
+a queue without `registry`, works as before, so roll it out to every app on the origin before relying on it.
+
+```js
+const outbox = createOutbox({ name: 'app-outbox' });
+const registry = createOutboxRegistry();   // the list lives in localStorage, read by every page of the origin
+registry.register(outbox);
+const queue = createWriteQueue({ store: outbox, backend, getOwner, registry });
+```
+
+`clearCache` waits while another tab of the origin still uses the SDK's cache; it now gives up after 3 s
+(`{ timeout }`, and `forgetDevice`'s `timeout` for `clearBackendCache`), reports `clearBackendCache` in `failed`,
+and `extra` and the reload still happen. The cache then stays until those tabs close.
 
 **Two phones at once.** A Firestore transaction that lost a race with another device's (`aborted`) is retried like a
 dropped connection, never shown as needing the user.
