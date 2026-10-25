@@ -21,13 +21,18 @@ separately from the API, from 0.8.0 on:
 
 ### A job (one save in the outbox)
 
-`{ v, key, owner, kind, record, base, state, accepted, at, error?, result?, remote?, kept?, ops?, realm? }`
+`{ v, key, owner, kind, record, base, state, accepted, at, error?, result?, remote?, kept?, ops?, realm?, code?, refused?, meta? }`
 
 - `v`: the job format, `JOB_FORMAT` = 1 on every job written from 0.8.0. A job without `v` was written before 0.8.0
   and has the same shape.
 - `state`: one of `JOB_STATES`: `pending`, `synced`, `failed`, `conflict`, `archived`. **Finished** = `synced` or
   `archived`; every version's sign-out check treats any other state as unsent, so a new state would block sign-out
   in older apps on the origin forever. No new state before 2.0; new facts about a job go in new optional fields.
+- 0.8.2 adds three optional fields (still `v: 1`; older versions ignore them): `code`, a refused save's error code;
+  `refused: true` on an `archived` job set aside after the server refused it (a flag, not a state: every version
+  counts it finished), kept out of pruning until retried or discarded and keeping 0.8.2's sign-out gate shut (an
+  older version on the origin does not know the flag: its gate passes and it may prune the job once 100 newer
+  finished saves pile up, as it always did); `meta`, the app's data about the save.
 - `key`: `<owner>:<time base36>:<random>`; jobs of one record (`kind` + `record.id`) are sent oldest `at` first.
 
 ## On the server (Firestore adapter)

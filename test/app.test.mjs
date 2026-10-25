@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { ESCALATE_MS } from '../src/watchdog.js';
-import { checkWrite } from '../src/conflict.js';
+import { checkWrite, recordSignature } from '../src/conflict.js';
 import { fakeServer } from './fake-server.mjs';
 import { createFirestoreBackend } from '../src/firestore.js';
 import { createOutboxRegistry } from '../src/registry.js';
@@ -228,7 +228,7 @@ test('status: unknown, not synced, until the server has answered once since the 
   off();
 });
 
-test('a save the server refuses: onRefused hears it with its code; "archive" sets it aside so sign-out is not blocked for good', async () => {
+test('a save the server refuses: onRefused hears it with its code; "archive" sets it aside, kept until Retry or Discard (0.8.2: the gate stays shut)', async () => {
   const srv = fakeServer();
   const refused = [];
   const { app } = makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: {
@@ -238,7 +238,11 @@ test('a save the server refuses: onRefused hears it with its code; "archive" set
   await app.save('item', 's1', { id: 'r1', text: 'Fake' });
   assert.ok(await until(() => refused.length === 1));
   assert.deepEqual(refused[0], { code: 'permission-denied', kind: 'item', id: 'r1' });
-  assert.equal(await app.flush(500), true, 'set aside: nothing unsent');
+  assert.equal(await app.flush(500), false, 'set aside, kept by the engine: the gate stays shut until Retry or Discard (0.8.2)');
+  const r = await app.signOut({ wait: 200 });
+  assert.equal(r.ok, false); assert.equal(r.reason, 'refused');
+  await app.queue.discard(app.queue.refused()[0].key);
+  assert.equal(await app.flush(500), true, 'discarded: nothing unsent');
 });
 
 test('a refused save with no onRefused stays failed and keeps the sign-out shut (never dropped silently)', async () => {
@@ -656,4 +660,66 @@ test('a tracked write that settles applies deletes held for its record (review, 
   await app.track(Promise.resolve(), { kind: 'item', id: 'r1' });
   await settle(5);
   assert.ok(settled > 0);
+});
+
+// 0.8.2: refused saves after a reload, the watch change info, the device copy read
+test('a refused save found after a reload: onRefused hears its code from the job; app.queue.refused() keeps it set aside (0.8.2)', async () => {
+  const srv = fakeServer(), name = uniq(), records = new Map();
+  const one = makeApp({ srv, name, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { outbox: memOutbox(name + '-outbox', 'default', records) } });
+  await one.app.onUser(() => {}); await one.app.signIn(); await one.app.open('s1');
+  await assert.rejects(one.app.save('item', 's1', { id: 'r1', text: 'Fake' }), /kept/);
+  const heard = [];
+  const two = makeApp({ srv, name, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { outbox: memOutbox(name + '-outbox', 'default', records),
+    onRefused: (err, entry) => { heard.push([err.code, entry.record.id]); return 'archive'; } } });
+  await two.app.onUser(() => {}); await two.app.signIn(); await two.app.open('s1');
+  assert.ok(await until(() => heard.length === 1));
+  assert.deepEqual(heard[0], ['permission-denied', 'r1'], 'the code came from the stored job, not this page\'s memory');
+  assert.ok(await until(() => two.app.queue.refused().length === 1 && two.app.queue.refused()[0].state === 'archived'));
+  assert.equal(two.app.queue.refused()[0].code, 'permission-denied');
+  assert.equal(await two.app.flush(300), false, 'set aside: the gate stays shut until discarded');
+});
+
+test('watch meta says what changed and what was removed; copyOf and lastSeen read the last delivered copy (0.8.2)', async () => {
+  const { app, srv } = makeApp();
+  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+  srv.set('items', { id: 'a', text: 'Fake A', updatedAt: 5, serverAt: 5, _saves: ['k'] });
+  srv.set('items', { id: 'b', text: 'Fake B', updatedAt: 6, serverAt: 6, _saves: ['k'] });
+  const calls = [];
+  const off = app.watch('s1', 'items', (list, meta) => calls.push({ ids: list.map(d => d.id).sort(), changed: [...meta.changed].sort(), removed: [...meta.removed].sort() }));
+  assert.ok(await until(() => calls.some(c => c.ids.length === 2)));
+  const first = calls.find(c => c.ids.length === 2);
+  assert.ok(first.changed.includes('a') && first.changed.includes('b'), 'first delivery: everything is new');
+  assert.equal(app.copyOf('item', 'a').text, 'Fake A');
+  assert.equal(app.copyOf('item', 'zz'), null);
+  assert.deepEqual(app.lastSeen('item', 'a'), { stamp: 5, signature: recordSignature({ id: 'a', text: 'Fake A' }) });
+  calls.length = 0;
+  srv.set('items', { id: 'a', text: 'Fake A2', updatedAt: 7, serverAt: 7, _saves: ['k'] });
+  assert.ok(await until(() => calls.some(c => c.changed.includes('a'))));
+  const c2 = calls.find(c => c.changed.includes('a'));
+  assert.deepEqual(c2.changed, ['a'], 'only a changed'); assert.deepEqual(c2.removed, []);
+  assert.equal(app.copyOf('item', 'a').text, 'Fake A2');
+  calls.length = 0;
+  await app.save('item', 's1', { id: 'b', _deleted: true }, { id: 'b', text: 'Fake B' });
+  assert.ok(await until(() => calls.some(c => c.removed.includes('b'))));
+  assert.deepEqual(calls.find(c => c.removed.includes('b')).changed, []);
+  assert.equal(app.copyOf('item', 'b'), null);
+  // a copy the device sent itself: lastSent (queue) and lastSeen agree once the listener hears it back
+  await app.save('item', 's1', { id: 'c', text: 'Fake C' });
+  assert.ok(await until(() => app.lastSeen('item', 'c') !== null));
+  assert.equal(app.lastSeen('item', 'c').signature, app.queue.lastSent('item', 'c').signature);
+  off();
+});
+
+test('a refused save set aside in another registered outbox keeps this app\'s sign-out shut (review, 0.8.2)', async () => {
+  const storage = memStorage(), srv = fakeServer(), boxes = new Map();
+  const box = name => { if (!boxes.has(name)) boxes.set(name, memOutbox(name)); return boxes.get(name); };
+  const registry = createOutboxRegistry({ storage, open: name => box(name) });
+  const nameA = uniq(), nameB = uniq(), sdkParts = fakeAuthSdk();
+  const one = makeApp({ sdkParts, srv, name: nameA, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: { storage, outbox: box(nameA + '-outbox'), queue: { registry }, onRefused: () => 'archive' } });
+  const two = makeApp({ sdkParts, srv, name: nameB, options: { storage, outbox: box(nameB + '-outbox'), queue: { registry } } });
+  await one.app.onUser(() => {}); await two.app.onUser(() => {});
+  await one.app.signIn(); await one.app.open('s1'); await two.app.open('s1');
+  await one.app.save('item', 's1', { id: 'r1', text: 'Fake' }).catch(() => {});   // (set aside at once: no throw)
+  assert.ok(await until(() => one.app.queue.refused()[0]?.state === 'archived'));
+  assert.equal(await two.app.flush(300), false);
 });

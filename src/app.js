@@ -21,7 +21,9 @@
 //   on refreshClaims(), when the role doc's v is ahead of the token's, POST url (Bearer token) once per uid:v, then
 //   refresh the token. A failure changes nothing (the rules fall back to reading the role doc).
 //   onRefused(err, entry) -> 'archive' | anything: a save the server refused (err.code, as the backend threw it);
-//   'archive' sets it aside (the app keeps its own copy for Retry/Discard). Otherwise it stays failed: shown as
+//   'archive' sets it aside, kept with its code for queue.refused(), retry(key) and discard(key) (0.8.2; after a
+//   reload too: the code is on the job, and a refused save found then is told once more). The outbox is then its only
+//   copy, so the sign-out gate stays shut ('refused') until it is retried or discarded, or signOut({ force }). Otherwise it stays failed: shown as
 //   attention, and the sign-out gate stays shut until the user chooses.
 //   forget: { extra, keep }: forgetDevice's (the app's own lists; the scopes whose device copy stays).
 //   report: the nothing-lost report (createReport), opt-in. storage: where the origin's outbox list is kept
@@ -39,7 +41,13 @@
 //   on the phone that made it, and only there: the server never has it, so other phones have nothing to answer (and
 //   two phones can't choose different versions); the held phone's status$ says attention until it is answered.
 // -> { signIn, signOut, onUser, user, open, watch, save, flush, status$, refreshClaims, nudge, relistens, facts,
-//      conflicts, describe, resolve, track, unsentOutside, outsideSettled, heard, idle, hub, queue, parts }
+//      conflicts, describe, resolve, track, unsentOutside, outsideSettled, heard, idle, copyOf, lastSeen, hub, queue, parts }
+//   watch(scope, coll, cb): cb(list, meta), meta (0.8.2) with { changed, removed }: the ids whose copy changed since the
+//   last call (all of them the first time) and the ids gone from the list.
+//   copyOf(kind, id) (0.8.2) -> the copy of that record a running watch of the open scope last handed (null: none).
+//   lastSeen(kind, id) (0.8.2) -> { stamp, signature } of the server's copy as last heard (the device copy after a
+//   reload; without this device's unsent saves), to compare with queue.lastSent(kind, id) (the copy this device last
+//   sent): both differ only when someone else saved since. null: no running watch has that record.
 //   Outside writes (0.8.1): track(promise, { kind, id }) -> the same promise; a write the app sends another way (straight
 //   to the SDK) counts as unsent until it settles (either way: a failure is the app's answer to handle). Unsent outside
 //   writes keep the status saving, flush and the sign-out gate shut, idle() false, and the watchdog from restarting
@@ -53,7 +61,8 @@
 //   written outside it: for an update's canReload.
 //   signIn({ hint, popupOnly, redirectFirst }) (0.8.1, per call): hint, the account's email, is Google's login_hint;
 //   popupOnly and redirectFirst (true/false) override the createApp options for this call.
-//   hub, queue, parts (0.8.1): promised are queue.{ onChange, pending, status, error, unsent, conflicted } and
+//   hub, queue, parts (0.8.1): promised are queue.{ onChange, pending, status, error, unsent, conflicted } (0.8.2:
+//   and refused, retry, discard, entries, finished, lastSent: writes.js) and
 //   hub.drop; the rest of hub, queue and parts is an escape hatch with no promise (an app's own sign-out steps go in
 //   signOut's before, not around hub.stopAll).
 //   facts() -> { persisted, confirmed, heardAt } (0.7.3): the storage guard's answer (false: the browser may clear
@@ -85,7 +94,7 @@ import { createWatchdog } from './watchdog.js';
 import { persistGuard } from './persist.js';
 import { syncStatus, attentionCount } from './status.js';
 import { forgetDevice } from './forget.js';
-import { describeConflict, mergeFields, resolvedRecord } from './conflict.js';
+import { describeConflict, mergeFields, resolvedRecord, recordSignature } from './conflict.js';
 import { createFirestoreBackend } from './firestore.js';
 
 /**
@@ -161,6 +170,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   /** @param {string} coll */
   const kindOf = coll => Object.keys(kinds).find(k => kinds[k] === coll) || coll;
   const online = () => nav?.onLine !== false;
+  const stampField = backendOptions.field || 'updatedAt';
   const engineFields = [backendOptions.mark || '_saves', backendOptions.serverField || 'serverAt', ...(backendOptions.edits ? [backendOptions.edits] : [])];
   const heldOn = !!backendOptions.held, device = String(options.device || '');
   /** @param {Doc | null | undefined} d */
@@ -200,17 +210,14 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   const outbox = options.outbox || createOutbox({ name: name + '-outbox' });
   if (storage) { try { registry = createOutboxRegistry({ storage }); registry.register(outbox); } catch (e) { registry = null; console.warn('outbox registry', e?.message); } }
   let scope = '';
-  /** @type {Map<string, string>} */
-  const codes = new Map();   // a failed save's code, by its key (the queue keeps the message only)
   const queue = createWriteQueue({
-    store: outbox, getOwner: () => scope || null, online, registry, report, ...(heldOn ? { ignore: engineFields } : {}), ...options.queue,
+    store: outbox, getOwner: () => scope || null, online, registry, report, field: stampField, engine: engineFields, ...(heldOn ? { ignore: engineFields } : {}), ...options.queue,
     backend: async (owner, kind, record, base, extra) => {
       // a record deleted elsewhere and saved again here (a restore, "keep mine"): stamped above the delete's tombstone,
       // which other devices hold, or a clock behind the deleter's would leave it hidden there (0.6.3)
       const tomb = record && !record._deleted ? hub.tomb(owner, collOf(kind), record.id) : 0;
       if (tomb > 0) extra = { ...extra, after: tomb };
-      try { return await (commit ? commit(owner, kind, record, base, extra) : adapter.commit(owner, collOf(kind), record, base, extra)); }
-      catch (e) { if (extra?.key) codes.set(extra.key, e?.code || ''); throw e; }
+      return commit ? commit(owner, kind, record, base, extra) : adapter.commit(owner, collOf(kind), record, base, extra);
     },
   });
   const hub = createSyncHub({
@@ -284,20 +291,33 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
 
   // watches: each one's list (device copy, then the server) with this device's unsent saves laid over it, again when
   // either changes (watchSaved); only what the listener hears feeds the status and the watchdog
-  /** @type {Set<{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, off: (() => void) | null }>} */
+  /** @typedef {{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, off: ReturnType<typeof watchSaved> | null }} Watch */
+  /** @type {Set<Watch>} */
   const watches = new Set();
   const heardHub = { watch: (/** @type {string} */ s, /** @type {string} */ coll, /** @type {(list: Doc[], meta: any) => void} */ fn) => hub.watch(s, coll, (list, m) => { if (m) onSnap(m); fn(list, m); }) };
-  /** @param {typeof watches extends Set<infer W> ? W : never} w */
+  /** @param {Watch} w */
   const start = w => { w.off = watchSaved({ hub: heardHub, queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll) }, (list, m) => w.cb(list.map(strip), m || {})); };
   const stopWatches = () => { for (const w of watches) { w.off?.(); w.off = null; } };
   const startWatches = () => { for (const w of watches) if (!w.off) start(w); };
   /** @param {string} s @param {string} coll @param {(list: Doc[], meta: any) => void} cb @returns {() => void} */
   function watch(s, coll, cb) {
-    /** @type {{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, off: (() => void) | null }} */
+    /** @type {Watch} */
     const w = { scope: s, coll, cb, off: null };
     watches.add(w); start(w);
     if (watchEvery > 0 && !timer) { timer = setInterval(() => watchdog.check(), watchEvery); /** @type {any} */ (timer).unref?.(); }
     return () => { w.off?.(); watches.delete(w); };
+  }
+
+  // (0.8.2) the copy a running watch of the open scope last handed (copyOf), and the engine's copy as last heard
+  // (lastSeen: { stamp, signature }, to tell a change made elsewhere from this device's own); null: none
+  /** @param {string} kind */
+  const watchOf = kind => [...watches].find(w => w.scope === scope && w.coll === collOf(kind) && w.off)?.off || null;
+  /** @param {string} kind @param {string} id @returns {Doc | null} */
+  const copyOf = (kind, id) => strip(watchOf(kind)?.copyOf(id) ?? null) ?? null;
+  /** @param {string} kind @param {string} id @returns {{ stamp: any, signature: string } | null} */
+  function lastSeen(kind, id) {
+    const d = watchOf(kind)?.seen(id);
+    return d ? { stamp: d[stampField] ?? null, signature: recordSignature(strip(d)) } : null;
   }
 
   // the watchdog: listening again restarts the engines from the device copy; restarting the connection turns the
@@ -336,8 +356,8 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
       if (x.state !== 'failed' || told.has(x.key) || !onRefused) continue;
       told.add(x.key);
       let answer;
-      try { answer = onRefused({ code: codes.get(x.key) || '', message: x.error }, x); } catch (e) { console.warn('onRefused', e); }
-      if (answer === 'archive') void queue.archive(x.key);
+      try { answer = onRefused({ code: x.code || '', message: x.error }, x); } catch (e) { console.warn('onRefused', e); }
+      if (answer === 'archive') void queue.archive(x.key, { refused: true });   // (0.8.2: kept for queue.refused())
     }
     // a delete heard while a save was held is applied once that record's saves are done (0.6.3)
     if (scope) void hub.settle(scope);
@@ -411,7 +431,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
 
   // sign-out on a shared device: the gate, then forgetDevice's order, then the SDK's sign-out
   // (0.8.1) 'refused' when a save the server refused waits for the user, else 'unsent'
-  const shut = () => queue.entries().some(x => x.state === 'failed') ? 'refused' : 'unsent';
+  const shut = () => queue.entries().some(x => x.state === 'failed' || x.refused) ? 'refused' : 'unsent';
   /** @param {{ wait?: number, force?: boolean, before?: (() => any) | null }} [options] @returns {Promise<{ ok: boolean, reason: '' | 'unsent' | 'refused' | 'changed', reload: boolean, failed: string[] }>} */
   async function signOut({ wait = 4000, force = false, before = null } = {}) {
     const s = await load(), uid = s.auth.currentUser?.uid || null;
@@ -437,7 +457,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
     });
     if (beforeFailed) r.failed.unshift('before');
     if (!r.wiped) { stopWatches(); startWatches(); return { ok: false, reason, reload: false, failed: r.failed }; }
-    stopWatches(); watches.clear(); scope = ''; heard = false; heardAt = 0; told.clear(); deleting.clear(); codes.clear(); claimsAsked = ''; tracked.clear();
+    stopWatches(); watches.clear(); scope = ''; heard = false; heardAt = 0; told.clear(); deleting.clear(); claimsAsked = ''; tracked.clear();
     if (clear) loaded = null;   // (the SDK instance was terminated: the page starts again)
     await s.A.signOut(s.auth);
     current = null;
@@ -504,6 +524,6 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   return {
     signIn, signOut, onUser, user: () => current, open, watch, save, flush, status$, refreshClaims, nudge,
     relistens: () => relistens, facts: () => ({ persisted, confirmed: heard, heardAt }), conflicts, describe, resolve, hub, queue, parts,
-    track, unsentOutside, outsideSettled, heard: heardOf, idle,
+    track, unsentOutside, outsideSettled, heard: heardOf, idle, copyOf, lastSeen,
   };
 }

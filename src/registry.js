@@ -19,7 +19,7 @@ export const REGISTRY_TIMEOUT = 3000;
  * @typedef {import('./types.js').Registry} Registry
  */
 
-const done = new Set(['synced', 'archived']);   // the write queue's finished states (writes.js)
+const done = new Set(['synced', 'archived']);   // the write queue's finished states (writes.js); a refused save set aside (refused: true, 0.8.2) is not given up
 /** @param {OutboxId} x */
 const idOf = x => ({ name: x.name, realm: x.realm || 'default' });
 /** @param {OutboxId} a @param {OutboxId} b */
@@ -67,7 +67,7 @@ export function createOutboxRegistry({ storage = globalThis.localStorage, open =
       try { list = others(except); } catch { return true; }   // the list can't be read: not known to be empty
       /** @param {OutboxId} x */
       /** @param {OutboxId} x */
-      const one = async x => { try { return (await within(Promise.resolve().then(() => outbox(x).list(owner)))).some(/** @param {{ state: string }} e */ e => !done.has(e.state)); } catch { return true; } };
+      const one = async x => { try { return (await within(Promise.resolve().then(() => outbox(x).list(owner)))).some(/** @param {{ state: string, refused?: boolean }} e */ e => !done.has(e.state) || !!e.refused); } catch { return true; } };
       return (await Promise.all(list.map(one))).some(Boolean);
     },
     /** @param {string} owner @param {{ except?: OutboxId | null }} [options] */

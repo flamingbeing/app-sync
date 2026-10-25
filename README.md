@@ -85,7 +85,27 @@ await app.signOut({ before: async () => stopMyListeners(), force: userSaidLoseTh
 Tracked writes count everywhere the queue's saves do: the status, `flush`, the sign-out gate, `idle()` and the
 watchdog. `before` runs after every listener stopped and before the wipe. `force` forgets unsent saves (only once
 the person chose that). Promised from `queue` and `hub`: `queue.{ onChange, pending, status, error, unsent,
-conflicted }` and `hub.drop`; the rest of `parts` is an escape hatch with no promise.
+conflicted }` (0.8.2: and `refused`, `retry`, `discard`, `entries`, `finished`, `lastSent`) and `hub.drop`; the rest
+of `parts` is an escape hatch with no promise.
+
+### Refused saves, job data and the watch change info (0.8.2)
+
+```js
+app.queue.refused();                              // saves the server refused, waiting for the person: [{ key, code, record, meta, … }]
+await app.queue.retry(key); await app.queue.discard(key);   // send it again, or give it up
+await app.save('item', scope, rec, base, { meta: { row: 3 } });   // kept with the job, after a reload too
+app.queue.finished(key)?.meta;                    // the job once synced or set aside (null while it is not)
+app.watch(scope, 'items', (list, { changed, removed }) => redraw(changed, removed));
+app.copyOf('item', id);                           // the copy last handed to a watch, at once
+const mine = app.queue.lastSent('item', id), seen = app.lastSeen('item', id);   // { stamp, signature }, after a reload too
+```
+
+A refused save keeps its error code on the job. `onRefused` returning `'archive'` sets it aside (state `archived`
+with `refused: true`, so every version's sign-out gate counts it finished) and the engine keeps it out of the
+history's pruning until the person retries or discards it, so an app needs no refused list of its own. Until then
+the sign-out gate stays shut (`reason: 'refused'`; `force` still signs out). `lastSent` is
+the copy this device last sent (while it is in the device history, the last 100 finished saves) and `lastSeen` the
+server's as last heard: when their signatures differ, someone else saved since.
 
 Anything the facade does not cover: pass the parts' own options (`backend`, `hub`, `stores`, `queue`), replace a part
 (`adapter`, `commit`, `outbox`), or use `app.parts` (hub, queue, stores, adapter, watchdog, registry). Each module

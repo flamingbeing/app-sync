@@ -130,7 +130,8 @@ test('the server\'s copy that arrives while this device\'s save is being sent sh
   assert.equal(q.status('settings', 'people'), 'synced');
   assert.deepEqual(plain.at(-1)[0].names, { a: 'Ann', b: 'Bo' }, 'the old pattern stays on the save\'s copy (the bug)');
   assert.deepEqual(shown.at(-1).list[0].names, { a: 'Ann 2', b: 'Bo' }, 'the server\'s copy shows once the save is done');
-  assert.deepEqual(shown.at(-1).meta, { fromCache: false, hasPendingWrites: false }, 'with the listener\'s last meta');
+  assert.deepEqual((({ fromCache, hasPendingWrites }) => ({ fromCache, hasPendingWrites }))(shown.at(-1).meta), { fromCache: false, hasPendingWrites: false }, 'with the listener\'s last meta');
+  assert.deepEqual(shown.at(-1).meta.removed, [], 'and the change info (0.8.2)');
   // nothing changes: nothing is handed over again
   const n = shown.length; q.kick(); await settle(10);
   assert.equal(shown.length, n);
