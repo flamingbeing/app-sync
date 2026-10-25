@@ -156,8 +156,8 @@ jobs:
       - name: The starter's pinned engine, for the mixed-version spec
         if: matrix.repo == 'app-starter'
         run: |
-          # the pin: the import map in index.html (root, Vite-lite layout), else public/sw.js, else app/sw.js (0.x layout)
-          for f in app/index.html app/public/sw.js app/app/sw.js; do
+          # the pin: the import map in index.html or public/sw.js (the starter keeps them under app/, 0.9.x; earlier a root layout), else app/sw.js (0.x layout)
+          for f in app/app/index.html app/app/public/sw.js app/index.html app/public/sw.js app/app/sw.js; do
             v="$(grep -o 'core\.anawj\.com/sync/[0-9][^/]*/' "$f" 2>/dev/null | head -1 | cut -d/ -f3)"
             if [ -n "$v" ]; then echo "pinned $v (from ${f#app/})"; break; fi
           done

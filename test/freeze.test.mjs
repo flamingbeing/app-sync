@@ -34,6 +34,13 @@ const PUBLIC = ['createApp', 'userOf', 'claimsBehind', 'createReport', 'REPORT_E
   'SKEW', 'createWriteQueue', 'createStores', 'recordSignature', 'checkWrite', 'mergeFields', 'mergeHeld', 'describeConflict',
   'resolvedRecord', 'pathOf', 'JOB_FORMAT', 'JOB_STATES', 'FILES', 'VERSION'];
 
+test('entries.json lists the files each entry loads (0.9.4), and files.json is unchanged', () => {
+  const entries = JSON.parse(read('entries.json'));
+  assert.deepEqual(Object.keys(entries), ['app', 'auth', 'sync', 'update']);
+  for (const [name, list] of Object.entries(entries)) assert.deepEqual(list, importGraph(name + '.js'), name);
+  assert.deepEqual(JSON.parse(read('files.json')), index.FILES, 'the top-level list does not change');
+});
+
 test('FILES lists exactly the files index.js loads, and files.json says the same', () => {
   assert.deepEqual([...index.FILES].sort(), importGraph('index.js'));
   assert.deepEqual(JSON.parse(read('files.json')), index.FILES);

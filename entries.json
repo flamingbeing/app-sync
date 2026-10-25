@@ -1,0 +1,31 @@
+{
+  "app": [
+    "app.js",
+    "src/runner.js"
+  ],
+  "auth": [
+    "auth.js",
+    "src/auth.js",
+    "src/user.js"
+  ],
+  "sync": [
+    "src/conflict.js",
+    "src/core.js",
+    "src/firestore.js",
+    "src/forget.js",
+    "src/module-sync.js",
+    "src/outbox.js",
+    "src/persist.js",
+    "src/registry.js",
+    "src/status.js",
+    "src/store.js",
+    "src/sync.js",
+    "src/watchdog.js",
+    "src/writes.js",
+    "sync.js"
+  ],
+  "update": [
+    "src/module-update.js",
+    "update.js"
+  ]
+}

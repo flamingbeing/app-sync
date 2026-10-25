@@ -181,6 +181,31 @@ const E = 'fake@example.com';
   await wipeStores();
 }
 
+// ---- (0.9.4) a listener the server refused (permission-denied) listens again at the next replan ----
+{
+  const store = await openStore(E);
+  const calls = [];
+  const listen = (email, coll, opts, onSnap, onError) => {
+    calls.push(coll);
+    if (calls.length === 1) onError({ code: 'permission-denied' });
+    else onSnap({ full: true, docs: [{ id: 'p1', updatedAt: T0 }], changes: [], fromCache: false });
+    return () => {};
+  };
+  const errors = [];
+  const s = createCollectionSync({ email: E, coll: 'items', store, listen, now: () => T0, onError: e => errors.push(e.code) });
+  let last = null;
+  s.subscribe(l => { last = l; });
+  await settle();
+  assert.deepEqual(errors, ['permission-denied']);
+  assert.equal(calls.length, 1);
+  assert.equal(s.replan(), true, 'a refused listener restarts at the next replan (claims or rules may have changed)');
+  await settle();
+  assert.equal(calls.length, 2);
+  assert.deepEqual(last.map(d => d.id), ['p1']);
+  assert.equal(s.replan(), false, 'a healthy listener is left alone');
+  s.stop();
+}
+
 // ---- a removal after this device's own pending write (a refused write) is checked with one read ----
 {
   let snap = null, fetched = 0;
