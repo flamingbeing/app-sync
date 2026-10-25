@@ -43,8 +43,10 @@
 //   A merge function may refuse a change it can't apply (a status changed elsewhere) by throwing { code:
 //   'write-conflict', remote: current }: the queue keeps the save as a conflict for the user, never failed.
 // -> { listen, fetchOne, commit, create, existing, stamp, stampFields, clearCache }
-//   commit(scope, coll, record, base, { key, ops }): a transaction that writes record (record._deleted: deletes it)
-//   only when the server's copy still matches base; throws { code: 'write-conflict', remote } otherwise (conflict.js).
+//   commit(scope, coll, record, base, { key, ops, after }): a transaction that writes record (record._deleted:
+//   deletes it) only when the server's copy still matches base; throws { code: 'write-conflict', remote } otherwise
+//   (conflict.js). after (0.6.3): a record not on the server is stamped after this time (its delete's tombstone, so
+//   devices holding that tombstone show it).
 //   In a merge collection it writes the merge of the server's copy with this change instead, and throws
 //   { code: 'not-found' } when the record was deleted elsewhere since base (never brought back). The write queue's
 //   backend(owner, kind, record, base, extra) maps kind to coll and calls commit(owner, coll, record, base, extra).
@@ -95,8 +97,9 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   const at = ms => time === 'iso' ? new Date(ms).toISOString() : ms;
   const next = prev => at(Math.max(Date.now(), timeOf(prev) + 1));
   const stampDoc = stamp || (doc => ({ ...doc, [stampField]: next() }));
-  // the default stamp again, now that the server's copy is known (an app's own stamp function is left as it is)
-  const forward = (doc, current) => stamp ? doc : { ...doc, [stampField]: next(current && current[stampField]) };
+  // the default stamp again, now that the server's copy is known (an app's own stamp function is left as it is); a
+  // record not on the server is stamped after `after` (0.6.3: the tombstone of its delete, which devices hold)
+  const forward = (doc, current, after = 0) => stamp ? doc : { ...doc, [stampField]: next(current ? current[stampField] : timeOf(after) > 0 ? timeOf(after) : undefined) };
   // the app's extra writes for this commit, in the same transaction
   const extra = (F, db, tx, ctx) => {
     if (!onCommit) return;
@@ -145,11 +148,11 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
   }
 
-  async function commit(scope, coll, record, base, { key = '', ops } = {}) {
+  async function commit(scope, coll, record, base, { key = '', ops, after = 0 } = {}) {
     const merging = mergeOf(coll);
-    if (merging) return commitMerged(scope, coll, record, base, merging, key, ops);
+    if (merging) return commitMerged(scope, coll, record, base, merging, key, ops, after);
     const holding = heldOf(coll);
-    if (holding) return commitHeld(scope, coll, record, base, holding, key, ops);
+    if (holding) return commitHeld(scope, coll, record, base, holding, key, ops, after);
     const deleted = record && record._deleted === true;
     const stamped = deleted ? { id: String(record.id), _deleted: true } : unstampServer(plain(stampDoc(plain(record), coll)));
     const canon = v => v ? canonical(coll, v) : null;
@@ -158,7 +161,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return F.runTransaction(db, async tx => {
       const snap = await tx.get(ref);
       const current = snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
-      const doc = deleted ? stamped : forward(stamped, current);
+      const doc = deleted ? stamped : forward(stamped, current, after);
       if (!checkWrite(canon(current), deleted ? null : canon(doc), canon(base))) return current || doc;
       if (deleted) tx.delete(ref); else tx.set(ref, withServer(F, stored(doc)));
       extra(F, db, tx, { scope, coll, before: current, after: deleted ? null : doc, key, ops });
@@ -167,7 +170,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   }
 
   // last-write-wins by field: the server's copy now, with this change merged in (never a conflict)
-  async function commitMerged(scope, coll, record, base, merging, key, ops) {
+  async function commitMerged(scope, coll, record, base, merging, key, ops, after) {
     const id = String(record.id), deleted = record._deleted === true;
     const { db, F } = await sdk();
     const ref = F.doc(colRef(db, F, scope, coll), id);
@@ -178,7 +181,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
       if (deleted) { if (current) { tx.delete(ref); extra(F, db, tx, { scope, coll, before: current, after: null, key, ops }); } return { id, _deleted: true }; }
       if (mark && key && Array.isArray(current?.[mark]) && current[mark].includes(key)) return current;   // applied already
       if (base && !current) { const e = new Error('This record was deleted elsewhere; your version is kept'); e.code = 'not-found'; throw e; }
-      const merged = forward(unstampServer(plain(stampDoc(plain({ ...merging(current ? plain(current) : null, plain(record), base ? plain(base) : null, ops), id }), coll))), current);
+      const merged = forward(unstampServer(plain(stampDoc(plain({ ...merging(current ? plain(current) : null, plain(record), base ? plain(base) : null, ops), id }), coll))), current, after);
       if (mark) { if (key) merged[mark] = [...(Array.isArray(current?.[mark]) ? current[mark] : []), key].slice(-MARKS); else if (current?.[mark]) merged[mark] = current[mark]; }
       if (current && recordSignature(bare(current)) === recordSignature(bare(merged))) return current;   // nothing changed
       tx.set(ref, withServer(F, stored(merged)));
@@ -189,7 +192,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
 
   // held conflicts by field (0.6.3): the server's copy now with this device's changes since base merged in; a field
   // changed on both sides to different values is held for the user (mergeHeld throws), never overwritten
-  async function commitHeld(scope, coll, record, base, { counters = [] }, key, ops) {
+  async function commitHeld(scope, coll, record, base, { counters = [] }, key, ops, after) {
     const id = String(record.id), deleted = record._deleted === true;
     const skip = [stampField, serverField, mark, edits].filter(Boolean);
     const without = v => { if (!v) return null; const out = { ...v }; for (const f of skip) delete out[f]; return out; };
@@ -211,7 +214,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
       try { merged = { ...mergeHeld(current ? without(plain(current)) : null, rec, was, { counters }), id }; }
       catch (e) { if (e.code === 'write-conflict') e.remote = current; throw e; }   // (the whole copy: who changed what)
       if (current && recordSignature(bare(current)) === recordSignature(bare(merged))) return current;   // nothing changed
-      const doc = forward(unstampServer(plain(stampDoc(merged, coll))), current);
+      const doc = forward(unstampServer(plain(stampDoc(merged, coll))), current, after);
       if (mark) { if (key) doc[mark] = [...(Array.isArray(current?.[mark]) ? current[mark] : []), key].slice(-MARKS); else if (current?.[mark]) doc[mark] = current[mark]; }
       if (edits) {
         const who = (editor && editor()) || {}, at = Date.now(), log = { ...(current?.[edits] || {}) }, from = was || {};

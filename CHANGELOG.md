@@ -20,6 +20,19 @@ Held conflicts by field, opt-in (`backend: { held }`); nothing changes for an ap
 - Report: `createReport({ byKind: true })` adds `held: { kind: n }` when there are conflicts; the Worker accepts and
   stores it (new D1 table `held`, the day's highest per kind) and the digest lists conflicts by kind.
 
+Two engine fixes, for every app (plain and held; both found by the held model test at 300 seeds; tests in
+`test/fixes.test.mjs`):
+
+- A delete heard while a save of that record is held (its bin or feed entry arrives while the record has unsent
+  saves) is now remembered (`meta.later`) and applied once the record's saves are done (`hub.settle(scope)`, which
+  createApp calls on every queue change; also when the collection next opens). Before, the tombstone was forgotten:
+  after the answer "theirs" (the deleted version) the stale record showed until the weekly full read.
+- A record deleted elsewhere and saved again here ("keep mine", a restore) is stamped after the delete's tombstone
+  known on this device (`hub.tomb(scope, coll, id)`, passed to the adapter as `commit(..., { after })`). Before, a
+  clock behind the deleter's stamped it at or below that tombstone, and devices holding the tombstone did not show it
+  until their weekly full read. Only records not on the server are affected; an update still stamps from the
+  server's copy.
+
 ## 0.6.2 (2026-10-25)
 
 - `createApp({ popupOnly: true })`: sign in with the popup only, never a redirect (not when the popup is blocked, nor

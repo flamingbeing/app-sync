@@ -110,6 +110,10 @@ export function createApp(options = {}) {
   const queue = createWriteQueue({
     store: outbox, getOwner: () => scope || null, online, registry, report, ...(heldOn ? { ignore: engineFields } : {}), ...options.queue,
     backend: async (owner, kind, record, base, extra) => {
+      // a record deleted elsewhere and saved again here (a restore, "keep mine"): stamped above the delete's tombstone,
+      // which other devices hold, or a clock behind the deleter's would leave it hidden there (0.6.3)
+      const tomb = record && !record._deleted ? hub.tomb(owner, collOf(kind), record.id) : 0;
+      if (tomb > 0) extra = { ...extra, after: tomb };
       try { return await (commit ? commit(owner, kind, record, base, extra) : adapter.commit(owner, collOf(kind), record, base, extra)); }
       catch (e) { if (extra?.key) codes.set(extra.key, e?.code || ''); throw e; }
     },
@@ -193,6 +197,8 @@ export function createApp(options = {}) {
       try { answer = onRefused({ code: codes.get(x.key) || '', message: x.error }, x); } catch (e) { console.warn('onRefused', e); }
       if (answer === 'archive') void queue.archive(x.key);
     }
+    // a delete heard while a save was held is applied once that record's saves are done (0.6.3)
+    if (scope) void hub.settle(scope);
     tell();
   });
 
