@@ -5,11 +5,41 @@
 1.0 will be the engine and the update module released as one stack, under one CHANGELOG, with the promises in the
 README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it; each is additive unless it says so.
 
-- 0.8.0: the lean public index, `src/internal.js`, the file manifest, the stored-format promise (this release).
-- 0.8.x: outside writes and sign-in/sign-out hooks; refused saves and job data that survive a reload, and the
+- 0.8.0: the lean public index, `src/internal.js`, the file manifest, the stored-format promise.
+- 0.8.1: outside writes and the sign-in/sign-out hooks.
+- 0.8.x: refused saves and job data that survive a reload, and the
   watch change info; `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
+
+## 0.8.1 (2026-10-25)
+
+Outside writes and the sign-in/sign-out hooks. Additive, except one `signOut` reason (below). Tests:
+`test/app.test.mjs` (+12).
+
+- **Writes outside the queue, one concept** (createApp): `app.track(promise, { kind, id })` counts a write the app
+  sends another way (straight to the SDK) as unsent until it settles; `app.unsentOutside(kind?, id?)` is their count,
+  a number at once; `app.outsideSettled(ms)` waits for them. They keep the status at saving, `flush()` and the
+  sign-out gate shut, `idle()` false and the watchdog from restarting the connection under them; with `kind` and `id`,
+  a delete heard from elsewhere waits for that record. `createApp({ outside: () => number })` adds writes the app
+  counts itself (an older version's leftovers in the SDK's queue). Deprecated, still working until 2.0:
+  `createApp({ quiet })` (false counts as one outside write) and `queue: { otherPending }`.
+- **`app.heard(meta)`**: a read or listener the app runs itself answered; it sets `facts().confirmed` / `heardAt` and
+  feeds the status and the watchdog (`{ fromCache: true }` does not confirm).
+- **`app.idle()`**: nothing being stored, sent, held in the queue or written outside it, for an update's `canReload`.
+- **`signIn({ hint, popupOnly, redirectFirst })`** per call: `hint` goes to Google as `login_hint`; the other two
+  override the createApp options for that call.
+- **`signOut({ wait, force, before })`**: `force` signs out anyway once the user chose to (after the wait; unsent
+  saves in every registered outbox and outside writes are forgotten with the device; someone else signed in
+  meanwhile still stops it). `before` is the app's own step, run after every listener stopped and before anything is
+  wiped (its own listeners, the Auth sign-out); a throw is named in `failed` and the sign-out goes on. It never runs
+  when the gate refuses.
+- **Changed:** `signOut` says `reason: 'refused'` (was `'unsent'`) when a save the server refused waits for the
+  user's Retry or Discard. Code that checks only `ok` is unaffected.
+- **One gate** (documented, test added): every outbox registered on the origin, this app's outside writes and its own
+  queue are checked before the app's own lists (`forget.extra`) are touched.
+- **What `hub`, `queue` and `parts` promise:** `queue.{ onChange, pending, status, error, unsent, conflicted }` and
+  `hub.drop`. The rest is an escape hatch with no promise; an app's own sign-out steps go in `before`.
 
 ## 0.8.0 (2026-10-25)
 
