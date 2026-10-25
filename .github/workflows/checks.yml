@@ -26,6 +26,8 @@ jobs:
       - uses: flamingbeing/app-devkit/setup-node@v1
         with:
           install: 'false'
+      - name: Types (JSDoc, tsc --checkJs)
+        run: npm install --no-save --no-package-lock typescript@5.8.3 && npx tsc -p .   # same as package.json
       - name: Repo check (with the Worker tests)
         run: node tools/check.mjs
       - name: Unit tests

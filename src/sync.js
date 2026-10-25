@@ -53,15 +53,33 @@
 // (or leaves this device's copy at or below the deleted version). tomb(id) is the highest tombstone known here for a
 // record (deleted, or deferred), so a record created again can be stamped above it (copies at or below it are hidden).
 
+/**
+ * @typedef {import('./types.js').Doc} Doc
+ * @typedef {import('./types.js').Stamp} Stamp
+ * @typedef {import('./types.js').CollMeta} CollMeta
+ * @typedef {import('./types.js').Change} Change
+ * @typedef {import('./types.js').Snapshot} Snapshot
+ * @typedef {import('./types.js').SnapMeta} SnapMeta
+ * @typedef {import('./types.js').Tomb} Tomb
+ * @typedef {import('./types.js').Listen} Listen
+ * @typedef {import('./types.js').FetchOne} FetchOne
+ * @typedef {import('./types.js').EngineStore} EngineStore
+ * @typedef {import('./types.js').ExpireRule} ExpireRule
+ */
+
 export const SKEW = 10 * 60e3;          // clocks may be this far behind
 export const FULL_EVERY = 7 * 864e5;     // a full read at least weekly
 export const GONE_KEEP = 8 * 864e5;      // deleted ids remembered (longer than the weekly full read)
 export const REPLAN_EVERY = 3600e3;     // a page left open checks hourly whether its full read is due
 
+/** @template T @param {T} v @returns {T} */
 const copy = v => JSON.parse(JSON.stringify(v));
+/** @param {any} a @param {any} b */
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 // a stamp as ms: a number, or an ISO string (0: none or unreadable)
+/** @param {any} v @returns {number} */
 export const timeOf = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;
+/** @param {any} d */
 const stamp = d => timeOf(d && d.updatedAt);
 
 // ---- pure helpers (test/sync.test.mjs) ----
@@ -69,6 +87,12 @@ const stamp = d => timeOf(d && d.updatedAt);
 // What to read now: the whole collection (first time, a week since the last full read, a clock gone back), or only
 // what changed since the last confirmed sync. newest: the highest updatedAt in the stored copy (0: none): anything
 // written after it is read too, so the time read from is anchored to the writers' stamps, not only to this clock.
+/**
+ * @param {CollMeta | null | undefined} meta
+ * @param {number} now
+ * @param {number} [newest]
+ * @returns {{ full: boolean, since: number | null }}
+ */
 export function plan(meta, now, newest = 0) {
   const m = meta || {};
   const full = !(m.fullAt > 0) || !(m.syncAt > 0) || now - m.fullAt > FULL_EVERY || m.fullAt > now + SKEW;
@@ -77,6 +101,11 @@ export function plan(meta, now, newest = 0) {
 
 // The same with server stamps: from the newest confirmed server stamp (meta.anchor), with no SKEW (the server's clock
 // stamped every document); a full read first, weekly, with no anchor yet, or when this clock went back.
+/**
+ * @param {CollMeta | null | undefined} meta
+ * @param {number} now
+ * @returns {{ full: boolean, since: number | null }}
+ */
 export function planServer(meta, now) {
   const m = meta || {};
   const full = !(m.fullAt > 0) || !(m.anchor > 0) || now - m.fullAt > FULL_EVERY || m.fullAt > now + SKEW;
@@ -84,10 +113,17 @@ export function planServer(meta, now) {
 }
 
 // the newest resolved server stamp in a confirmed snapshot's documents (skipping this device's pending writes)
+/** @param {Iterable<any>} docs @param {Set<string>} pending @param {string} field */
 const newestServer = (docs, pending, field) => { let n = 0; for (const d of docs) if (d && !pending.has(d.id)) n = Math.max(n, timeOf(d[field])); return n; };
 
 // A record that left a query without being deleted (locked, moved): the entry an app writes to an extra tombstone
 // feed, so devices holding that version (or older) drop it at their next open. A newer version shows again.
+/**
+ * @param {string} kind
+ * @param {Doc} record
+ * @param {Stamp} [at]
+ * @returns {{ id: string, kind: string, data: { id: string, updatedAt: Stamp | undefined }, deletedAt: Stamp }}
+ */
 export const leaveEntry = (kind, record, at = Date.now()) => {
   const t = Math.max(timeOf(at), timeOf(record.updatedAt) + 1);
   return { id: kind + ':' + record.id, kind, data: { id: String(record.id), updatedAt: record.updatedAt }, deletedAt: typeof at === 'string' ? new Date(t).toISOString() : t };
@@ -96,6 +132,13 @@ export const leaveEntry = (kind, record, at = Date.now()) => {
 // Apply a snapshot's changes to docs (a Map, changed in place). A copy older than a known deletion is stale and
 // skipped. A removal goes at once when the deletion is known or sure(id) says the server confirmed it; otherwise it
 // is returned in verify (e.g. this device's refused write leaving the query), to be checked with one read.
+/**
+ * @param {Map<string, Doc>} docs
+ * @param {Change[] | null | undefined} changes
+ * @param {Record<string, number>} [gone]
+ * @param {(id: string) => boolean} [sure]
+ * @returns {{ put: Doc[], del: string[], verify: string[] }}
+ */
 export function applyChanges(docs, changes, gone = {}, sure = () => false) {
   const put = [], del = [], verify = [];
   for (const c of changes || []) {
@@ -112,6 +155,11 @@ export function applyChanges(docs, changes, gone = {}, sure = () => false) {
 }
 
 // Replace docs with the server's whole list; returns what changed (so only that is written to the device).
+/**
+ * @param {Map<string, Doc>} docs
+ * @param {Doc[]} list
+ * @returns {{ put: Doc[], del: string[] }}
+ */
 export function replaceAll(docs, list) {
   const next = new Map(list.map(d => [d.id, d]));
   const put = list.filter(d => !docs.has(d.id) || !same(docs.get(d.id), d));
@@ -122,6 +170,12 @@ export function replaceAll(docs, list) {
 
 // Tombstones [{ id, deletedAt }]: remove each record unless it changed after that time; remember the ids. (From the
 // bin, the time is the binned version's updatedAt: binTombs.)
+/**
+ * @param {Map<string, Doc>} docs
+ * @param {Record<string, number>} gone
+ * @param {Tomb[] | null | undefined} tombs
+ * @returns {string[]} the ids removed
+ */
 export function applyTombs(docs, gone, tombs) {
   const del = [];
   for (const t of tombs || []) {
@@ -134,9 +188,15 @@ export function applyTombs(docs, gone, tombs) {
 }
 
 // records deleted on this device -> tombstones: each at the deleted version's stamp; at (now) only for one not held here
+/** @param {Map<string, Doc>} docs @param {any[]} ids @param {number} at @returns {Tomb[]} */
 export const dropTombs = (docs, ids, at) => ids.map(id => ({ id: String(id), deletedAt: stamp(docs.get(String(id))) || at }));
 
 // tombstones [{ id, deletedAt }] kept back (the record has saves not sent) -> later, { id: ms }, the highest per id
+/**
+ * @param {Record<string, number> | null | undefined} later
+ * @param {Tomb[] | null | undefined} tombs
+ * @returns {Record<string, number>}
+ */
 export function deferTombs(later, tombs) {
   const out = { ...(later || {}) };
   for (const t of tombs || []) { const at = timeOf(t && t.deletedAt); if (t && t.id && at) out[t.id] = Math.max(out[t.id] || 0, at); }
@@ -145,6 +205,13 @@ export function deferTombs(later, tombs) {
 
 // deferred tombstones (meta.later) of records not held any more (holding(id) false; ids: only those) applied to docs as
 // any tombstone: removed unless changed after it, and remembered in gone. -> { meta, del } (null: nothing to do)
+/**
+ * @param {Map<string, Doc>} docs
+ * @param {CollMeta} meta
+ * @param {string[] | null} ids
+ * @param {(id: string) => boolean} holding
+ * @returns {{ meta: CollMeta, del: string[] } | null}
+ */
 export function settleTombs(docs, meta, ids, holding) {
   const later = meta.later || {}, due = Object.keys(later).filter(id => (!ids || ids.includes(id)) && !holding(id));
   if (!due.length) return null;
@@ -154,6 +221,7 @@ export function settleTombs(docs, meta, ids, holding) {
   return { meta: { ...meta, gone, later: rest }, del };
 }
 
+/** @param {Record<string, number> | null | undefined} gone @param {number} now @returns {Record<string, number>} */
 export const pruneGone = (gone, now) => Object.fromEntries(Object.entries(gone || {}).filter(([, t]) => t > now - GONE_KEEP));
 
 // recycle bin entries { kind, data, deletedAt } -> tombstones per collection, kinds mapping an entry's kind to its
@@ -161,7 +229,13 @@ export const pruneGone = (gone, now) => Object.fromEntries(Object.entries(gone |
 // version's updatedAt, even when a fast clock stamped it after deletedAt (a copy of that version must still go): a copy
 // changed since then survives, so a bin entry whose delete was refused (the record changed elsewhere) removes nothing.
 // Older entries without one use deletedAt.
+/**
+ * @param {any[] | null | undefined} entries
+ * @param {Record<string, string>} [kinds]
+ * @returns {Record<string, Tomb[]>}
+ */
 export function binTombs(entries, kinds = {}) {
+  /** @type {Record<string, Tomb[]>} */
   const out = {};
   for (const e of entries || []) {
     const coll = e && Object.hasOwn(kinds, e.kind) ? kinds[e.kind] : null, id = e && e.data && e.data.id;
@@ -174,6 +248,13 @@ export function binTombs(entries, kinds = {}) {
 
 // Soft-deleted records whose field (e.g. removedAt) is older than rule.after: removed from docs and remembered in
 // gone at their stamp (so a copy restored later, stamped after it, shows again). rule null: none. -> ids removed
+/**
+ * @param {Map<string, Doc>} docs
+ * @param {Record<string, number>} gone
+ * @param {ExpireRule | undefined} rule
+ * @param {number} now
+ * @returns {string[]}
+ */
 export function expireDocs(docs, gone, rule, now) {
   if (!rule || !rule.field || !(rule.after > 0)) return [];
   const del = [];
@@ -186,7 +267,14 @@ export function expireDocs(docs, gone, rule, now) {
 
 // Stamp ids again one small write at a time (a batch fails whole when one of them was deleted since); a failed one
 // is skipped. write(id) -> Promise. Resolves to the ids stamped.
+/**
+ * @param {string[]} ids
+ * @param {(id: string) => Promise<any>} write
+ * @param {number} [size]
+ * @returns {Promise<string[]>}
+ */
 export async function eachSettled(ids, write, size = 20) {
+  /** @type {string[]} */
   const done = [];
   for (let i = 0; i < ids.length; i += size) {
     const part = ids.slice(i, i + size);
@@ -199,21 +287,56 @@ export async function eachSettled(ids, write, size = 20) {
 // ---- one collection ----
 
 // subscribe(cb) -> unsubscribe; cb(list, { fromCache, hasPendingWrites }) with the whole merged list (a copy each time).
+/**
+ * @typedef {object} CollectionSyncOptions
+ * @property {string} scope
+ * @property {string} coll
+ * @property {EngineStore} store
+ * @property {Listen} listen
+ * @property {FetchOne | null} [fetchOne]
+ * @property {() => number} [now]
+ * @property {(e: any) => void} [onError]
+ * @property {'skip' | 'full'} [unstamped]
+ * @property {ExpireRule} [expire]
+ * @property {'client' | 'server'} [stampMode]
+ * @property {string} [serverField]
+ * @property {(id: string) => boolean} [unsent]
+ * @property {(id: string, doc: Doc) => void} [onLeave]
+ */
+/** @param {CollectionSyncOptions} options */
 export function createCollectionSync({ scope, coll, store, listen, fetchOne = null, now = Date.now, onError = () => {}, unstamped = 'skip', expire = null, stampMode = 'client', serverField = 'serverAt', unsent = () => false, onLeave = () => {} }) {
   const server = stampMode === 'server';
   // a held record with saves not sent yet (can't tell: kept, the safe side)
+  /** @param {string} id */
   const holding = id => { try { return docs.has(id) && !!unsent(id); } catch { return docs.has(id); } };
+  /** @param {string} id */
   const left = id => { try { onLeave(id, copy(docs.get(id))); } catch (e) { console.warn('onLeave', e); } };
-  const subs = new Set(), local = new Set();   // local: ids last seen with this device's write pending
-  let docs = new Map(), meta = {}, flags = null, stopped = false, unlisten = null, chain = Promise.resolve(), runs = 0, planned = null;
+  /** @type {Set<(list: Doc[], meta: SnapMeta) => void>} */
+  const subs = new Set();
+  const local = new Set();   // local: ids last seen with this device's write pending
+  /** @type {Map<string, Doc>} */
+  let docs = new Map();
+  /** @type {CollMeta} */
+  let meta = {};
+  /** @type {SnapMeta | null} */
+  let flags = null;
+  /** @type {(() => void) | null} */
+  let unlisten = null;
+  /** @type {Promise<any>} */
+  let chain = Promise.resolve();
+  /** @type {{ full: boolean, since: number | null } | null} */
+  let planned = null;
+  let stopped = false, runs = 0;
   // A write that fails (storage full) leaves the device's copy short of what meta claims: until a later write puts the
   // whole list back (replace), nothing else is written, and the next start reads everything (fullAt 0).
   let dirty = false;
+  /** @param {{ put?: Doc[], del?: string[], meta?: CollMeta, replace?: boolean }} op */
   const persist = op => (chain = chain.then(async () => {
     const heal = dirty;
     await store.write(coll, heal ? { replace: true, put: [...docs.values()], meta } : op);
     if (heal) dirty = false;
   }).catch(e => { dirty = true; meta = { ...meta, fullAt: 0 }; console.warn('Local store not saved', e); }));
+  /** @param {(list: Doc[], meta: SnapMeta) => void} cb */
   const send = cb => { if (flags && subs.has(cb)) cb(copy([...docs.values()]), { ...flags }); };
   const emit = () => { for (const cb of subs) send(cb); };
 
@@ -249,6 +372,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     if (stopped) unlisten();
   }
 
+  /** @param {Snapshot} s */
   function onSnap(s) {
     if (stopped) return;
     const t = now();
@@ -267,7 +391,9 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       changed = !!(r.put.length || r.del.length);
       persist({ ...r, meta });
     } else {
-      const unsure = new Set(), kept = [];
+      const unsure = new Set();
+      /** @type {string[]} */
+      const kept = [];
       const changes = (s.changes || []).filter(c => c.type !== 'removed' || !holding(c.id) || (kept.push(c.id), false));
       for (const c of changes) {
         if (c.type === 'removed') { if (s.fromCache || local.has(c.id)) unsure.add(c.id); local.delete(c.id); }
@@ -291,7 +417,9 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
   }
 
   // a record left the query without a known deletion: one read says whether it still exists
+  /** @param {string} id */
   async function verify(id) {
+    /** @type {Doc | null | undefined} */
     let doc;
     try { doc = fetchOne ? await fetchOne(scope, coll, id) : undefined; } catch { doc = undefined; }
     if (stopped) return;
@@ -309,6 +437,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
   }
 
   return {
+    /** @param {(list: Doc[], meta: SnapMeta) => void} cb @returns {() => boolean} */
     subscribe(cb) { subs.add(cb); if (flags) queueMicrotask(() => send(cb)); return () => subs.delete(cb); },
     get size() { return subs.size; },
     ready,
@@ -317,6 +446,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     replan() { if (stopped || !planned || planned.full || !planNow().full) return false; start(); return true; },
     // deleted here (for good, or into the bin): gone at once, and copies of that version (or older) arriving later are
     // ignored; the tombstone is the deleted version's stamp (not this clock), so a restore stamped after it shows
+    /** @param {string[]} ids @param {number} [at] */
     async drop(ids, at = now()) {
       await ready;
       const del = applyTombs(docs, meta.gone ||= {}, dropTombs(docs, ids, at));
@@ -325,6 +455,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     },
     // tombstones from the bin or a feed; a record with saves not sent yet stays and is reported, as when it leaves
     // the query (its tombstone is not remembered, so the save's answer shows)
+    /** @param {Tomb[] | null | undefined} list */
     async tombs(list) {
       await ready;
       const kept = (list || []).filter(t => t && t.id && holding(t.id) && stamp(docs.get(t.id)) <= timeOf(t.deletedAt));
@@ -335,6 +466,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       if (del.length) emit();
     },
     // deferred tombstones of records whose saves are done now (ids: only those; default all) -> ids removed
+    /** @param {string[] | null} [ids] @returns {Promise<string[]>} */
     async settle(ids = null) {
       await ready;
       if (stopped) return [];
@@ -346,6 +478,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       return r.del;
     },
     // the highest tombstone known here for id (ms; 0: none)
+    /** @param {string} id */
     tomb: id => Math.max(Number((meta.gone || {})[id]) || 0, Number((meta.later || {})[id]) || 0),
     waiting: () => Object.keys(meta.later || {}),
     // the device's store was deleted under this engine (another tab signed out or switched account) and opened
@@ -362,10 +495,32 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
 
 // ---- the recycle bin as a feed of tombstones ----
 // Listens to bin entries changed since the last sync (deletedAt) and hands them on; keeps only its meta record.
+/**
+ * @typedef {object} TombFeedOptions
+ * @property {string} scope
+ * @property {EngineStore} store
+ * @property {Listen} listen
+ * @property {(byColl: Record<string, Tomb[]>) => Promise<void>} apply
+ * @property {Record<string, string>} [kinds]
+ * @property {string} [coll]
+ * @property {() => number} [now]
+ * @property {(e: any) => void} [onError]
+ * @property {'client' | 'server'} [stampMode]
+ * @property {string} [serverField]
+ */
+/** @param {TombFeedOptions} options */
 export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll = 'bin', now = Date.now, onError = () => {}, stampMode = 'client', serverField = 'serverAt' }) {
   const server = stampMode === 'server';
   const planNow = () => server ? planServer(meta, now()) : plan(meta, now(), Number(meta.newest) || 0);
-  let meta = {}, stopped = false, unlisten = null, chain = Promise.resolve(), runs = 0, planned = null;
+  /** @type {CollMeta} */
+  let meta = {};
+  /** @type {(() => void) | null} */
+  let unlisten = null;
+  /** @type {Promise<any>} */
+  let chain = Promise.resolve();
+  /** @type {{ full: boolean, since: number | null } | null} */
+  let planned = null;
+  let stopped = false, runs = 0;
   const ready = (async () => {
     meta = (await store.load(coll)).meta || {};
     if (stopped) return;
@@ -417,11 +572,32 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
 // metaOnly). unstamped ('skip' | 'full'), expire ({ [coll]: { field, after } }) and stampMode ('client' | 'server',
 // with serverField; the bin and feeds too): see the top of this file.
 export const GRACE = 1500;
+/**
+ * @typedef {object} SyncHubOptions
+ * @property {(scope: string) => Promise<import('./types.js').Store>} openStore
+ * @property {Listen} listen
+ * @property {FetchOne | null} [fetchOne]
+ * @property {() => number} [now]
+ * @property {(e: any) => void} [onError]
+ * @property {number} [grace]
+ * @property {string | null} [bin]
+ * @property {Record<string, string>} [binKinds]
+ * @property {Record<string, Record<string, string>>} [feeds]
+ * @property {'skip' | 'full'} [unstamped]
+ * @property {Record<string, { field: string, after: number }>} [expire]
+ * @property {'client' | 'server'} [stampMode]
+ * @property {string} [serverField]
+ * @property {(scope: string, coll: string, id: string) => boolean} [unsent]
+ * @property {(scope: string, coll: string, id: string, doc: Doc) => void} [onLeave]
+ */
+/** @param {SyncHubOptions} options */
 export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, feeds: extraFeeds = {}, unstamped = 'skip', expire = {}, stampMode = 'client', serverField = 'serverAt', unsent = () => false, onLeave = () => {} }) {
-  const feedKinds = [...(bin ? [[bin, binKinds]] : []), ...Object.entries(extraFeeds || {}).filter(([c]) => c && c !== bin)];
+  const feedKinds = [...(bin ? /** @type {[string, Record<string, string>][]} */ ([[bin, binKinds]]) : []), ...Object.entries(extraFeeds || {}).filter(([c]) => c && c !== bin)];
   const engines = new Map(), feeds = new Map(), stores = new Map(), timers = new Map(), stopping = new Map(), tombing = new Map();
   const waiting = new Set();   // scope\ncoll\nid with a deferred tombstone in a collection's stored copy (not running)
+  /** @param {string} scope @param {string} coll */
   const key = (scope, coll) => scope + '\n' + coll;
+  /** @param {string} scope @returns {Promise<import('./types.js').Store>} */
   async function storeFor(scope) {
     let s = stores.get(scope);
     if (s) { const got = await s; if (!got.closed) return got; }
@@ -441,6 +617,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
   // of an engine just stopped on the same collection
   // (and for tombstones being written straight into it, so an engine starting meanwhile reads them and its meta
   // writes keep them)
+  /** @param {string} scope @returns {EngineStore} */
   const lazyStore = scope => ({
     load: async coll => {
       const k = key(scope, coll);
@@ -448,9 +625,10 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       await (tombing.get(k) || Promise.resolve()).catch(() => {});
       return (await storeFor(scope)).load(coll);
     },
-    write: async (coll, op) => (await storeFor(scope)).write(coll, op),
+    write: async (/** @type {string} */ coll, /** @type {any} */ op) => (await storeFor(scope)).write(coll, op),
   });
   // tombstones for a collection that isn't running: straight into its stored copy, one after another per collection
+  /** @param {string} scope @param {string} coll @param {any[]} list @param {boolean} [drop] @returns {Promise<void>} */
   function storeTombs(scope, coll, list, drop = false) {
     const k = key(scope, coll);
     const run = (tombing.get(k) || Promise.resolve()).catch(() => {}).then(async () => {
@@ -458,6 +636,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       const st = await storeFor(scope), got = await st.load(coll);
       const docs = new Map(got.docs.map(d => [d.id, d])), meta = got.meta || {};
       // (as a running engine: a record with saves not sent yet stays, reported)
+      /** @param {Tomb} t */
       const held = t => { if (!docs.has(t.id) || stamp(docs.get(t.id)) > timeOf(t.deletedAt)) return false; try { return !!unsent(scope, coll, t.id); } catch { return true; } };
       const kept = drop ? [] : (list || []).filter(t => t && t.id && held(t));
       const del = applyTombs(docs, meta.gone ||= {}, drop ? dropTombs(docs, list, now()) : list.filter(t => !kept.includes(t)));
@@ -474,19 +653,22 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     tombing.set(k, tracked);
     return run;
   }
+  /** @param {string} scope */
   function tombsFor(scope) {
-    return async byColl => {
+    return async (/** @type {Record<string, Tomb[]>} */ byColl) => {
       for (const [coll, list] of Object.entries(byColl)) {
         const e = engines.get(key(scope, coll));
         await (e ? e.tombs(list) : storeTombs(scope, coll, list));
       }
     };
   }
+  /** @param {string} scope */
   function idle(scope) {
     if ([...engines.keys()].some(k => k.startsWith(scope + '\n'))) return;
     for (const [k, f] of feeds) if (k.startsWith(scope + '\n')) { f.stop(); feeds.delete(k); }
   }
   return {
+    /** @param {string} scope @param {string} coll @param {(list: Doc[], meta: SnapMeta) => void} cb @returns {() => void} */
     watch(scope, coll, cb) {
       const k = key(scope, coll);
       let e = engines.get(k);
@@ -512,12 +694,14 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       };
     },
     // records deleted on this device (for good, or into the bin)
+    /** @param {string} scope @param {string} coll @param {string[]} ids @returns {Promise<void>} */
     drop(scope, coll, ids) {
       if (!ids || !ids.length) return Promise.resolve();
       const e = engines.get(key(scope, coll));
-      return (e ? e.drop(ids) : storeTombs(scope, coll, ids, true)).catch(err => console.warn('Local store not updated', err));
+      return (e ? e.drop(ids) : storeTombs(scope, coll, ids, true)).catch((/** @type {any} */ err) => console.warn('Local store not updated', err));
     },
     // deferred tombstones (0.6.3): apply those of scope whose record's saves are done (call when the queue changes)
+    /** @param {string} scope */
     async settle(scope) {
       const runs = [];
       for (const [k, e] of engines) if (k.startsWith(scope + '\n') && e.waiting().length) runs.push(e.settle());
@@ -526,9 +710,10 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
         for (const w of [...waiting]) if (w.startsWith(key(scope, coll) + '\n')) waiting.delete(w);
         runs.push(storeTombs(scope, coll, []));
       }
-      await Promise.all(runs.map(p => p.catch(err => console.warn('Local store not updated', err))));
+      await Promise.all(runs.map(p => p.catch((/** @type {any} */ err) => console.warn('Local store not updated', err))));
     },
     // the highest tombstone known on this device for a record (ms; 0: none), from its running engine
+    /** @param {string} scope @param {string} coll @param {any} id */
     tomb(scope, coll, id) { const e = engines.get(key(scope, coll)); return e ? e.tomb(String(id)) : 0; },
     // stop everything and forget open stores (sign-out); resolves when pending local writes are done
     async stopAll() {
@@ -546,6 +731,12 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
 
 // Call hub.replan() when the page is shown again, the browser comes back online, and every `every` ms while the page
 // is shown (a page that stays visible for days never wakes). -> a function that stops it.
+/**
+ * @param {{ replan: () => number }} hub
+ * @param {any} [win]
+ * @param {{ every?: number }} [options]
+ * @returns {() => void} stops it
+ */
 export function replanOnWake(hub, win = typeof window !== 'undefined' ? window : null, { every = REPLAN_EVERY } = {}) {
   if (!win || !win.addEventListener) return () => {};
   const doc = win.document;

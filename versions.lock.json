@@ -211,5 +211,25 @@
     "src/sync.js": "91c363b9ac82ec3ea8f98b26df2c0c463156c0dd9eaf14bc6c93fa330fad2f47",
     "src/watchdog.js": "acfa925f1c5787538462aecaf7288ce71b1ce4b9721a29ae229e06d00d3caecd",
     "src/writes.js": "4c40097eb76df3b536fa870bc2bdc581ad2b1e460d70d101b0ad684df5084704"
+  },
+  "0.7.0": {
+    "LICENSE": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "NOTICE": "a4a91e7763c9b0d122fcb4c69fcfb4088427b73bd713f37d513669095430894c",
+    "index.js": "ff18213923ea7d70964f92849bc459935f475005024be2bf1dd1708c15d5a44b",
+    "src/app.js": "842f05c457ac10084dc4afe1312b5c38c104fa7527b06770897d06506fc18f9e",
+    "src/cache.js": "a2e8a213041e5ab944e69e0a87292faed59f3337a7e468330e45ed9dd10c6b55",
+    "src/conflict.js": "e3e6b3e160170bcb15f4f7815c9af5e922cce9c41a9e8e2c259ccd77be12a2dd",
+    "src/firestore.js": "affa20e1ececda54ada29f34bc8774ac9f12882ba29fa5976a4db6ac87d14d6a",
+    "src/forget.js": "0f9a0f128ce8eb1620f062bfff1bb49619fa63b7560a9e0feccc035538c8ce0a",
+    "src/outbox.js": "fb38f5a8e1020b0acc6ba0a681335345369f2e48f7acd567789af37bb5f73a0d",
+    "src/persist.js": "c7386e6d85e967b0f2ec898034bd4d383628ba10c05478fb9394ca7e925a1209",
+    "src/registry.js": "0cd94e17ab1d0d9b8fd1a69dfcb88139071bfff279d8b8a8dd9e24929f93bcc1",
+    "src/report.js": "54b802601609d47539b3d4486586e6e7ef44f35f0d70fd0e3b7b5053a52832cb",
+    "src/status.js": "ebef20b3e9530cf4e93d0ca1f1ec1b010d2511a78b9f962a944739207e8e50ab",
+    "src/store.js": "3aa215d883895635015dc725fde5c17d5bf98c5819537122dfd173dbe8d07084",
+    "src/sync.js": "1e142de39fd37b9a50fe0ec72b08ae47cb40a7613a0a0f2770f2b6d00eceffb7",
+    "src/types.js": "8009f984ab98afab5c4ec6fc150f3c17e32794174b4d89e7fee9bb68feb1de66",
+    "src/watchdog.js": "f89d77f54a3f13923b0e4830f7112990d0a9f2049d918fcf8fe9d77c1789f3a8",
+    "src/writes.js": "b1d5ac726e9ba005ae23b8f11225e9c9bce9c465f6c3670b9c2ea7c8a5b130e4"
   }
 }
