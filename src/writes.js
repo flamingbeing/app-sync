@@ -106,6 +106,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   const notify = () => { for (const fn of listeners) fn(); };
   /** @type {Map<string, { kind: string, owner: string, record: Doc }>} */
   const inflight = new Map();   // saves called but not stored yet (overlay shows them)
+  let storing = 0;   // saves called and not finished (flush waits for all of them, however many are for one record)
   /** @param {string | null} email @param {number} gen */
   const current = (email, gen) => owner === email && generation === gen && getOwner() === email;
   // sorted again only when the list changes (a job's at and key never do; callers never change it in place): overlay
@@ -244,10 +245,10 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (getOwner() !== email) throw new Error('Account changed; the editor has not been saved');
     // shown at once (0.7.2): the lists have this save from now, before it is stored, until its job takes over
     const early = { kind, owner: email, record: copy(record) }, earlyKey = kind + ':' + record.id;
-    inflight.set(earlyKey, early); notify();
+    storing++;
     const unshow = () => { if (inflight.get(earlyKey) !== early) return false; inflight.delete(earlyKey); return true; };
-    try { return await saveNow(kind, email, record, base, ops, meta, unshow); }
-    finally { if (unshow()) notify(); }
+    try { inflight.set(earlyKey, early); notify(); return await saveNow(kind, email, record, base, ops, meta, unshow); }
+    finally { storing--; if (unshow()) notify(); }
   }
   /** @param {string} kind @param {string} email @param {Doc} record @param {Doc | null} base @param {any} ops @param {any} meta @param {() => boolean} unshow @returns {Promise<Doc>} */
   async function saveNow(kind, email, record, base, ops, meta, unshow) {
@@ -412,6 +413,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       await Promise.race([kick().then(() => Promise.all([...running.values()])), delay(ms)]);
       // (0.8.2) a refused save set aside is not given up either: kept until the person retries or discards it
       if (jobs.some(x => !terminal.has(x.state) || x.refused)) return false;
+      // a save still being stored is unsent too (forgetting now would let its row land after the wipe)
+      if (storing) return false;
       // writes the app sends another way (straight to the SDK) and not yet on the server
       if (otherPending) { try { if (await otherPending()) return false; } catch { return false; } }
       // the other apps on this origin (they share sign-in): their unsent saves for this user
