@@ -622,3 +622,38 @@ test('one gate over every registered outbox: another app\'s unsent save on this 
   assert.deepEqual({ ok: r.ok, reason: r.reason }, { ok: false, reason: 'unsent' });
   assert.deepEqual(extra, [], 'the app\'s own lists are kept');
 });
+
+test('flush: a save made while outside writes settle keeps the gate shut (review, 0.8.1)', async () => {
+  const nav = fakeNav({ online: false });
+  const { app } = makeApp({ nav });
+  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+  void app.track(new Promise(r => setTimeout(r, 40)));
+  setTimeout(() => { void app.save('item', 's1', { id: 'late', text: 'Fake' }); }, 10);
+  assert.equal(await app.flush(300), false);
+  const r = await app.signOut({ wait: 300 });
+  assert.equal(r.ok, false);
+});
+
+test('signOut({ before }): someone else signed in during before stops the wipe; signed out (none) goes on (review, 0.8.1)', async () => {
+  const sdkParts = fakeAuthSdk();
+  const { app, adapter } = makeApp({ sdkParts });
+  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+  const r = await app.signOut({ force: true, before: async () => { sdkParts.auth.currentUser = fakeUser({ uid: 'u2', email: 'other@example.test' }); } });
+  assert.deepEqual({ ok: r.ok, reason: r.reason }, { ok: false, reason: 'changed' });
+  assert.equal(adapter.cleared, 0);
+  const b = makeApp();
+  await b.app.onUser(() => {}); await b.app.signIn(); await b.app.open('s1');
+  const r2 = await b.app.signOut({ before: async () => { await b.sdk.A.signOut(b.sdk.auth); } });
+  assert.equal(r2.ok, true, 'the app\'s own Auth sign-out in before');
+});
+
+test('a tracked write that settles applies deletes held for its record (review, 0.8.1)', async () => {
+  const { app } = makeApp();
+  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+  let settled = 0;
+  const s = app.hub.settle;
+  app.hub.settle = sc => { settled++; return s(sc); };
+  await app.track(Promise.resolve(), { kind: 'item', id: 'r1' });
+  await settle(5);
+  assert.ok(settled > 0);
+});

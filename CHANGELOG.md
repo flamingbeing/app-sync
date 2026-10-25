@@ -15,7 +15,7 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 ## 0.8.1 (2026-10-25)
 
 Outside writes and the sign-in/sign-out hooks. Additive, except one `signOut` reason (below). Tests:
-`test/app.test.mjs` (+12).
+`test/app.test.mjs` (+15).
 
 - **Writes outside the queue, one concept** (createApp): `app.track(promise, { kind, id })` counts a write the app
   sends another way (straight to the SDK) as unsent until it settles; `app.unsentOutside(kind?, id?)` is their count,

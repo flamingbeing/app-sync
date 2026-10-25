@@ -242,7 +242,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   function track(promise, { kind = '', id = '' } = {}) {
     const t = { kind, id: String(id) };
     tracked.add(t); tell();
-    const done = () => { if (!tracked.delete(t)) return; tell(); for (const fn of [...settledWaits]) fn(); };
+    const done = () => { if (!tracked.delete(t)) return; if (scope) void hub.settle(scope); tell(); for (const fn of [...settledWaits]) fn(); };
     const p = Promise.resolve(promise);
     p.then(done, done);
     return p;
@@ -361,9 +361,9 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   async function flush(ms = 4000) {
     const end = Date.now() + ms;   // (one wait in all, 0.7.3: the saves being stored, then their sends)
     if (saving.size) await Promise.race([Promise.allSettled([...saving]), new Promise(r => setTimeout(r, ms))]);
-    const sent = await queue.flush(Math.max(0, end - Date.now()));
-    const outside = await outsideSettled(Math.max(0, end - Date.now()));   // (0.8.1: tracked writes, the app's count)
-    return sent && outside && !saving.size;   // (a save still being stored is not sent)
+    await outsideSettled(Math.max(0, end - Date.now()));   // (0.8.1: tracked writes and the app's count first, so the
+    const sent = await queue.flush(Math.max(0, end - Date.now()));   // queue's answer is the last one asked)
+    return sent && !unsentOutside() && !saving.size;   // (a save still being stored is not sent)
   }
   /** @param {string} s */
   async function open(s) { scope = s; await queue.activate(s); tell(); }
@@ -425,7 +425,13 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
       proceed: async () => {
         if ((s.auth.currentUser?.uid || null) !== uid) { reason = 'changed'; return false; }
         if (!force && !(await flush(1500))) { reason = shut(); return false; }
-        if (before) { try { await before(); } catch (e) { beforeFailed = true; console.warn('signOut: before', e); } }
+        if (before) {
+          try { await before(); } catch (e) { beforeFailed = true; console.warn('signOut: before', e); }
+          // (before may sign out of Auth itself; someone else signed in meanwhile, or a save made then, stops the wipe)
+          const now = s.auth.currentUser?.uid || null;
+          if (now && now !== uid) { reason = 'changed'; return false; }
+          if (!force && (saving.size || queue.pending() || unsentOutside())) { reason = shut(); return false; }
+        }
         return true;
       },
     });
