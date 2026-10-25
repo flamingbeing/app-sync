@@ -246,6 +246,16 @@ assert.ok(entry.deletedAt > l2.updatedAt);
 await LOCK.backend.clearCache();
 await Promise.all([FAST].map(d => F.terminate(d.db)));
 
+// ---- 0.5.1: create (no read in the transaction) and existing (ids the server has) ----
+const made = await A.backend.create(S, 'made', { id: 'm1', text: 'Fake new' });
+assert.ok(made.updatedAt > 0);
+assert.equal((await B.backend.fetchOne(S, 'made', 'm1')).text, 'Fake new');
+assert.equal((await A.backend.create(S, 'made', { id: 'm1', text: 'Fake resend' })).text, 'Fake new', 'a resend leaves the first copy');
+for (let i = 2; i <= 40; i++) await A.backend.create(S, 'made', { id: 'm' + i, text: 'Fake ' + i });
+const ask = Array.from({ length: 70 }, (_, i) => 'm' + (i + 1));
+const have = await B.backend.existing(S, 'made', ask);
+assert.deepEqual([...have].sort(), Array.from({ length: 40 }, (_, i) => 'm' + (i + 1)).sort(), 'only the 40 there, across three queries');
+
 await Promise.all([A, B, OLD].map(d => F.terminate(d.db)));
 console.log('firestore emulator tests passed');
 process.exit(0);

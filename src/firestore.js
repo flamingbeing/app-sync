@@ -31,12 +31,22 @@
 //   segments. Not called when nothing is written (the server already has this content).
 //   A merge function may refuse a change it can't apply (a status changed elsewhere) by throwing { code:
 //   'write-conflict', remote: current }: the queue keeps the save as a conflict for the user, never failed.
-// -> { listen, fetchOne, commit, stamp, stampFields, clearCache }
+// -> { listen, fetchOne, commit, create, existing, stamp, stampFields, clearCache }
 //   commit(scope, coll, record, base, { key, ops }): a transaction that writes record (record._deleted: deletes it)
 //   only when the server's copy still matches base; throws { code: 'write-conflict', remote } otherwise (conflict.js).
 //   In a merge collection it writes the merge of the server's copy with this change instead, and throws
 //   { code: 'not-found' } when the record was deleted elsewhere since base (never brought back). The write queue's
 //   backend(owner, kind, record, base, extra) maps kind to coll and calls commit(owner, coll, record, base, extra).
+//   create(scope, coll, record): a new record written without reading it inside the transaction (0.5.1), for rules
+//   that can't answer a read of a document that isn't there yet (someone who may create a record but not read
+//   others'). It looks on the server first: a copy already there (an earlier send whose answer was lost) is returned
+//   and nothing is written; a read the rules refuse counts as not there. Then a transaction that only sets it,
+//   stamped as commit stamps (so it never waits in the SDK's offline queue: offline it throws 'unavailable'). Refused
+//   with 'permission-denied' (the earlier send landed, so this is now an update), it looks again and returns that
+//   copy when it is there; otherwise the refusal stands. No conflict check: use commit for a change to a record.
+//   existing(scope, coll, ids) -> Promise of a Set of the ids the server has (0.5.1), asked 30 at a time (Firestore's
+//   'in' limit), four queries at once, from the server, never the cache (throws offline: it can't tell). Each query
+//   counts as billed reads (one per document found, at least one). For a restore that only adds what is missing.
 //   stamp(prev) -> the stamp value for now (for an app's own writes outside the queue, so every write is stamped
 //   alike); with prev (the record's stamp before this write), max(now, prev + 1).
 //   stampFields(prev) -> Promise of the fields to add to such a write: { [field]: stamp(prev) } and, in server mode,
@@ -162,6 +172,46 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     });
   }
 
+  async function create(scope, coll, record) {
+    const stamped = unstampServer(plain(stampDoc(plain(record), coll)));
+    const { db, F } = await sdk();
+    const ref = F.doc(colRef(db, F, scope, coll), String(stamped.id));
+    const found = async () => {
+      const snap = await F.getDocFromServer(ref).catch(e => { if (e && e.code === 'permission-denied') return null; throw e; });
+      onRead(coll, 'billed', 1);
+      return snap && snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
+    };
+    const there = await found();
+    if (there) return there;
+    try {
+      await F.runTransaction(db, async tx => { tx.set(ref, withServer(F, stored(stamped))); });
+      return stamped;
+    } catch (e) {
+      if (e && e.code === 'permission-denied') { const now = await found().catch(() => null); if (now) return now; }
+      throw e;
+    }
+  }
+
+  const IN = 30, AT_ONCE = 4;
+  async function existing(scope, coll, ids) {
+    const want = [...new Set((ids || []).map(String))];
+    const have = new Set();
+    if (!want.length) return have;
+    const { db, F } = await sdk();
+    const col = colRef(db, F, scope, coll);
+    const lookup = async part => {
+      const snap = await F.getDocsFromServer(F.query(col, F.where(F.documentId(), 'in', part)));
+      onRead(coll, 'billed', Math.max(1, snap.size));
+      for (const d of snap.docs) have.add(d.id);
+    };
+    for (let i = 0; i < want.length; i += IN * AT_ONCE) {
+      const parts = [];
+      for (let k = 0; k < AT_ONCE; k++) { const part = want.slice(i + IN * k, i + IN * (k + 1)); if (part.length) parts.push(part); }
+      await Promise.all(parts.map(lookup));
+    }
+    return have;
+  }
+
   async function stampFields(prev) {
     const { F } = server ? await sdk() : {};
     return withServer(F, { [stampField]: next(prev) });
@@ -174,5 +224,5 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return Promise.race([clear(), late]).finally(() => clearTimeout(timer));
   }
 
-  return { listen, fetchOne, commit, stamp: prev => next(prev), stampFields, clearCache };
+  return { listen, fetchOne, commit, create, existing, stamp: prev => next(prev), stampFields, clearCache };
 }

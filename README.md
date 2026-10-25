@@ -165,6 +165,11 @@ current }` (an Error with those fields). The save ends as a conflict with the se
 discard or try again. Refused by the rules instead (`permission-denied`), it would end as failed and keep sign-out
 shut until the user deals with it.
 
+**Creates the rules can't read first (0.5.1).** When someone may create a record but not read one that isn't there
+yet, send the first save with `fs.create(scope, coll, record)` instead of `commit` (no read inside the transaction;
+a resend finds the first copy). A restore that adds only missing records asks `fs.existing(scope, coll, ids)` first,
+then saves the rest through the queue with no base.
+
 **Two phones at once.** A Firestore transaction that lost a race with another device's (`aborted`) is retried like a
 dropped connection, never shown as needing the user.
 
