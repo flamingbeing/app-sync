@@ -1,6 +1,8 @@
 # Status
 
 ## Now
+- 0.6.4 (25 Oct): `firestoreCache` helper (multi-tab cache, steps down to single-tab then memory on quota or "Unexpected state", remembered per device, report codes) and README on what the watchdog covers.
+
 - 0.4.1: fault-injection tests (offline flapping, two devices on one record, sign-out mid-queue, 0.3.0 data, transient errors, leaving with unsent saves, reload with a draft open); a bin or feed entry no longer drops a record with unsent saves.
 - 0.4.0 and update 0.2.0 (safety pack): stamps forward, commit hook, `aborted` retried, honest status, unsent records kept on leave, `forgetDevice` + `clearCache`; update reload waits for `canReload`, `waitForGo`, online check, stamp tool pinned rule and SGT date.
 - 0.3.0: server stamps (`stampMode: 'server'`), extra tombstone feeds (`feeds`, `leaveEntry`), hourly re-plan in `replanOnWake`.

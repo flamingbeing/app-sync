@@ -34,6 +34,7 @@ What it does:
 | `src/store.js` | `createStores` (the device copy: `openStore`, `wipeStores`) |
 | `src/outbox.js` | `createOutbox` (the write queue's durable store) |
 | `src/watchdog.js` | `decide`, `createWatchdog` |
+| `src/cache.js` | `firestoreCache` (multi-tab offline cache, steps down on quota or "Unexpected state") |
 | `src/status.js` | `syncStatus`, `attentionCount` |
 | `src/persist.js` | `persistGuard` (asks the browser to keep the site's storage) |
 | `src/firestore.js` | `createFirestoreBackend` |
@@ -89,6 +90,29 @@ records who changed each field and when (`{ by, device, at }` per top-level fiel
 rules that whitelist fields must allow that field (and `mark`'s). `createReport({ byKind: true })` counts held saves
 per kind in the report, so a kind that clashes often shows in the digest. Off by default: without `held`, every
 collection keeps the whole-record check.
+
+### The offline cache and what the watchdog covers (0.6.4)
+
+```js
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, persistentSingleTabManager, memoryLocalCache } from 'firebase/firestore';
+const F = { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, persistentSingleTabManager, memoryLocalCache };
+const { db, mode, failed } = firestoreCache(F, { app: firebaseApp, report });   // mode: 'multi' | 'single' | 'memory'
+// from a listener's error callback or a failed SDK call:
+if (failed(err).changed) location.reload();      // the next load starts one step lower
+```
+
+Tabs share one offline cache (`multi`); if the SDK refuses it, or the storage is full, the device steps down to one
+tab (`single`), then to memory only, and stays there (remembered on the device; `reset()` tries again). The step goes
+in the report as `cache-quota` / `cache-state` (what failed) and `cache-single` / `cache-memory` (the step in use).
+Memory only means nothing offline between loads; unsent saves still wait in the outbox, which is separate. Without
+`app`, the helper returns just `cache` for your own `initializeFirestore`. Apps that don't call it keep their cache.
+
+The listener watchdog covers a stream that goes **silent** (shows only the phone's copy for too long, a flag that
+never clears, no word from the server after the phone comes back); it listens again, then restarts the connection.
+It does **not** cover: an offline phone whose listener never calls back at all
+([firebase-js-sdk#8696](https://github.com/firebase/firebase-js-sdk/issues/8696): the status then says `offline`, not
+`synced`), nor a full browser storage quota ([#8305](https://github.com/firebase/firebase-js-sdk/issues/8305): use
+`firestoreCache`'s step-down). Neither case shows `synced` without the server having been heard (see the status rules).
 
 ## What stays in each app
 

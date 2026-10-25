@@ -192,5 +192,24 @@
     "src/sync.js": "91c363b9ac82ec3ea8f98b26df2c0c463156c0dd9eaf14bc6c93fa330fad2f47",
     "src/watchdog.js": "acfa925f1c5787538462aecaf7288ce71b1ce4b9721a29ae229e06d00d3caecd",
     "src/writes.js": "4c40097eb76df3b536fa870bc2bdc581ad2b1e460d70d101b0ad684df5084704"
+  },
+  "0.6.4": {
+    "LICENSE": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "NOTICE": "a4a91e7763c9b0d122fcb4c69fcfb4088427b73bd713f37d513669095430894c",
+    "index.js": "a905799c1ee81d24f96eeb089b3a85b1de82cdc7d35b3ab3ddeedcdb1bcbfbde",
+    "src/app.js": "c1a33ef72710754ec91ef37c0f62ea5831344e8cd2e0b0ab33c8b0ae36efd7e5",
+    "src/cache.js": "1353641f2d6e590892f1e5853e91457ddf4394ab21471d2723dc81cd6062a6ff",
+    "src/conflict.js": "7eb25524079aff5090c4886e0c9b2dc865ebf1680190c87f0a7b674a0b892d74",
+    "src/firestore.js": "8bdc5d64c0792cca12117282797cad35d932817aa7577baf09a915ded97178f2",
+    "src/forget.js": "befcd0a71bacb20058d2c568dd8ead97b9e5d134d88f2108ba9a0072f402f7d7",
+    "src/outbox.js": "06bf8e938ed3e0a640af3c514da1a27f4d80c25022c4a41084de1328551db45b",
+    "src/persist.js": "b0a27f138ace730446c9be9e45aae4cce549339636304041f18c69d9cd59ee1a",
+    "src/registry.js": "dc174df62e0c419f54acae68d7ffc796b6e99c62fb4264f7de9e2031c6b67767",
+    "src/report.js": "1280e9da248ec3667428a5b2010395a61faf5d51ca9cd298b9e960a2c3ab79fe",
+    "src/status.js": "36f5018c2ce3064cc77fd7a36776bab20d5581efe8f4992eb0a86861609fe995",
+    "src/store.js": "a523a13391a247d8c6c57627e9b9194a1b95e69af99e90ac12000d6e4f7fe162",
+    "src/sync.js": "91c363b9ac82ec3ea8f98b26df2c0c463156c0dd9eaf14bc6c93fa330fad2f47",
+    "src/watchdog.js": "acfa925f1c5787538462aecaf7288ce71b1ce4b9721a29ae229e06d00d3caecd",
+    "src/writes.js": "4c40097eb76df3b536fa870bc2bdc581ad2b1e460d70d101b0ad684df5084704"
   }
 }

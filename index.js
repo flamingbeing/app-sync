@@ -6,6 +6,7 @@ export { createStores, OPEN_WAIT } from './src/store.js';
 export { createOutbox } from './src/outbox.js';
 export { decide, createWatchdog, CACHE_MS, FLAG_MS, STALE_MS, THROTTLE_MS, ESCALATE_MS, CYCLE_THROTTLE_MS } from './src/watchdog.js';
 export { persistGuard } from './src/persist.js';
+export { firestoreCache, cacheFailure, CACHE_KEY, CACHE_MODES } from './src/cache.js';
 export { syncStatus, attentionCount } from './src/status.js';
 export { forgetDevice, FORGET_TIMEOUT } from './src/forget.js';
 export { createOutboxRegistry, REGISTRY_KEY, REGISTRY_TIMEOUT } from './src/registry.js';
@@ -15,4 +16,4 @@ import { createReport as createReportOf } from './src/report.js';
 export { buildReport, errorCode, REPORT_ENDPOINT, REPORT_EVERY, UNCONFIRMED_MS, MAX_CODES, MAX_KINDS } from './src/report.js';
 // the nothing-lost report, with this engine's version filled in
 export const createReport = options => createReportOf({ sync: VERSION, ...options });
-export const VERSION = '0.6.3';
+export const VERSION = '0.6.4';
