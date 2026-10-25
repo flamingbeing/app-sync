@@ -123,8 +123,10 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   // a record's saves not yet done with, oldest first: only the first is ever sent
   /** @param {string} id */
   const chainOf = id => ordered().filter(x => keyOf(x) === id && !terminal.has(x.state));
+  /** @type {Set<Promise<any>>} */
+  const puts = new Set();   // puts to the store not yet finished (forget waits for them, so none lands after the wipe)
   /** @param {Job} job */
-  async function persist(job) { await store.put(copy(job)); }
+  async function persist(job) { const put = Promise.resolve(store.put(copy(job))); puts.add(put); try { await put; } finally { puts.delete(put); } }
   // Another window on this device (a second tab, or the home-screen app beside the browser) shares the store and may
   // have sent or set aside a job since this one read it: what it stored wins, or this window sends its stale copy
   // later (a case deleted there comes back, one restored there is deleted again). Two windows sending one job at the
@@ -380,6 +382,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     const old = owner; owner = null; ++generation; loading = null; jobs = []; running.clear(); waits.clear(); storageError = ''; notify();
     if (!old) return;
     let error = null;
+    await Promise.allSettled([...puts]);
     try { await store.forget(old); } catch (e) { error = e; }
     if (registry) { try { await registry.forget(old, { except: store }); } catch (e) { error ||= e; } }
     if (error) throw error;

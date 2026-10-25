@@ -91,7 +91,9 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
             overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
             retry: (key: string) => Promise<void>;
             archive: (key: string, { refused }?: {
-                refused?: boolean;
+                refused
+                /** @param {() => boolean} [ok] */
+                ?: boolean;
             }) => Promise<void>;
             discard: (key: string) => Promise<void>;
             forget: () => Promise<void>;
@@ -137,7 +139,9 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
                 overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
                 retry: (key: string) => Promise<void>;
                 archive: (key: string, { refused }?: {
-                    refused?: boolean;
+                    refused
+                    /** @param {() => boolean} [ok] */
+                    ?: boolean;
                 }) => Promise<void>;
                 discard: (key: string) => Promise<void>;
                 forget: () => Promise<void>;
@@ -219,7 +223,9 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
         retry: (key: string) => Promise<void>;
         archive: (key: string, { refused }?: {
-            refused?: boolean;
+            refused
+            /** @param {() => boolean} [ok] */
+            ?: boolean;
         }) => Promise<void>;
         discard: (key: string) => Promise<void>;
         forget: () => Promise<void>;

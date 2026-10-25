@@ -385,3 +385,16 @@ test('the sign-out check stays shut while an earlier save of a record is still b
   try { assert.equal(await q.flush(), false, 'the first save is still out'); }
   finally { gates.forEach(r => r()); await first; }
 });
+
+test('a forget while a first save is still being stored leaves no row behind', async () => {
+  const rows = new Map(); let release; const gate = new Promise(r => { release = r; });
+  let entered; const started = new Promise(r => { entered = r; });
+  const store = { async put(x) { entered(); await gate; rows.set(x.key, structuredClone(x)); }, async list(o) { return [...rows.values()].filter(x => x.owner === o); }, async get(k) { return rows.get(k) || null; }, async remove(k) { rows.delete(k); }, async forget(o) { for (const [k, x] of rows) if (x.owner === o) rows.delete(k); } };
+  const q = createWriteQueue({ store, getOwner: () => 'a', online: () => false, backend: async (_o, _k, r) => r, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const saving = q.save('item', 'a', { id: 'x' }).catch(() => {});
+  await started;
+  const forgetting = q.forget();
+  release(); await saving; await forgetting;
+  assert.equal(rows.size, 0, 'the wipe comes after the put that was out');
+});
