@@ -33,7 +33,10 @@ Stored formats only gain one key (FORMATS.md). Tests: `test/runner.test.mjs`, `t
   watch as in 0.8.3). **Sign-out keeps the device's data**: the device copy and unsent saves stay and send when the same
   account signs in again. Another account signing in is a `switch`: the app's `beforeSwitch`, then the old data wiped,
   then `signin`; refused (the new account signed out again, nothing wiped, `blocked()` says why) while the old account
-  has unsent saves. `forget()` is the wipe on purpose (refused while unsent unless `force`). Auth's answers wait for
+  has unsent saves, also one made during `beforeSwitch` (`reason: 'unsent'`), or when a module's wipe throws
+  (`reason: 'wipe'`: the old account stays the owner, the next sign-in tries again). Each tab compares Auth's
+  account with the owner whose data it holds, so a tab still switches after another tab already did. `forget()` is
+  the wipe on purpose (refused while unsent unless `force`, checked again after its `before`). Auth's answers wait for
   every module to start (`ctx.ready`): found by the model test, a page opening with another account in Auth (signed
   in from another tab) could otherwise switch before a slow module had reported its unsent saves or listened for
   the wipe. A refused switch tells `onUser` (null) and emits `signout` for the account it replaced at once.

@@ -15,17 +15,20 @@
 //   email } (FORMATS.md). Another account signing in (a sign-in here, another tab, a reload) is a switch: the app's
 //   beforeSwitch, then switch (the modules wipe the old data), then signin. While the old account has unsent saves
 //   (ctx.status: unsent) the switch is refused: the new account is signed out again, nothing is wiped, and blocked()
-//   says why, until those saves are sent (that account signs in again) or forget({ force }).
+//   says why, until those saves are sent (that account signs in again) or forget({ force }); a save made during
+//   beforeSwitch refuses it too. A module whose wipe throws refuses it as well (reason 'wipe': the old account stays
+//   the owner, the new one is signed out, the next sign-in tries the switch again).
 // -> api { signIn, signOut, forget, onUser, user, blocked, refreshClaims }
-//   signIn({ hint, popupOnly, redirectFirst, method }) -> { ok, reason: '' | 'redirect' | 'unsent', from? }: hint is
-//   Google's login_hint; 'redirect': the page is leaving to sign in; 'unsent': refused switch (from: the account with
-//   unsent saves). method: 'google' only (the other methods are 1.x).
+//   signIn({ hint, popupOnly, redirectFirst, method }) -> { ok, reason: '' | 'redirect' | 'unsent' | 'wipe', from? }:
+//   hint is Google's login_hint; 'redirect': the page is leaving to sign in; 'unsent' | 'wipe': refused switch (from:
+//   the account whose data stays). method: 'google' only (the other methods are 1.x).
 //   signOut() -> { ok, reason }: Auth signs out; signout is emitted; nothing is wiped, nothing refused.
 //   forget({ force, before }) -> { ok, reason: '' | 'unsent', failed }: wipe this device on purpose: refused while
-//   anything is unsent unless force; then before() (the app's step; a throw is named in failed), Auth signs out
-//   (signout), forget wipes (failed names any module whose wipe threw), and the device has no owner.
+//   anything is unsent unless force; then before() (the app's step; a throw is named in failed; a save made during it
+//   refuses too), Auth signs out (signout), forget wipes (failed names any module whose wipe threw), and the device has
+//   no owner.
 //   onUser(cb) -> off: cb(user | null) once known and on each change, after the events. user() -> the account or null.
-//   blocked() -> { from, to, reason: 'unsent' } | null: the last refused switch.
+//   blocked() -> { from, to, reason: 'unsent' | 'wipe' } | null: the last refused switch.
 import { userOf, claimsBehind } from './user.js';
 
 const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported', 'auth/cancelled-popup-request'];
@@ -60,8 +63,10 @@ export function auth(options = {}) {
   let offAuth = null;
   /** @type {string | null | undefined} the uid last handled from Auth */
   let seen;
-  /** @type {{ from: Owner, to: AppUser, reason: 'unsent' } | null} */
+  /** @type {{ from: Owner, to: AppUser, reason: 'unsent' | 'wipe' } | null} */
   let blocked = null;
+  /** @type {Owner | null} the owner whose data this tab holds (null: read the stored one) */
+  let held = null;
   /** @type {Set<(u: AppUser | null) => void>} */
   const userSubs = new Set();
   // Auth's answers, handled one at a time (a switch's wipe finishes before the next answer is looked at)
@@ -98,32 +103,39 @@ export function auth(options = {}) {
       tellUser();
       return;
     }
-    const user = /** @type {AppUser} */ (userOf(u)), from = owner();
+    // this tab's owner first: another tab may have switched the stored one already, this tab's data is still the old
+    const user = /** @type {AppUser} */ (userOf(u)), from = held || owner();
     if (from && from.uid !== uid) {
       // the last account's unsent saves would go with its data: refuse, sign the new account out, wipe nothing
-      if (unsent() > 0) {
-        blocked = { from, to: user, reason: 'unsent' };
-        seen = null;   // (Auth's answer to this sign-out changes nothing more)
-        await s.A.signOut(s.auth);
-        stopClaimsWatch();
-        const was = current;
-        current = null;
-        if (was) await ctx.emit('signout', { user: was });
-        tellUser();
-        return;
-      }
+      if (unsent() > 0) return refuse(from, user, 'unsent');
       /** @type {string[]} */
       const failed = [];
       if (beforeSwitch) { try { await beforeSwitch({ from, to: user }); } catch (e) { failed.push('before'); console.warn('auth: beforeSwitch', e); } }
-      failed.push(...await ctx.emit('switch', { from, to: user }));
+      if (unsent() > 0) return refuse(from, user, 'unsent');   // (a save made during the app's step)
+      const wipes = await ctx.emit('switch', { from, to: user });
+      failed.push(...wipes);
       if (failed.length) ctx.report({ event: 'switch', failed });
+      // a wipe that threw left old data: the old account stays the owner, the switch is tried again next sign-in
+      if (wipes.length) return refuse(from, user, 'wipe');
     }
-    store.set('owner', { uid, email: user.email });
+    store.set('owner', held = { uid, email: user.email });
     blocked = null;
     current = user;
     await ctx.emit('signin', { user });
     tellUser();
     if (!watchClaims(u)) void refreshClaims();
+  }
+
+  /** @param {Owner} from @param {AppUser} to @param {'unsent' | 'wipe'} reason */
+  async function refuse(from, to, reason) {
+    blocked = { from, to, reason };
+    seen = null;   // (Auth's answer to this sign-out changes nothing more)
+    await s.A.signOut(s.auth);
+    stopClaimsWatch();
+    const was = current;
+    current = null;
+    if (was) await ctx.emit('signout', { user: was });
+    tellUser();
   }
 
   /** @param {{ hint?: string, popupOnly?: boolean, redirectFirst?: boolean, method?: string }} [opts] */
@@ -141,7 +153,7 @@ export function auth(options = {}) {
       return { ok: false, reason: 'redirect' };
     }
     await chain;
-    return blocked ? { ok: false, reason: 'unsent', from: blocked.from } : { ok: true, reason: '' };
+    return blocked ? { ok: false, reason: blocked.reason, from: blocked.from } : { ok: true, reason: '' };
   }
   const standalone = () => { try { return !!(win?.matchMedia?.('(display-mode: standalone)').matches || nav?.standalone); } catch { return false; } };
   const redirectFirst = options.redirectFirst || (() => standalone() || (/Android/i.test(nav?.userAgent || '') && /Firefox\//i.test(nav?.userAgent || '')));
@@ -162,10 +174,12 @@ export function auth(options = {}) {
     /** @type {string[]} */
     const failed = [];
     if (before) { try { await before(); } catch (e) { failed.push('before'); console.warn('forget: before', e); } }
+    if (!force && unsent() > 0) return { ok: false, reason: 'unsent', failed };   // (a save made during the app's step)
     const user = current ? { uid: current.uid, email: current.email } : owner();
     if (x?.auth.currentUser) { await x.A.signOut(x.auth); await chain; }
     failed.push(...await ctx.emit('forget', { user }));
     store.remove('owner');
+    held = null;
     blocked = null;
     return { ok: true, reason: '', failed };
   }

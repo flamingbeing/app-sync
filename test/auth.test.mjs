@@ -173,6 +173,68 @@ test('forget(): refused while unsent unless forced; the hook, sign-out, then for
   assert.deepEqual(t.log.slice(4), ['signout u2', 'forget u2']);
 });
 
+test('a save made while the app\'s beforeSwitch runs refuses the switch: nothing is wiped', async () => {
+  let t;
+  t = setup({ options: { beforeSwitch: async () => { t.app.data.save({ id: 'late' }); } } });
+  await t.app.ready;
+  await t.app.auth.signIn();
+  await t.app.auth.signOut();
+  t.sdk.as(fakeUser({ uid: 'u2' }));
+  assert.deepEqual(await t.app.auth.signIn(), { ok: false, reason: 'unsent', from: { uid: 'u1', email: 'fake.person@example.test' } });
+  assert.deepEqual(t.device, { rows: [{ id: 'late' }], unsent: 1 });
+  assert.equal(t.app.auth.user(), null);
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.ok(!t.log.some(l => l.startsWith('switch')));
+});
+
+test('a module whose wipe throws refuses the switch: the new account is signed out, the old owner kept, tried again next time', async () => {
+  const storage = memStorage(), device = { rows: [], unsent: 0 }, log = [], sdk = fakeSdk();
+  let fail = true;
+  const bad = { name: 'bad', needs: [], start(ctx) { ctx.on('switch', () => { if (fail) throw new Error('fake wipe failed'); log.push('bad wiped'); }); return {}; }, stop() {} };
+  const reports = [];
+  const app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk, report: f => reports.push(f) }, modules: [auth(), fakeData(device, log), bad] });
+  await app.ready;
+  await app.auth.signIn();
+  await app.auth.signOut();
+  sdk.as(fakeUser({ uid: 'u2' }));
+  assert.deepEqual(await app.auth.signIn(), { ok: false, reason: 'wipe', from: { uid: 'u1', email: 'fake.person@example.test' } });
+  assert.equal(app.auth.user(), null);
+  assert.equal(sdk.auth.currentUser, null);
+  assert.equal(app.auth.blocked()?.reason, 'wipe');
+  assert.equal(JSON.parse(storage.getItem('fake-app:auth/owner')).uid, 'u1');
+  assert.ok(!log.includes('signin u2'));
+  assert.deepEqual(reports.filter(r => r.event === 'switch').map(r => r.failed), [['bad']]);
+  fail = false;
+  assert.deepEqual(await app.auth.signIn(), { ok: true, reason: '' });
+  assert.deepEqual(log.slice(-3), ['switch u1>u2', 'bad wiped', 'signin u2']);
+});
+
+test('another tab already switched: this tab still switches (its own data and listeners), once', async () => {
+  const storage = memStorage(), sdk1 = fakeSdk(), sdk2 = fakeSdk();
+  const one = setup({ storage, sdk: sdk1 }), two = setup({ storage, sdk: sdk2 });
+  await one.app.ready; await two.app.ready;
+  await one.app.auth.signIn();
+  sdk2.auth.set(fakeUser()); await settle();
+  assert.deepEqual(two.log, ['signin u1']);
+  sdk1.as(fakeUser({ uid: 'u2' }));
+  await one.app.auth.signIn();
+  assert.deepEqual(one.log.slice(-2), ['switch u1>u2', 'signin u2']);
+  // Auth tells the other tab later; the owner in storage already says u2
+  sdk2.auth.set(fakeUser({ uid: 'u2' })); await settle();
+  assert.deepEqual(two.log, ['signin u1', 'switch u1>u2', 'signin u2']);
+});
+
+test('forget(): a save made while the app\'s before() runs refuses it (unless forced)', async () => {
+  let t;
+  t = setup();
+  await t.app.ready;
+  await t.app.auth.signIn();
+  const r = await t.app.auth.forget({ before: () => { t.app.data.save({ id: 'late' }); } });
+  assert.deepEqual(r, { ok: false, reason: 'unsent', failed: [] });
+  assert.deepEqual(t.device, { rows: [{ id: 'late' }], unsent: 1 });
+  assert.ok(!t.log.some(l => l.startsWith('forget')));
+});
+
 test('claims: asked once per uid:v when the role doc is ahead of the token; the watch asks again when it changes', async () => {
   const posts = [];
   const fetch = async (url, init) => { posts.push(url + ' ' + init.headers.Authorization); return { ok: true, status: 200 }; };

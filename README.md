@@ -36,7 +36,7 @@ import { auth } from 'https://core.anawj.com/sync/0.9.0/auth.js';
 const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [auth()] });
 await app.ready;
 app.auth.onUser(user => show(user));
-await app.auth.signIn({ hint: lastEmail });   // { ok, reason: '' | 'redirect' | 'unsent' }
+await app.auth.signIn({ hint: lastEmail });   // { ok, reason: '' | 'redirect' | 'unsent' | 'wipe' }
 await app.auth.signOut();                     // keeps this device's data; the same account carries on
 await app.auth.forget();                      // wipes this device (refused while anything is unsent, unless force)
 ```
@@ -45,7 +45,9 @@ A module is `{ name, needs, start(ctx, deps) -> api, stop() }`: started in `need
 holds only the apis it needs. `ctx` is small and frozen: `name, module, config, sdk(), user(), on(event, fn),
 emit(event, data), storage(ns), status, report(fact), ready` (every module started). Events: `signin { user }`, `signout { user }` (data kept),
 `switch { from, to }` (another account: the old data is wiped after `auth({ beforeSwitch })`), `forget { user }`.
-Another account's sign-in is refused while the last one has unsent saves (`app.auth.blocked()` says so). Details:
+Another account's sign-in is refused while the last one has unsent saves (also one made during `beforeSwitch`) or
+when a module's wipe throws (the next sign-in tries again); `app.auth.blocked()` says which. Each tab switches its
+own data, even after another tab switched first. Details:
 the comments at the top of `src/runner.js` and `src/auth.js`.
 
 ## Modules

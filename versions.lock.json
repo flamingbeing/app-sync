@@ -408,7 +408,7 @@
     "files.json": "1061da26e6d3329a26f05bc3b6e466dde3bee9f7ff04b4d5351be12aa2d6a8f9",
     "index.js": "e049e3aa5edacc8692a6aaa7f6a5dbcd02bbf6868d627fa9099f2c75e1a1e519",
     "src/app.js": "967dd3b958629ad2aa5fe6299149cf7f889c390655d3ff85b9036607f94e1f6a",
-    "src/auth.js": "b26b58a5412cca4180c953f1fe1501a478f4adae4f48c8452f08174505f977bd",
+    "src/auth.js": "51db56dd7d9db5cf98d86e78c88ae62a62dc0a67dcbf3e4997aab495f5680b7c",
     "src/cache.js": "a2e8a213041e5ab944e69e0a87292faed59f3337a7e468330e45ed9dd10c6b55",
     "src/conflict.js": "272198f956cb135d4597bb1b55d8ba5afab16f5fc6035e6a42dd5624f482badc",
     "src/firestore.js": "17e22e520d9f9dce8dc608eb8354e08cf1a9450fd1c8e247073ef874ab770f90",
