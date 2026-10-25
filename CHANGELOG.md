@@ -14,6 +14,15 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.4 (2026-10-26)
+
+Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is one
+line in `src/writes.js` (the outbox).
+
+- **The sign-out check stays shut while a save is still being stored**: `flush()` ignored a save whose first write to
+  the device was still out, so it could answer "nothing unsent" and let a sign-out wipe run; the row then landed after
+  the wipe. A save not yet stored now counts as unsent.
+
 ## 1.3.3 (2026-10-26)
 
 Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is three lines

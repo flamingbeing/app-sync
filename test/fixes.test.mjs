@@ -355,3 +355,15 @@ test('a check read does not win over a copy that arrived with the same stamp', a
   assert.equal(last.find(d => d.id === 'a')?.v, 2, 'the older read does not win');
   off(); await hub.stopAll(); await wipeStores();
 });
+
+test('the sign-out check stays shut while a save is still being stored', async () => {
+  const rows = new Map(); let release; const gate = new Promise(r => { release = r; });
+  let entered; const started = new Promise(r => { entered = r; });
+  const store = { async put(x) { entered(); await gate; rows.set(x.key, structuredClone(x)); }, async list(o) { return [...rows.values()].filter(x => x.owner === o); }, async get(k) { return rows.get(k) || null; }, async remove(k) { rows.delete(k); }, async forget() { rows.clear(); } };
+  const q = createWriteQueue({ store, getOwner: () => 'a', online: () => false, backend: async (_o, _k, r) => r, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const saving = q.save('item', 'a', { id: 'x' }).catch(() => {});
+  await started;
+  try { assert.equal(await q.flush(), false, 'a save not yet stored is unsent'); }
+  finally { release(); await saving; }
+});

@@ -412,6 +412,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       await Promise.race([kick().then(() => Promise.all([...running.values()])), delay(ms)]);
       // (0.8.2) a refused save set aside is not given up either: kept until the person retries or discards it
       if (jobs.some(x => !terminal.has(x.state) || x.refused)) return false;
+      // a save still being stored is unsent too (forgetting now would let its row land after the wipe)
+      if (inflight.size) return false;
       // writes the app sends another way (straight to the SDK) and not yet on the server
       if (otherPending) { try { if (await otherPending()) return false; } catch { return false; } }
       // the other apps on this origin (they share sign-in): their unsent saves for this user
