@@ -106,6 +106,9 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   const notify = () => { for (const fn of listeners) fn(); };
   /** @type {Map<string, { kind: string, owner: string, record: Doc }>} */
   const inflight = new Map();   // saves called but not stored yet (overlay shows them)
+  // puts to the store not yet finished: forget waits for them, so none lands after the wipe
+  /** @type {Set<Promise<any>>} */
+  const puts = new Set();
   let storing = 0;   // saves called and not finished (flush waits for all of them, however many are for one record)
   /** @param {string | null} email @param {number} gen */
   const current = (email, gen) => owner === email && generation === gen && getOwner() === email;
@@ -123,8 +126,6 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   // a record's saves not yet done with, oldest first: only the first is ever sent
   /** @param {string} id */
   const chainOf = id => ordered().filter(x => keyOf(x) === id && !terminal.has(x.state));
-  /** @type {Set<Promise<any>>} */
-  const puts = new Set();   // puts to the store not yet finished (forget waits for them, so none lands after the wipe)
   /** @param {Job} job */
   async function persist(job) { const put = Promise.resolve(store.put(copy(job))); puts.add(put); try { await put; } finally { puts.delete(put); } }
   // Another window on this device (a second tab, or the home-screen app beside the browser) shares the store and may
