@@ -37,6 +37,7 @@ What it does:
 | `src/status.js` | `syncStatus`, `attentionCount` |
 | `src/persist.js` | `persistGuard` (asks the browser to keep the site's storage) |
 | `src/firestore.js` | `createFirestoreBackend` |
+| `src/report.js` | `createReport`, `buildReport` (the nothing-lost report, opt-in) |
 | `index.js` | all of the above |
 
 ## Use
@@ -166,6 +167,18 @@ shut until the user deals with it.
 
 **Two phones at once.** A Firestore transaction that lost a race with another device's (`aborted`) is retried like a
 dropped connection, never shown as needing the user.
+
+**Nothing-lost report (0.5.0, opt-in).** So that a save stuck on a phone is noticed without anyone looking:
+
+```js
+const report = S.createReport({ app: 'my-app', version: () => swVersion, storage: localStorage });   // a string, or a function
+const queue = S.createWriteQueue({ ...options, report });
+report.start();   // a check every few minutes (sends at most once an hour) and on page hide
+```
+
+A report holds counts (saves waiting over an hour, refused, in conflict), sync errors by code and the versions;
+never a record, an id, a path, an email or an error message. `report.error(code)` counts an error the app sees
+itself (a listener's). The endpoint keeps per-app daily counts; nothing per device or per person.
 
 ## What stays in each app
 

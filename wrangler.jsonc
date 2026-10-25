@@ -1,5 +1,5 @@
 // Cloudflare Workers config. The Worker (worker/sites.js) serves dist/ (each release tag, built by tools/build-sync.mjs) and decides which folder each
-// address may see (worker/routes.js). No data and no secrets in this file: settings the Worker needs are set in the
+// address may see (worker/routes.js). No secrets in this file: settings the Worker needs are set in the
 // Cloudflare dashboard (keep_vars keeps them across deploys).
 {
   "name": "app-sync",
@@ -19,5 +19,8 @@
   "workers_dev": false,
   "keep_vars": true,
   // dist/ is built from the release tags by tools/build-sync.mjs (the deploy workflow runs it first)
-  "routes": [{ "pattern": "core.anawj.com", "custom_domain": true }]
+  "routes": [{ "pattern": "core.anawj.com", "custom_domain": true }],
+  // the nothing-lost report's daily counts (worker/report.js makes its tables); the id is not a secret. The digest
+  // token is the Worker secret REPORT_TOKEN, set in Cloudflare, never here.
+  "d1_databases": [{ "binding": "REPORTS", "database_name": "app-sync-report", "database_id": "f9f59c70-fb50-4d1f-9177-7f03f92d06b2" }]
 }
