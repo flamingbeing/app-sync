@@ -2,18 +2,21 @@
 export function auth(options?: AuthOptions): import("./runner.js").Module;
 /**
  * A sign-in method (1.3.0, src/signin/): signIn(sdk, request, anon) -> { credential } to sign in with (linked to anon,
- * the anonymous account signed in, if any), { reason } when nobody is signed in by it now, or {} once it signed in.
+ * the anonymous account signed in, if any), { token } a custom token to sign in with (1.3.6), { reason } when nobody
+ * is signed in by it now, or {} once it signed in.
  */
 export type AuthMethod = {
     name: string;
     signIn: (sdk: any, request: SignInRequest, anon: any) => Promise<{
         credential?: any;
+        token?: string;
         reason?: string;
     }>;
 };
 /**
  * A sign-in method (1.3.0, src/signin/): signIn(sdk, request, anon) -> { credential } to sign in with (linked to anon,
- * the anonymous account signed in, if any), { reason } when nobody is signed in by it now, or {} once it signed in.
+ * the anonymous account signed in, if any), { token } a custom token to sign in with (1.3.6), { reason } when nobody
+ * is signed in by it now, or {} once it signed in.
  */
 export type SignInRequest = import("./types.js").SignInRequest & {
     popupOnly?: boolean;
@@ -21,12 +24,14 @@ export type SignInRequest = import("./types.js").SignInRequest & {
 };
 /**
  * A sign-in method (1.3.0, src/signin/): signIn(sdk, request, anon) -> { credential } to sign in with (linked to anon,
- * the anonymous account signed in, if any), { reason } when nobody is signed in by it now, or {} once it signed in.
+ * the anonymous account signed in, if any), { token } a custom token to sign in with (1.3.6), { reason } when nobody
+ * is signed in by it now, or {} once it signed in.
  */
 export type AppUser = import("./user.js").AppUser;
 /**
  * A sign-in method (1.3.0, src/signin/): signIn(sdk, request, anon) -> { credential } to sign in with (linked to anon,
- * the anonymous account signed in, if any), { reason } when nobody is signed in by it now, or {} once it signed in.
+ * the anonymous account signed in, if any), { token } a custom token to sign in with (1.3.6), { reason } when nobody
+ * is signed in by it now, or {} once it signed in.
  */
 export type Owner = {
     uid: string;
@@ -34,7 +39,8 @@ export type Owner = {
 };
 /**
  * A sign-in method (1.3.0, src/signin/): signIn(sdk, request, anon) -> { credential } to sign in with (linked to anon,
- * the anonymous account signed in, if any), { reason } when nobody is signed in by it now, or {} once it signed in.
+ * the anonymous account signed in, if any), { token } a custom token to sign in with (1.3.6), { reason } when nobody
+ * is signed in by it now, or {} once it signed in.
  */
 export type AuthOptions = {
     /**
