@@ -137,3 +137,51 @@ test('the server\'s copy that arrives while this device\'s save is being sent sh
   off();
   assert.equal(subs.size, 1, 'off stops listening (only the contrast listener is left)');
 });
+
+test('a delete heard while a save is held is applied once that record\'s saves are done (0.6.3)', async () => {
+  // A record's bin entry arrives while this device holds a save of it (a conflict waiting for the user): the record
+  // stays, as it must. The user then keeps the other version, which is the deleted one: the record must go. Before,
+  // the kept tombstone was forgotten and the stale copy showed until the weekly full read.
+  const { openStore } = createStores({ prefix: 'fix-h1:', colls: ['items'] });
+  const srv = fakeServer(), store = await openStore(S);
+  srv.set('items', { id: 'x1', title: 'Fake', updatedAt: 5 });
+  srv.set('items', { id: 'x2', title: 'Fake 2', updatedAt: 5 });
+  let held = true, shown = [];
+  const sync = createCollectionSync({ scope: S, coll: 'items', store, listen: srv.listen, unsent: () => held });
+  sync.subscribe(list => { shown = list.map(d => d.id); });
+  await sync.ready; await settle();
+  assert.deepEqual(shown, ['x1', 'x2']);
+  await sync.tombs([{ id: 'x1', deletedAt: 5 }]);
+  assert.deepEqual(shown, ['x1', 'x2'], 'kept while its save is held');
+  assert.equal(sync.tomb('x1'), 5, 'the tombstone is known');
+  held = false;
+  await sync.settle(); await settle();
+  assert.deepEqual(shown, ['x2'], 'gone once its saves are done');
+  // the same across a reload: deferred on one page, settled when the next one opens
+  held = true;
+  await sync.tombs([{ id: 'x2', deletedAt: 5 }]);
+  await sync.stop();
+  held = false;
+  const again = createCollectionSync({ scope: S, coll: 'items', store, listen: srv.listen, unsent: () => held });
+  let after = null;
+  again.subscribe(list => { after = list.map(d => d.id); });
+  await again.ready; await settle();
+  assert.deepEqual(after, [], 'settled when the next page opens');
+  await again.stop();
+});
+
+test('a record deleted elsewhere and saved again here is stamped above the delete\'s tombstone (0.6.3)', async () => {
+  // "Keep mine" after another phone deleted the record: other devices hold a tombstone at the deleted version's stamp
+  // and hide any copy at or below it. A re-create stamped by a clock behind the deleter's was hidden there for good.
+  const { sharedSdk } = await import('./fake-sdk.mjs');
+  const { createFirestoreBackend } = await import('../src/firestore.js');
+  for (const held of [false, true]) {
+    const shared = sharedSdk(), b = createFirestoreBackend({ sdk: shared.device().sdk, path: (s, c) => ['spaces', s, c], ...(held ? { held: true } : {}) });
+    const tomb = Date.now() + H;   // the deleter's clock an hour ahead
+    const doc = await b.commit(S, 'items', { id: 'x1', title: 'Fake' }, null, { after: tomb });
+    assert.ok(doc.updatedAt > tomb, (held ? 'held' : 'plain') + ': stamped after the tombstone');
+    // an update still stamps from the server's copy
+    const next = await b.commit(S, 'items', { ...doc, title: 'Fake 2' }, doc, { after: tomb + H });
+    assert.equal(next.updatedAt, doc.updatedAt + 1);
+  }
+});

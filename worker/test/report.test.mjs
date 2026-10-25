@@ -96,3 +96,17 @@ test('parseReport keeps only the known fields', () => {
   assert.deepEqual(parseReport(JSON.stringify(good({ errors: { unavailable: 2, aborted: 0 } }))), { app: 'demo', version: 'demo-v3', sync: '0.5.0', unconfirmed: 0, refused: 0, conflicts: 0, errors: { unavailable: 2 } });
   assert.equal(sgtDay(Date.UTC(2026, 9, 24, 16, 0)), '2026-10-25');
 });
+
+test('held conflicts by kind (0.6.3): stored as the day\'s highest per kind, shown in the digest; bad kinds refused', async () => {
+  const env = fresh();
+  assert.equal((await post(env, good({ conflicts: 3, held: { note: 2, task: 1 } }))).status, 204);
+  assert.equal((await post(env, good({ conflicts: 1, held: { note: 1 } }))).status, 204);
+  assert.equal((await post(env, good())).status, 204);   // a report without held (an older engine) still counts
+  for (const held of [{ 'not a kind': 1 }, { note: -1 }, { note: 'x' }, [1], Object.fromEntries(Array.from({ length: 21 }, (_, i) => ['k' + i, 1]))]) {
+    assert.equal((await post(env, good({ conflicts: 1, held }))).status, 400, JSON.stringify(held));
+  }
+  const d = await (await digest(env, 'right-token', sgtDay(Date.now()))).json();
+  assert.deepEqual(d.apps[0].held, { note: 2, task: 1 });
+  assert.match(d.text, /3 conflicts \(note 2, task 1\)/);
+  assert.deepEqual(parseReport(JSON.stringify(good({ held: { note: 0 } }))).held, undefined);
+});

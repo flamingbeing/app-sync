@@ -2,21 +2,25 @@
 // how its saves are doing on this device. Only counts, error codes and versions are sent, never a record, an id, a
 // path, an email or an error message: buildReport copies nothing else from what it is given.
 //
-// createReport({ app, version, sync, endpoint, every, storage, send, now, onError }) -> { watch, error, payload, due, flush, start, stop }
+// createReport({ app, version, sync, endpoint, every, storage, send, now, onError, byKind }) -> { watch, error, payload, due, flush, start, stop }
 //   app: the app's id (lower case letters, digits, "-"). version: the app's own version (e.g. the service worker's), or
 //   a function giving it when a report is made (a version learned later); one that is not a short label reads unknown.
 //   sync: this engine's version (index.js fills it in with VERSION).
 //   endpoint: where to POST (default REPORT_ENDPOINT). every: the least time between two reports (default an hour).
 //   storage: localStorage or alike, keeps the error counts and the last send across page loads (none: memory only).
 //   send(url, body) -> truthy when handed over (default navigator.sendBeacon as text/plain, else fetch keepalive).
+//   byKind (0.6.3, opt-in): the conflicts are also counted per kind (the app's save kinds, e.g. 'note'), as held, so a
+//   kind whose saves often meet a change made elsewhere shows in the digest (its sync logic may need a fix). Needs
+//   the report Worker of 0.6.3 or later (an older one refuses the field).
 // watch(queue): a write queue (writes.js) whose entries are counted; createWriteQueue({ report }) does it itself.
 // error(code): one sync error of that code (the write queue counts its own; an app may add a listener's).
 // flush({ force }): send now if due (force: even if not); -> true when sent. A flush asked while one is being sent
 //   gets that one's answer (0.5.2). start(): a check every few minutes and on page hide; stop() undoes it.
 //
-// Payload: { v: 1, app, version, sync, unconfirmed, refused, conflicts, errors: { code: n } }
+// Payload: { v: 1, app, version, sync, unconfirmed, refused, conflicts, errors: { code: n }, held?: { kind: n } }
 //   unconfirmed: saves still waiting for the server after UNCONFIRMED_MS; refused: saves the server refused (failed);
-//   conflicts: saves that met a change made elsewhere; errors: sync errors by code since the last report.
+//   conflicts: saves that met a change made elsewhere; errors: sync errors by code since the last report; held (byKind
+//   only, and only when there are conflicts): the conflicts by kind (a kind name that is not a short word is 'other').
 
 export const REPORT_ENDPOINT = 'https://core.anawj.com/report';
 export const REPORT_EVERY = 60 * 60 * 1000;
@@ -26,6 +30,8 @@ const CHECK_EVERY = 5 * 60 * 1000;
 const APP = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const LABEL = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,39}$/;
 const CODE = /^[a-z][a-z0-9-]{0,39}$/;
+const KIND = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
+export const MAX_KINDS = 20;
 const MAX_COUNT = 1e6;
 
 const count = n => Math.min(MAX_COUNT, Math.max(0, Math.floor(Number(n) || 0)));
@@ -33,14 +39,19 @@ const count = n => Math.min(MAX_COUNT, Math.max(0, Math.floor(Number(n) || 0)));
 export const errorCode = code => typeof code === 'string' && CODE.test(code) ? code : code == null || code === '' ? 'unknown' : 'other';
 
 // The payload from a queue's entries and the error counts: pure, nothing from a record is read but its state and time.
-export function buildReport({ app, version, sync = '', entries = [], errors = {}, now = Date.now() }) {
+export function buildReport({ app, version, sync = '', entries = [], errors = {}, now = Date.now(), byKind = false }) {
   if (!APP.test(String(app))) throw new Error('report: app must be lower-case letters, digits and "-"');
   if (!LABEL.test(String(version))) throw new Error('report: version must be a short label (letters, digits, . _ + -)');
   let unconfirmed = 0, refused = 0, conflicts = 0;
+  const held = {};
   for (const x of entries) {
     const state = x?.state;
     if (state === 'failed') refused++;
-    else if (state === 'conflict') conflicts++;
+    else if (state === 'conflict') {
+      conflicts++;
+      const k = typeof x.kind === 'string' && KIND.test(x.kind) && (x.kind in held || Object.keys(held).length < MAX_KINDS - 1) ? x.kind : 'other';
+      held[k] = count((held[k] || 0) + 1);
+    }
     else if (state === 'pending' && Number(x.at) <= now - UNCONFIRMED_MS) unconfirmed++;
   }
   const codes = {};
@@ -48,7 +59,7 @@ export function buildReport({ app, version, sync = '', entries = [], errors = {}
     const c = Object.keys(codes).length >= MAX_CODES && !(errorCode(code) in codes) ? 'other' : errorCode(code);
     codes[c] = count((codes[c] || 0) + count(n));
   }
-  return { v: 1, app: String(app), version: String(version), sync: LABEL.test(String(sync)) ? String(sync) : 'unknown', unconfirmed: count(unconfirmed), refused: count(refused), conflicts: count(conflicts), errors: codes };
+  return { v: 1, app: String(app), version: String(version), sync: LABEL.test(String(sync)) ? String(sync) : 'unknown', unconfirmed: count(unconfirmed), refused: count(refused), conflicts: count(conflicts), errors: codes, ...(byKind && conflicts ? { held } : {}) };
 }
 
 function defaultSend(url, body) {
@@ -61,7 +72,7 @@ function defaultSend(url, body) {
   return true;
 }
 
-export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOINT, every = REPORT_EVERY, storage = null, send = defaultSend, now = () => Date.now(), onError = () => {} } = {}) {
+export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOINT, every = REPORT_EVERY, storage = null, send = defaultSend, now = () => Date.now(), onError = () => {}, byKind = false } = {}) {
   const versionNow = () => { try { const v = typeof version === 'function' ? version() : version; return LABEL.test(String(v)) ? String(v) : 'unknown'; } catch { return 'unknown'; } };
   if (typeof version !== 'function') buildReport({ app, version });   // checks app and version now, not an hour later
   else buildReport({ app, version: 'unknown' });
@@ -75,7 +86,7 @@ export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOI
   };
   const keep = state => { memory = state; if (storage) { try { storage.setItem(KEY, JSON.stringify(state)); } catch { /* memory only */ } } };
   const entries = () => [...queues].flatMap(q => { try { return q.entries(); } catch { return []; } });
-  const payload = () => buildReport({ app, version: versionNow(), sync, entries: entries(), errors: load().errors, now: now() });
+  const payload = () => buildReport({ app, version: versionNow(), sync, entries: entries(), errors: load().errors, now: now(), byKind });
   const due = () => now() - load().last >= every;
   // one report at a time: page hide fires visibilitychange and pagehide together, and a second flush started before the
   // first is handed over would send the same counts again; it gets the first one's answer instead (0.5.2)

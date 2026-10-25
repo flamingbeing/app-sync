@@ -30,7 +30,7 @@ What it does:
 |---|---|
 | `src/sync.js` | `createSyncHub`, `createCollectionSync`, `createTombFeed`, `replanOnWake`, `leaveEntry`, pure helpers (`plan`, `planServer`, `applyChanges`, `applyTombs`, `binTombs`, …) |
 | `src/writes.js` | `createWriteQueue` |
-| `src/conflict.js` | `checkWrite`, `recordSignature` |
+| `src/conflict.js` | `checkWrite`, `recordSignature`, `mergeFields`; held conflicts (0.6.3): `mergeHeld`, `clashingFields`, `describeConflict`, `resolvedRecord`, `whenText` |
 | `src/store.js` | `createStores` (the device copy: `openStore`, `wipeStores`) |
 | `src/outbox.js` | `createOutbox` (the write queue's durable store) |
 | `src/watchdog.js` | `decide`, `createWatchdog` |
@@ -44,7 +44,7 @@ What it does:
 ## Use
 
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.6.2/index.js';
+import { createApp } from 'https://core.anawj.com/sync/0.6.3/index.js';
 
 const app = createApp({
   name: 'myapp', colls: ['items'], path: (space, coll) => ['spaces', space, coll],
@@ -68,6 +68,27 @@ Anything the facade does not cover: pass the parts' own options (`backend`, `hub
 (`adapter`, `commit`, `outbox`), or use `app.parts` (hub, queue, stores, adapter, watchdog, registry). Each module
 also loads on its own; the full wiring by hand (0.5.x style) still works, and `src/app.js` shows it in one place.
 Each module's header comment describes its options and contract in full.
+
+### Held conflicts by field (0.6.3, opt-in)
+
+```js
+const app = createApp({ …, device: 'Ward phone',
+  backend: { held: true, edits: '_edits', mark: '_saves' } });   // or held: { items: { counters: ['qty'] } }
+app.status$(st => drawChip(st));                 // 'attention' while a held save is unanswered
+for (const c of app.conflicts()) {               // this phone's held saves only
+  const d = app.describe(c.key);                 // d.fields: [{ path, mine, theirs }], each { value, when (SGT), by, device }
+  await app.resolve(c.key, await askUser(d));    // 'mine' | 'theirs' | { [path]: 'mine' | 'theirs' }
+}
+```
+
+Two phones changing different fields of a record both keep their change; the same field changed to the same value
+asks nothing; counters add up. Only a field changed on both sides to different values holds the save, on the phone
+that sent it second and nowhere else (the server never has it, so no other phone has anything to answer), until the
+user chooses; nothing is overwritten without that answer, and this phone's other changes land either way. `edits`
+records who changed each field and when (`{ by, device, at }` per top-level field), a data-shape change: security
+rules that whitelist fields must allow that field (and `mark`'s). `createReport({ byKind: true })` counts held saves
+per kind in the report, so a kind that clashes often shows in the digest. Off by default: without `held`, every
+collection keeps the whole-record check.
 
 ## What stays in each app
 

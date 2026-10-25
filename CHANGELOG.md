@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.3 (2026-10-25)
+
+Held conflicts by field, opt-in (`backend: { held }`); nothing changes for an app that doesn't set it. Tests:
+`test/held.test.mjs`, the model test run again with held conflicts (`test/model.test.mjs`), Worker report test.
+
+- `conflict.js mergeHeld`: a 3-way merge per field. Different fields merge; the same field changed to the same value
+  is no conflict; counters (`held: { coll: { counters: [...] } }`, need `mark`) add each side's change; a field
+  changed on both sides to different values throws `write-conflict` with `fields` (the clashing paths) and nothing is
+  written. Also `clashingFields`, `describeConflict` (the popup's data: both versions side by side, when each changed
+  in SGT and who, signed-in name and device), `resolvedRecord` (the answer, keeping this device's other changes) and
+  `whenText`.
+- Firestore adapter: `held` (true or per collection; `merge` collections stay as they are), `edits` (a field that
+  records `{ by, device, at }` per changed top-level field: a data-shape change, so rules that whitelist fields must
+  allow it) and `editor()`. A delete meeting a change elsewhere, or an edit of a record deleted elsewhere, is held too.
+- `createApp`: `device` (the device's name), and `conflicts()`, `describe(key)`, `resolve(key, choice)`. A held save
+  exists only on the phone that sent it second, so only that phone answers; `status$` stays on attention until it does.
+- Write queue: `ignore` (fields left out when comparing versions; createApp passes the engine's fields with `held`).
+- Report: `createReport({ byKind: true })` adds `held: { kind: n }` when there are conflicts; the Worker accepts and
+  stores it (new D1 table `held`, the day's highest per kind) and the digest lists conflicts by kind.
+
+Two engine fixes, for every app (plain and held; both found by the held model test at 300 seeds; tests in
+`test/fixes.test.mjs`):
+
+- A delete heard while a save of that record is held (its bin or feed entry arrives while the record has unsent
+  saves) is now remembered (`meta.later`) and applied once the record's saves are done (`hub.settle(scope)`, which
+  createApp calls on every queue change; also when the collection next opens). Before, the tombstone was forgotten:
+  after the answer "theirs" (the deleted version) the stale record showed until the weekly full read.
+- A record deleted elsewhere and saved again here ("keep mine", a restore) is stamped after the delete's tombstone
+  known on this device (`hub.tomb(scope, coll, id)`, passed to the adapter as `commit(..., { after })`). Before, a
+  clock behind the deleter's stamped it at or below that tombstone, and devices holding the tombstone did not show it
+  until their weekly full read. Only records not on the server are affected; an update still stamps from the
+  server's copy.
+
 ## 0.6.2 (2026-10-25)
 
 - `createApp({ popupOnly: true })`: sign in with the popup only, never a redirect (not when the popup is blocked, nor

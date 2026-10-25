@@ -47,6 +47,11 @@
 // record that leaves the query (locked, moved, deleted elsewhere), or whose bin or feed entry arrives (0.4.1), stays
 // on this device and onLeave(id, doc) reports it, so the app can tell the user and the save meets the server's answer
 // (a conflict, kept for the user) instead of the record vanishing with the change in it.
+//
+// Deferred tombstones (0.6.3): such a kept record's tombstone is remembered (meta.later) and applied once its saves are
+// done (settle), so a delete heard while a save was held still removes the record when the answer leaves it deleted
+// (or leaves this device's copy at or below the deleted version). tomb(id) is the highest tombstone known here for a
+// record (deleted, or deferred), so a record created again can be stamped above it (copies at or below it are hidden).
 
 export const SKEW = 10 * 60e3;          // clocks may be this far behind
 export const FULL_EVERY = 7 * 864e5;     // a full read at least weekly
@@ -131,6 +136,24 @@ export function applyTombs(docs, gone, tombs) {
 // records deleted on this device -> tombstones: each at the deleted version's stamp; at (now) only for one not held here
 export const dropTombs = (docs, ids, at) => ids.map(id => ({ id: String(id), deletedAt: stamp(docs.get(String(id))) || at }));
 
+// tombstones [{ id, deletedAt }] kept back (the record has saves not sent) -> later, { id: ms }, the highest per id
+export function deferTombs(later, tombs) {
+  const out = { ...(later || {}) };
+  for (const t of tombs || []) { const at = timeOf(t && t.deletedAt); if (t && t.id && at) out[t.id] = Math.max(out[t.id] || 0, at); }
+  return out;
+}
+
+// deferred tombstones (meta.later) of records not held any more (holding(id) false; ids: only those) applied to docs as
+// any tombstone: removed unless changed after it, and remembered in gone. -> { meta, del } (null: nothing to do)
+export function settleTombs(docs, meta, ids, holding) {
+  const later = meta.later || {}, due = Object.keys(later).filter(id => (!ids || ids.includes(id)) && !holding(id));
+  if (!due.length) return null;
+  const gone = { ...(meta.gone || {}) }, rest = { ...later };
+  const del = applyTombs(docs, gone, due.map(id => ({ id, deletedAt: later[id] })));
+  for (const id of due) delete rest[id];
+  return { meta: { ...meta, gone, later: rest }, del };
+}
+
 export const pruneGone = (gone, now) => Object.fromEntries(Object.entries(gone || {}).filter(([, t]) => t > now - GONE_KEEP));
 
 // recycle bin entries { kind, data, deletedAt } -> tombstones per collection, kinds mapping an entry's kind to its
@@ -203,6 +226,9 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     if (swept.length) persist({ del: swept, meta });
     // a list confirmed before shows at once; a device that never synced waits for the listener (as Firestore did)
     if (meta.syncAt) { flags = { fromCache: true, hasPendingWrites: false }; emit(); }
+    // tombstones deferred on an earlier page whose record's saves are done since
+    const settled = settleTombs(docs, meta, null, holding);
+    if (settled) { meta = settled.meta; persist({ del: settled.del, meta }); if (settled.del.length && flags) emit(); }
     start();
   })().catch(onError);
 
@@ -234,7 +260,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       const kept = [...docs.keys()].filter(id => !there.has(id) && holding(id));
       const r = replaceAll(docs, [...list, ...kept.map(id => docs.get(id))]);
       for (const id of kept) left(id);
-      meta = { ...meta, syncAt: t, fullAt: t, gone: pruneGone(meta.gone, t), ...(s.epoch !== undefined ? { epoch: s.epoch } : {}),
+      meta = { ...meta, syncAt: t, fullAt: t, gone: pruneGone(meta.gone, t), ...(meta.later ? { later: pruneGone(meta.later, t) } : {}), ...(s.epoch !== undefined ? { epoch: s.epoch } : {}),
         ...(server ? { anchor: newestServer(s.docs || [], pending, serverField) } : {}) };
       const swept = expireDocs(docs, meta.gone, expire, t);
       if (swept.length) r.put = r.put.filter(d => !swept.includes(d.id)), r.del.push(...swept);
@@ -303,10 +329,25 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       await ready;
       const kept = (list || []).filter(t => t && t.id && holding(t.id) && stamp(docs.get(t.id)) <= timeOf(t.deletedAt));
       const del = applyTombs(docs, meta.gone ||= {}, (list || []).filter(t => !kept.includes(t)));
+      if (kept.length) meta = { ...meta, later: deferTombs(meta.later, kept) };
       for (const t of kept) left(t.id);
       await persist({ del, meta });
       if (del.length) emit();
     },
+    // deferred tombstones of records whose saves are done now (ids: only those; default all) -> ids removed
+    async settle(ids = null) {
+      await ready;
+      if (stopped) return [];
+      const r = settleTombs(docs, meta, ids, holding);
+      if (!r) return [];
+      meta = r.meta;
+      await persist({ del: r.del, meta });
+      if (r.del.length) emit();
+      return r.del;
+    },
+    // the highest tombstone known here for id (ms; 0: none)
+    tomb: id => Math.max(Number((meta.gone || {})[id]) || 0, Number((meta.later || {})[id]) || 0),
+    waiting: () => Object.keys(meta.later || {}),
     // the device's store was deleted under this engine (another tab signed out or switched account) and opened
     // again empty: write the whole list back, and read everything at the next start, since the list may be partial
     wiped() {
@@ -379,6 +420,7 @@ export const GRACE = 1500;
 export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, feeds: extraFeeds = {}, unstamped = 'skip', expire = {}, stampMode = 'client', serverField = 'serverAt', unsent = () => false, onLeave = () => {} }) {
   const feedKinds = [...(bin ? [[bin, binKinds]] : []), ...Object.entries(extraFeeds || {}).filter(([c]) => c && c !== bin)];
   const engines = new Map(), feeds = new Map(), stores = new Map(), timers = new Map(), stopping = new Map(), tombing = new Map();
+  const waiting = new Set();   // scope\ncoll\nid with a deferred tombstone in a collection's stored copy (not running)
   const key = (scope, coll) => scope + '\n' + coll;
   async function storeFor(scope) {
     let s = stores.get(scope);
@@ -419,8 +461,13 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       const held = t => { if (!docs.has(t.id) || stamp(docs.get(t.id)) > timeOf(t.deletedAt)) return false; try { return !!unsent(scope, coll, t.id); } catch { return true; } };
       const kept = drop ? [] : (list || []).filter(t => t && t.id && held(t));
       const del = applyTombs(docs, meta.gone ||= {}, drop ? dropTombs(docs, list, now()) : list.filter(t => !kept.includes(t)));
+      let m = kept.length ? { ...meta, later: deferTombs(meta.later, kept) } : meta;
       for (const t of kept) { try { onLeave(scope, coll, t.id, copy(docs.get(t.id))); } catch (e) { console.warn('onLeave', e); } }
-      await st.write(coll, { del, meta });
+      // (and deferred ones whose saves are done: a settle, here while the collection isn't running)
+      const settled = settleTombs(docs, m, null, id => { try { return docs.has(id) && !!unsent(scope, coll, id); } catch { return docs.has(id); } });
+      if (settled) { m = settled.meta; del.push(...settled.del); }
+      for (const id of Object.keys(m.later || {})) waiting.add(key(scope, coll) + '\n' + id);
+      await st.write(coll, { del, meta: m });
     });
     const tracked = run.finally(() => { if (tombing.get(k) === tracked) tombing.delete(k); });
     tracked.catch(() => {});
@@ -470,11 +517,24 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       const e = engines.get(key(scope, coll));
       return (e ? e.drop(ids) : storeTombs(scope, coll, ids, true)).catch(err => console.warn('Local store not updated', err));
     },
+    // deferred tombstones (0.6.3): apply those of scope whose record's saves are done (call when the queue changes)
+    async settle(scope) {
+      const runs = [];
+      for (const [k, e] of engines) if (k.startsWith(scope + '\n') && e.waiting().length) runs.push(e.settle());
+      const idle = new Set([...waiting].filter(w => w.startsWith(scope + '\n')).map(w => w.split('\n')[1]).filter(c => !engines.has(key(scope, c))));
+      for (const coll of idle) {
+        for (const w of [...waiting]) if (w.startsWith(key(scope, coll) + '\n')) waiting.delete(w);
+        runs.push(storeTombs(scope, coll, []));
+      }
+      await Promise.all(runs.map(p => p.catch(err => console.warn('Local store not updated', err))));
+    },
+    // the highest tombstone known on this device for a record (ms; 0: none), from its running engine
+    tomb(scope, coll, id) { const e = engines.get(key(scope, coll)); return e ? e.tomb(String(id)) : 0; },
     // stop everything and forget open stores (sign-out); resolves when pending local writes are done
     async stopAll() {
       for (const t of timers.values()) clearTimeout(t);
       const waits = [...engines.values(), ...feeds.values()].map(x => x.stop());
-      engines.clear(); feeds.clear(); stores.clear(); timers.clear(); stopping.clear();
+      engines.clear(); feeds.clear(); stores.clear(); timers.clear(); stopping.clear(); waiting.clear();
       await Promise.all(waits).catch(() => {});
     },
     // the page woke (shown again, back online): every engine due a full read starts it. -> how many restarted
