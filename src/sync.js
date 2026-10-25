@@ -422,8 +422,9 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
   async function verify(id) {
     /** @type {Doc | null | undefined} */
     let doc;
+    const before = docs.get(id);
     try { doc = fetchOne ? await fetchOne(scope, coll, id) : undefined; } catch { doc = undefined; }
-    if (stopped) return;
+    if (stopped || docs.get(id) !== before) return;   // a snapshot changed this record while the read was out: it is newer
     const gone = meta.gone || {};
     if (!(doc && !(gone[id] != null && stamp(doc) <= gone[id])) && holding(id)) { left(id); return; }
     if (doc && !(gone[id] != null && stamp(doc) <= gone[id])) {
