@@ -4,7 +4,7 @@
 // status chip, and the report's counts by kind. Made-up data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeHeld, clashingFields, whenText, describeConflict, resolvedRecord } from '../src/conflict.js';
+import { mergeHeld, clashingFields, whenText, describeConflict, resolvedRecord, mergeClashes } from '../src/conflict.js';
 import { createFirestoreBackend } from '../src/firestore.js';
 import { createApp } from '../src/app.js';
 import { buildReport } from '../src/report.js';
@@ -144,12 +144,12 @@ test('held commit: counters count both devices once each (a lost answer resent c
 
 // ---- two phones through createApp ----
 
-function phone(name, shared, srv, { held = { notes: true }, edits = '_edits' } = {}) {
+function phone(name, shared, srv, { held = { notes: true }, edits = '_edits', merge } = {}) {
   const dev = { name, online: true, view: [], subs: new Set(), states: [] };
   const user = { uid: 'u1', email: 'fake@example.test', displayName: 'Fake Person', getIdTokenResult: async () => ({ claims: {} }), getIdToken: async () => 't' };
   const auth = { currentUser: user };
   const A = { onAuthStateChanged: (_a, cb) => { cb(auth.currentUser); return () => {}; }, signOut: async () => {}, GoogleAuthProvider: class {} };
-  const backendOptions = { held, edits, mark: '_saves' };
+  const backendOptions = { held, edits, mark: '_saves', ...(merge ? { merge } : {}) };
   const backend = createFirestoreBackend({ sdk: shared.device({ name }).sdk, path: (s, c) => ['spaces', s, c], ...backendOptions, editor: () => ({ by: 'Fake Person', device: name }) });
   const listen = (scope, coll, opts, onSnap, onError) => {
     const sub = { args: [scope, coll, opts, onSnap, onError], off: dev.online ? srv.listen(scope, coll, opts, onSnap, onError) : null };
@@ -237,6 +237,118 @@ test('two phones: answering mine saves this phone\'s value over the other; a sam
   await until(() => b.shown('n1')?.title === 'Fake A');
   assert.equal(b.shown('n1').title, 'Fake A');
   await assert.rejects(a.app.resolve(c.key, 'mine'), /no longer waiting/);
+});
+
+test('fix 0.7.1: a save queued behind one that is then held is part of the answer, never only set aside', async () => {
+  const { shared, a, b } = await twoPhones();
+  const base = strip(a.shown('n1'));
+  a.offline(); b.offline();
+  await a.app.save('note', S, { ...base, title: 'Fake A' }, base).catch(() => {});
+  a.onlineAgain(); await a.app.flush(2000);
+  // phone B, offline: the title (it will clash), then the place on top of its own version (queued before the clash)
+  await b.app.save('note', S, { ...base, title: 'Fake B' }, base).catch(() => {});
+  await b.app.save('note', S, { ...base, title: 'Fake B', place: 'Box' }, { ...base, title: 'Fake B' }).catch(() => {});
+  b.onlineAgain(); await b.app.flush(2000);
+  await until(() => b.state() === 'attention');
+  const [c] = b.app.conflicts();
+  assert.equal(b.app.describe(c.key).mine.value.place, 'Box', 'mine is this phone\'s newest version');
+  await b.app.resolve(c.key, 'theirs');
+  await b.app.flush(2000);
+  const doc = shared.docs.get(pathOf('notes', 'n1'));
+  assert.deepEqual([doc.title, doc.place], ['Fake A', 'Box'], 'theirs for the title; the later place change still lands');
+});
+
+// ---- held conflicts for merge collections (0.7.1): the app's merge function applies ops ----
+
+// A made-up merge function like an app's: ops are [{ set: { path: value } } | { inc: { path: n } } | { put: true }],
+// applied in order to the copy given (current); a put replaces it with the record.
+const applyOps = (current, record, _base, ops) => {
+  let doc = current ? JSON.parse(JSON.stringify(current)) : { id: record.id };
+  for (const o of ops && ops.length ? ops : [{ put: true }]) {
+    if (o.put) { doc = JSON.parse(JSON.stringify(record)); continue; }
+    for (const [path, v] of Object.entries(o.set || o.inc || {})) {
+      const keys = path.split('.'), last = keys.pop();
+      let at = doc; for (const k of keys) at = at[k] = at[k] && typeof at[k] === 'object' ? at[k] : {};
+      at[last] = o.inc ? (typeof at[last] === 'number' ? at[last] : 0) + v : v;
+    }
+  }
+  return doc;
+};
+
+test('mergeClashes: a set over a change elsewhere clashes; increments and one-sided changes never do', () => {
+  const base = { id: 'r1', place: 'Shelf', lots: { a: { qty: 3, note: 'x' } } };
+  const cur = { id: 'r1', place: 'Fridge', lots: { a: { qty: 5, note: 'y' } } };
+  const mine = applyOps(base, base, base, [{ set: { place: 'Box', 'lots.a.note': 'z' } }, { inc: { 'lots.a.qty': 1 } }]);
+  const merged = applyOps(cur, base, base, [{ set: { place: 'Box', 'lots.a.note': 'z' } }, { inc: { 'lots.a.qty': 1 } }]);
+  assert.equal(merged.lots.a.qty, 6, 'both increments count');
+  assert.deepEqual(mergeClashes(cur, mine, merged, base), ['place', 'lots.a.note']);
+  // only this device changed it, only elsewhere, or both to the same value: no clash
+  assert.deepEqual(mergeClashes({ ...base, place: 'Fridge' }, { ...base, lots: { a: { qty: 3, note: 'z' } } }, { place: 'Fridge', lots: { a: { qty: 3, note: 'z' } } }, base), []);
+  assert.deepEqual(mergeClashes({ ...base, place: 'Box' }, { ...base, place: 'Box' }, { ...base, place: 'Box' }, base), []);
+  // a removal here over a change there clashes; the merge keeping the server's value (its own rule) does not
+  assert.deepEqual(mergeClashes(cur, { id: 'r1', lots: base.lots }, { id: 'r1', lots: cur.lots }, base), ['place']);
+  assert.deepEqual(mergeClashes(cur, { ...base, place: 'Box' }, cur, base), []);
+  // stamps and skipped fields never clash
+  assert.deepEqual(mergeClashes({ ...base, updatedAt: 9, _s: [1] }, { ...base, updatedAt: 2, _s: [2] }, { ...base, updatedAt: 2, _s: [2] }, { ...base, updatedAt: 1 }, { skip: ['_s'] }), []);
+});
+
+test('held merge commit: off unless named; ops land on the server copy; a set over a change elsewhere is held, nothing written', async () => {
+  const shared = sharedSdk();
+  const opts = d => ({ merge: { items: applyOps }, held: { items: true }, mark: '_saves', edits: '_edits', editor: () => ({ by: 'Fake Person', device: d }) });
+  const a = backendOn(shared.device({ name: 'a' }), opts('Phone A')), b = backendOn(shared.device({ name: 'b' }), opts('Phone B'));
+  const lww = backendOn(shared.device({ name: 'c' }), { merge: { items: applyOps }, held: true, mark: '_saves' });   // held: true leaves merge collections as they were
+  const base = { id: 'r1', place: 'Shelf', lots: { a: { qty: 3 } } };
+  shared.meddle(pathOf('items', 'r1'), { ...base, updatedAt: 1 });
+  await a.commit(S, 'items', base, base, { key: 'k-a', ops: [{ inc: { 'lots.a.qty': 2 } }, { set: { place: 'Fridge' } }] });
+  shared.lostAck.push('deadline-exceeded');
+  await b.commit(S, 'items', base, base, { key: 'k-b', ops: [{ inc: { 'lots.a.qty': 1 } }] }).catch(() => {});
+  await b.commit(S, 'items', base, base, { key: 'k-b', ops: [{ inc: { 'lots.a.qty': 1 } }] });   // resent: counted once
+  let doc = shared.docs.get(pathOf('items', 'r1'));
+  assert.deepEqual([doc.lots.a.qty, doc.place], [6, 'Fridge'], 'both increments count once, never a clash');
+  assert.deepEqual([doc._edits.place.device, doc._edits.lots.device], ['Phone A', 'Phone B']);
+  const before = shared.commits.length;
+  const e = await b.commit(S, 'items', base, base, { key: 'k-b2', ops: [{ set: { place: 'Box' } }, { inc: { 'lots.a.qty': 1 } }] }).catch(x => x);
+  assert.equal(e.code, 'write-conflict'); assert.deepEqual(e.fields, ['place']); assert.equal(e.remote.place, 'Fridge');
+  assert.equal(shared.commits.length, before, 'held: nothing written, not even the increment');
+  // a merge function that refuses a change gets the server copy as remote
+  const refuse = backendOn(shared.device({ name: 'd' }), { merge: { items: () => { throw Object.assign(new Error('no'), { code: 'write-conflict' }); } }, held: { items: true } });
+  const e2 = await refuse.commit(S, 'items', base, base, { ops: [] }).catch(x => x);
+  assert.equal(e2.remote.place, 'Fridge');
+  // a delete over a change elsewhere and an edit of a record deleted elsewhere are held, as with whole records
+  assert.equal((await a.commit(S, 'items', { id: 'r1', _deleted: true }, base).catch(x => x)).code, 'write-conflict');
+  shared.meddle(pathOf('items', 'r2'), { id: 'r2', place: 'Shelf' }); shared.docs.delete(pathOf('items', 'r2'));
+  const e3 = await a.commit(S, 'items', { id: 'r2' }, { id: 'r2', place: 'Shelf' }, { ops: [{ set: { place: 'Box' } }] }).catch(x => x);
+  assert.equal(e3.code, 'write-conflict'); assert.equal(e3.remote, null);
+  // held: true without naming it: the merge collection stays last-write-wins (unchanged)
+  await lww.commit(S, 'items', base, base, { key: 'k-c', ops: [{ set: { place: 'Box' } }] });
+  doc = shared.docs.get(pathOf('items', 'r1'));
+  assert.equal(doc.place, 'Box');
+});
+
+test('two phones, merge collection: increments both land; a set clash is held on the second phone and answered through the merge', async () => {
+  const opts = { held: { notes: true }, merge: { notes: applyOps } };
+  const { shared, a, b } = await twoPhones(opts);
+  const base = strip(a.shown('n1'));
+  a.offline(); b.offline();
+  await a.app.save('note', S, base, base, { ops: { set: { place: 'Fridge' }, inc: undefined } }).catch(() => {});
+  a.onlineAgain(); await a.app.flush(2000);
+  await b.app.save('note', S, base, base, { ops: { inc: { count: 2 } } }).catch(() => {});
+  await b.app.save('note', S, base, base, { ops: { set: { place: 'Box', title: 'Fake B' } } }).catch(() => {});
+  await b.app.save('note', S, base, base, { ops: { inc: { count: 1 } } }).catch(() => {});
+  b.onlineAgain(); await b.app.flush(2000);
+  await until(() => b.state() === 'attention');
+  const doc = shared.docs.get(pathOf('notes', 'n1'));
+  assert.deepEqual([doc.place, doc.count], ['Fridge', 3], 'the increment before the clash landed; nothing overwritten');
+  const [c] = b.app.conflicts();
+  const d = b.app.describe(c.key);
+  assert.deepEqual(d.fields.map(f => [f.path, f.mine.value, f.theirs.value, f.theirs.device]), [['place', 'Box', 'Fridge', 'Phone A']]);
+  await b.app.resolve(c.key, { place: 'theirs' });
+  await b.app.flush(2000);
+  await until(() => b.state() === 'synced');
+  const end = shared.docs.get(pathOf('notes', 'n1'));
+  assert.deepEqual([end.place, end.title, end.count], ['Fridge', 'Fake B', 4], 'theirs kept, my other set and my later increment land once');
+  assert.equal(b.app.conflicts().length, 0);
+  await until(() => a.shown('n1')?.count === 4);
 });
 
 // ---- the report ----

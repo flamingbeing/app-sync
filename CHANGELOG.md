@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.1 (2026-10-25)
+
+Held conflicts for merge collections, opt-in, and a fix to held answers. Nothing changes for an app without `held`,
+nor for a merge collection that `held` doesn't name (`held: true` still leaves merge collections last-write-wins).
+Tests: `test/held.test.mjs` (+4), the model test run a third time with the merge collection held, emulator.
+
+- Held for a merge collection: name it in `held` (`held: { items: true }` with `merge: { items: fn }`). The merge
+  function still applies the save's ops (patches, nested increments) to the server's copy inside the transaction; the
+  save is held only where that would overwrite a change made elsewhere: a path changed on both sides to different
+  values where the merge takes this device's value. Increments the merge adds up never clash; stamps, `mark` and
+  `edits` are never compared. Writes `edits` (who changed each top-level field) and the held error carries `remote`
+  (also when the merge function itself refuses). Deletes and edits of a record deleted elsewhere are held as with
+  whole records. The merge function must be pure (it also runs on base), and the app passes the copy the edit
+  started from as base (null: every field sent counts as changed). `describe()` and `resolve()` go through the merge
+  function: the answer is the merge of this device's ops with the server's copy, theirs where chosen, saved over
+  that copy (held again if it changed meanwhile, never a blind put). New pure helpers `mergeClashes`, `mergeFnClashes`.
+- Fix (held, 0.6.3+): a save queued behind one that is then held (made offline, before the clash was known) is now
+  part of "mine" in `describe()` and `resolve()`. Before, answering set it aside in the history (with the "kept"
+  notice) and its change never reached the server. The queue also keeps a replaced held copy's ops.
+- Release: a new tag now starts the Deploy workflow, so the new version is served on core at once (0.6.4 and 0.7.0
+  were served only after the next push: the push's own deploy ran before the tag existed).
+
 ## 0.7.0 (2026-10-25)
 
 Types only: JSDoc across `src/` and `index.js`, checked by `tsc --checkJs` in Checks. No runtime behaviour change

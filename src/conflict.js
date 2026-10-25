@@ -6,7 +6,7 @@
  * @typedef {import('./types.js').HeldSave} HeldSave
  * @typedef {import('./types.js').ConflictChoice} ConflictChoice
  * @typedef {import('./types.js').ConflictView} ConflictView
- * @typedef {{ counters?: string[], skip?: string[] }} MergeOptions
+ * @typedef {{ counters?: string[], skip?: string[], merge?: ((current: Doc | null, record: Doc, base: Doc | null, ops?: any) => Doc) | null }} MergeOptions
  */
 
 // Pure equality: key order and updatedAt are ignored (a backend refreshes updatedAt on save), so identical content
@@ -122,6 +122,71 @@ export function mergeHeld(current, record, base, { counters = [], skip = [], pic
   return out;
 }
 
+// Held conflicts for a collection saved through a merge function (0.7.1: the Firestore adapter's `merge` fn with
+// `held` naming that collection). The merge function (pure) applies the save's ops, such as increments, that only it
+// understands; the clash check then compares its result by path instead of re-merging:
+//   mine: the save applied to base (merge(base, record, base, ops)); merged: applied to the server's copy now;
+//   a path (leaf, plain objects walked key by key, arrays whole) clashes when this device changed it since base, it
+//   was changed elsewhere too, the two differ, and merged takes this device's value there (the server's change would be
+//   overwritten). A path where merged is neither side (an increment adds both) or keeps the server's (the merge
+//   function's own rule) never clashes. skip: top-level fields left out (stamps, the engine's own fields).
+// -> the clashing paths ([] when none)
+const ABSENT = '\u0000absent';
+/**
+ * @param {Doc | null} current
+ * @param {Doc | null} mine
+ * @param {Doc | null} merged
+ * @param {Doc | null} base
+ * @param {{ skip?: string[] }} [options]
+ * @returns {string[]}
+ */
+export function mergeClashes(current, mine, merged, base, { skip = [] } = {}) {
+  const skipped = new Set(['id', 'updatedAt', ...skip]);
+  /** @param {any} o @param {string} k */
+  const sigAt = (o, k) => isMap(o) && Object.hasOwn(o, k) ? recordSignature(o[k] ?? null) : ABSENT;
+  /** @type {string[]} */
+  const clashes = [];
+  /** @type {(cur: any, me: any, out: any, was: any, prefix: string) => void} */
+  const walk = (cur, me, out, was, prefix) => {
+    const keys = new Set([cur, me, out, was].flatMap(o => isMap(o) ? Object.keys(o) : []));
+    for (const k of keys) {
+      if (!prefix && skipped.has(k)) continue;
+      const vals = [cur, me, out, was].map(o => isMap(o) && Object.hasOwn(o, k) ? o[k] : undefined);
+      const w = sigAt(was, k), m = sigAt(me, k), c = sigAt(cur, k);
+      if (m === w || c === w || m === c) continue;                     // changed on one side only, or alike
+      if (vals.every(v => v === undefined || isMap(v)) && vals.filter(isMap).length > 1) { walk(vals[0], vals[1], vals[2], vals[3], prefix + k + '.'); continue; }
+      if (sigAt(out, k) === m) clashes.push(prefix + k);              // merged takes mine over theirs
+    }
+  };
+  walk(current, mine, merged, base, '');
+  return clashes;
+}
+
+// mergeClashes for a held save of a merge collection, running the merge function both ways (copies: it never sees
+// the caller's objects). -> { mine, merged, fields }
+/**
+ * @param {Doc | null} current
+ * @param {Doc} record
+ * @param {Doc | null} base
+ * @param {(current: Doc | null, record: Doc, base: Doc | null, ops?: any) => Doc} merge
+ * @param {any} ops
+ * @param {{ skip?: string[] }} [options]
+ * @returns {{ mine: Doc, merged: Doc, fields: string[] }}
+ */
+export function mergeFnClashes(current, record, base, merge, ops, options = {}) {
+  const mine = merge(base ? clone(base) : null, clone(record), base ? clone(base) : null, clone(ops));
+  const merged = merge(current ? clone(current) : null, clone(record), base ? clone(base) : null, clone(ops));
+  return { mine, merged, fields: mergeClashes(current, mine, merged, base, options) };
+}
+
+/** @param {any} record @param {string} path @param {any} from (the side whose value it takes; absent there: removed) */
+const setFrom = (record, path, from) => {
+  const keys = path.split('.'), last = /** @type {string} */ (keys.pop());
+  let o = record, src = from;
+  for (const k of keys) { if (!isMap(o[k])) o[k] = {}; o = o[k]; src = isMap(src) ? src[k] : undefined; }
+  if (isMap(src) && Object.hasOwn(src, last)) o[last] = clone(src[last]); else delete o[last];
+};
+
 // The fields of a held save that clash with the server's copy (mergeHeld's paths; [] when none do).
 /**
  * @param {Doc | null} current
@@ -159,7 +224,7 @@ const valueAt = (record, path) => path.split('.').reduce((v, k) => isMap(v) ? v[
  * @param {MergeOptions & { edits?: string | null, me?: { by?: string, device?: string }, timeZone?: string }} [options]
  * @returns {ConflictView}
  */
-export function describeConflict({ record, base = null, remote = null, at = 0 }, { counters = [], skip = [], edits = null, me = {}, timeZone } = {}) {
+export function describeConflict({ record, base = null, remote = null, at = 0, ops }, { counters = [], skip = [], edits = null, me = {}, timeZone, merge = null } = {}) {
   const mineDeleted = !!record?._deleted, theirsDeleted = !remote;
   /** @param {any} v */
   const msOf = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;
@@ -174,8 +239,14 @@ export function describeConflict({ record, base = null, remote = null, at = 0 },
     const e = top ? remote?.[/** @type {string} */ (edits)]?.[top] : [...changes].sort((a, b) => msOf(b.at) - msOf(a.at))[0];
     return isMap(e) ? side(value, e.at, e.by, e.device) : side(value, remote?.updatedAt);
   };
-  const fields = mineDeleted || theirsDeleted ? [] : clashingFields(remote, record, base, { counters, skip: edits ? [...skip, edits] : skip })
-    .map(path => ({ path, mine: mineSide(valueAt(record, path)), theirs: theirsSide(valueAt(remote, path), path.split('.')[0]) }));
+  const skipAll = edits ? [...skip, edits] : skip;
+  // a merge collection (0.7.1): the clashes as the commit finds them, mine as the merge function makes it
+  /** @type {{ mine: Doc, fields: string[] } | null} */
+  let viaMerge = null;
+  if (merge && !mineDeleted && !theirsDeleted) { try { viaMerge = mergeFnClashes(remote, record, base, merge, ops, { skip: skipAll }); } catch { viaMerge = { mine: record, fields: [] }; } }
+  const mineRecord = viaMerge ? viaMerge.mine : record;
+  const fields = (mineDeleted || theirsDeleted ? [] : viaMerge ? viaMerge.fields : clashingFields(remote, record, base, { counters, skip: skipAll }))
+    .map(path => ({ path, mine: mineSide(valueAt(mineRecord, path)), theirs: theirsSide(valueAt(remote, path), path.split('.')[0]) }));
   return { deleted: { mine: mineDeleted, theirs: theirsDeleted }, fields, mine: mineSide(record), theirs: theirsSide(remote, fields.length === 1 ? fields[0].path.split('.')[0] : null) };
 }
 
@@ -190,11 +261,16 @@ export function describeConflict({ record, base = null, remote = null, at = 0 },
  * @param {MergeOptions} [options]
  * @returns {Doc}
  */
-export function resolvedRecord({ record, base = null, remote = null }, choice, { counters = [], skip = [] } = {}) {
+export function resolvedRecord({ record, base = null, remote = null, ops }, choice, { counters = [], skip = [], merge = null } = {}) {
   /** @param {string} path @returns {'mine' | 'theirs'} */
   const pick = path => typeof choice === 'string' ? choice : choice?.[path] === 'mine' ? 'mine' : 'theirs';
   const whole = typeof choice === 'string' ? choice : 'theirs';
   const id = record?.id ?? remote?.id;
   if (record?._deleted || !remote) return clone(whole === 'mine' ? record : remote || { id, _deleted: true });
+  if (merge) {   // a merge collection (0.7.1): the merge function's result on the server's copy, theirs where chosen
+    const { merged, fields } = mergeFnClashes(remote, record, base, merge, ops, { skip });
+    for (const path of fields) if (pick(path) === 'theirs') setFrom(merged, path, remote);
+    return { ...merged, id };
+  }
   return { ...mergeHeld(remote, record, base, { counters, skip, pick }), id };
 }

@@ -1,6 +1,9 @@
 # Tags each new version: on a push to main, if package.json's version has no tag yet, tag that commit vX.Y.Z; the same
 # for the update module (update/VERSION -> update-vX.Y.Z).
 # An existing tag is never moved or replaced (versions are immutable). Also runs by hand.
+# A new tag then starts the Deploy workflow: the push's own deploy built dist/ before the tag existed, so the new
+# version would otherwise stay unserved until the next push (0.6.4 and 0.7.0 were). A tag pushed with the workflow's
+# token starts no workflow by itself; a workflow_dispatch does.
 name: Release tag
 
 on:
@@ -10,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: release-tag
@@ -24,6 +28,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Tag the version if it is new
+        id: sync
         run: |
           v="v$(node -p "require('./package.json').version")"
           code="$(node -p "require('fs').readFileSync('index.js','utf8').match(/VERSION = '([^']+)'/)[1]")"
@@ -34,7 +39,9 @@ jobs:
           git tag -a "$v" -m "app-sync ${v#v}" "$GITHUB_SHA"
           git push origin "refs/tags/$v"
           echo "tagged $v at $GITHUB_SHA"
+          echo "tagged=true" >> "$GITHUB_OUTPUT"
       - name: Tag the update module if its version is new
+        id: update
         run: |
           v="update-v$(tr -d '[:space:]' < update/VERSION)"
           for f in update/sw-core.js update/register.js; do
@@ -46,3 +53,9 @@ jobs:
           git tag -a "$v" -m "app-update ${v#update-v}" "$GITHUB_SHA"
           git push origin "refs/tags/$v"
           echo "tagged $v at $GITHUB_SHA"
+          echo "tagged=true" >> "$GITHUB_OUTPUT"
+      - name: Deploy the new version
+        if: steps.sync.outputs.tagged == 'true' || steps.update.outputs.tagged == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy.yml --ref "$GITHUB_REF_NAME"

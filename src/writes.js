@@ -217,7 +217,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       job = { key: email + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2), owner: email,
         kind, record: copy(record), base: copy(stale?.state === 'failed' ? stale.base : base), state: held ? 'conflict' : 'pending', accepted: false, at: Math.max(Date.now(), ...jobs.map(x => x.at + 1)) };
       if (held) { job.remote = copy(conflict.remote ?? null); job.error = conflict.error; }
-      const carried = stale?.state === 'failed' ? stale.ops || [] : [];
+      const carried = stale && (stale.state === 'failed' || held) ? stale.ops || [] : [];   // (a held copy's ops too: 0.7.1)
       if (ops !== undefined || carried.length) job.ops = [...carried, ...(ops !== undefined ? [copy(ops)] : [])];
     }
     try { await persist(job); storageError = ''; }
