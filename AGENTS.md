@@ -29,6 +29,9 @@ npm run test:emulator         # Firestore adapter on the local emulator (Java)
 node tools/proofread.mjs      # page and doc mistakes
 ```
 
+CI also runs app-starter's browser tests on the candidate engine (the `consumer` job; locally: in an app-starter
+checkout, `SYNC_DIR=<this checkout> npm run e2e`). A red consumer job is a break for every app: fix it here first.
+
 ## Releasing
 
 1. Bump `version` in `package.json` and `VERSION` in `index.js`; add the CHANGELOG entry.

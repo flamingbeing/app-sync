@@ -1,5 +1,6 @@
-# Every PR and push to main: the repo checks and unit tests, and the Firestore adapter against the local emulator
-# (demo project, nothing reaches a real Firebase project). Two jobs side by side.
+# Every PR and push to main: the repo checks and unit tests, the Firestore adapter against the local emulator (demo
+# project, nothing reaches a real Firebase project), the update module in a browser, and app-starter's browser tests on
+# this engine (consumer). Jobs side by side.
 name: Checks
 
 on:
@@ -57,3 +58,34 @@ jobs:
         run: npm install --no-save --no-package-lock playwright@1.63.0 && npx playwright install --with-deps chromium
       - name: Update module in a real browser
         run: node update/test/e2e.mjs
+
+  # The consumer test: app-starter's browser tests (sign-in, offline save, two-phone sync, conflict, sign-out wipe,
+  # update) with this commit's engine served in place of the released one (its fixture's SYNC_DIR), before a release.
+  consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: flamingbeing/app-starter
+          ref: main
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: candidate
+      - name: The starter serves a local build (fails if its fixture lost SYNC_DIR)
+        run: grep -q SYNC_DIR e2e/fixtures.mjs
+      - uses: flamingbeing/app-devkit/setup-node@v1.8.0
+      - uses: flamingbeing/app-devkit/setup-browser@v1.8.0
+      - uses: flamingbeing/app-devkit/setup-emulators@v1.8.0
+        with:
+          emulators: firestore,auth
+      - name: app-starter's browser tests on this engine
+        run: npx playwright test
+        env:
+          SYNC_DIR: candidate
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: consumer-results
+          path: test-results
+          if-no-files-found: ignore
