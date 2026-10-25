@@ -219,6 +219,22 @@ never the device copy. `merge['*']` is the merge of every collection not named; 
 `index.js`) writes the save over the server's copy whole. `commitRetry` tries a commit refused with one of `codes`
 once more after `delay` ms.
 
+### A kind saved elsewhere, unstamped collections, the app's own listener, inStepAt and reopen (1.2.0)
+
+```js
+sync({ ..., kinds: { note: 'notes', shared: { coll: 'shared', path: (scope, coll, r) => ['groups', r.group, coll] } } });
+sync({ ..., backend: { unstampedColls: ['settings'] }, reopen: async ({ memory, sdk }) => openFirestore(sdk, memory) });
+app.sync.watch(scope, 'items', list => draw(list), { listen: myListen });
+app.sync.facts().inStepAt;   // when the status was last synced; now while it is
+```
+
+A kind with `{ coll, path }` saves to `path(scope, coll, record)` instead of the scope's path, through the same queue.
+`unstampedColls` writes those collections with the app's fields only (no `id`, stamp or server stamp; the conflict
+check reads the content), for rules that refuse the extra fields. `listen` puts a collection on the app's own listener
+(the adapter's `listen` shape), still kept in the device copy and watched by the watchdog. `reopen` hands the sync
+module a new Firestore instance after a wipe (memory-only when the old cache could not be cleared), so a switch of
+account needs no reload.
+
 ### Held conflicts by field (0.6.3, opt-in)
 
 ```js
@@ -276,7 +292,7 @@ conflict handling, the bin and history screens, and how the status looks.
 ## Server rules the engine relies on
 
 - Every synced document carries a number field (default `updatedAt`) that only increases when it changes; in server
-  mode also `serverAt`, set to `request.time` on every write.
+  mode also `serverAt`, set to `request.time` on every write (except `backend.unstampedColls`, 1.2.0).
 - A bin entry is `{ id, kind, data, deletedAt }`, where `data` is the deleted version.
 - Never `merge` an empty map, and never batch-overwrite records without reading them first.
 

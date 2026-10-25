@@ -14,6 +14,33 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.2.0 (2026-10-26)
+
+Additive: no 1.0 name, module contract or stored format changes (FORMATS.md as 1.0; no new job state; the outbox job
+keeps no path: a kind's path is asked at each send). Each piece lands with a failing test first.
+
+- **`kinds: { [kind]: { coll, path } }`** (`src/kinds.js`): a kind saved to `path(scope, coll, record)` instead of the
+  scope's path (a record kept outside the scope), through the same queue, outbox, conflict check and report; the
+  adapter's commit takes it as `extra.path`. A bad kind fails at `sync()`, not at the first save.
+- **`backend.unstampedColls: [coll]`** (`firestore.js`): collections whose documents hold only the app's fields (rules
+  that refuse `id`, the stamp and the server stamp): written without them, the conflict check on the content alone.
+  Naming a merge or held collection throws.
+- **`watch(scope, coll, cb, { listen })`**: the app's own listener for that collection (the adapter's `listen` shape)
+  instead of the adapter's; its snapshots go into the device copy and feed the status, `facts()` and the watchdog as
+  the adapter's do. One way at a time per collection: another `listen` for it throws while it runs; a plain watch of
+  it joins the app's listener (those watches start first).
+- **`facts().inStepAt`**: the last time the status was synced (the server heard, nothing waiting), now while it is;
+  0 before.
+- **`sync({ reopen: async ({ memory, sdk }) => db })`**: after a wipe ends the SDK instance (a switch of account,
+  `forget()`), a new Firestore instance in its place, so the page need not reload: a persistent cache once the old one
+  was cleared, else (or when that won't open) a memory-only one, so the last account's cache is never read again. Both
+  failing: the page reloads, as without `reopen`.
+- `entries.json` (sync) gains `src/kinds.js`; `files.json` / `FILES` unchanged (no new `index.js` import).
+
+Modular: yes (no new entry, global or ctx field; the modularity check, types and both Vite builds pass). Shaken: none
+of the five has code of its own to shake: `kinds.js` is part of the sync module every sync page loads, and the rest
+are options inside the sync api, the module and the adapter.
+
 ## 1.1.0 (2026-10-26)
 
 Additive: no 1.0 name, module contract or stored format changes (FORMATS.md as 1.0; no new job state). Each piece
