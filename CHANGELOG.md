@@ -26,6 +26,8 @@ Additive: no stored-format change, no change to the module contract, every 0.9.3
   engines remember the refusal, and the next `replan()` (page shown again, back online, or the periodic replan) listens
   again, so a role or rules change takes effect without a reload. A healthy listener is still left alone. Test first
   in `test/sync.test.mjs`.
+- `checks.yml`: the starter's pinned-engine step also looks in `app/app/index.html` and `app/app/public/sw.js` (the starter's
+  own `app/` folder inside the checkout), where the modules-only starter keeps its import map.
 
 ## 0.9.3 (2026-10-25)
 
