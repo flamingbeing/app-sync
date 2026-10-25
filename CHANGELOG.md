@@ -16,7 +16,7 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 
 ## 1.3.6 (2026-10-26)
 
-Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fixes are a
+Fix, no API or stored-format change (one module-contract clarification, below); modular: yes, shaken: no new export or option, the fixes are a
 few lines in `src/auth.js`, `src/runner.js` and `src/signin/passcode.js` (the passcode method still has its own chunk).
 
 - **A sign-out wins over a sign-in still out**: a passcode sign-in whose token came back after `signOut()` or
@@ -36,6 +36,9 @@ few lines in `src/auth.js`, `src/runner.js` and `src/signin/passcode.js` (the pa
 - **A handler that stops the app ends the event**: `emit` ran the handlers after one that awaited `app.stop()`. It now
   stops there, and names the modules it did not reach as failed (as an event sent after stop now does), so a switch
   or forget cut short by a stop, also a slow one, keeps the old owner.
+- **Contract clarification**: `ctx.emit` returns the modules whose handler threw *or did not run because the app
+  stopped* (also those whose handlers the stop already removed). Callers that treat the list as "did not happen" fail
+  closed, as the auth module does; no 1.x name or shape changes.
 
 ## 1.3.5 (2026-10-26)
 
