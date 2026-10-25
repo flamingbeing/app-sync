@@ -5,6 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
+import { ESCALATE_MS } from '../src/watchdog.js';
 import { checkWrite } from '../src/conflict.js';
 import { fakeServer } from './fake-server.mjs';
 import { createFirestoreBackend } from '../src/firestore.js';
@@ -373,4 +374,61 @@ test('a record deleted on this device leaves its list once the delete is done, t
   assert.ok(await until(() => view.length === 0), 'the deleted record left the list');
   assert.equal(shared.docs.has(`spaces/${S}/tasks/t1`), false);
   await app.hub.stopAll();
+});
+
+// ---- 0.7.3: C2's gaps (an app's own unacknowledged writes, the status facts, one flush wait) ----
+
+test('quiet: the watchdog never restarts the connection while the app says its own writes are not acknowledged (0.7.3)', async () => {
+  const run = async quiet => {
+    const srv = fakeServer();
+    let now = Date.now();
+    const listen = (scope, c, o, cb) => srv.listen(scope, c, o, s => cb({ ...s, fromCache: true }));
+    const { app } = makeApp({ srv, adapter: { ...fakeAdapter(srv), listen }, options: { now: () => now, ...(quiet ? { quiet } : {}) } });
+    await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+    app.watch('s1', 'items', () => {});
+    await settle(20);
+    now += 60000;
+    assert.equal(app.nudge(), true, 'stuck on the device copy: listen again');
+    await settle(20);
+    now += ESCALATE_MS;
+    return app.nudge();   // still stuck: restart the connection, only when quiet
+  };
+  assert.equal(await run(null), true, 'quiet (nothing unsent): the connection is restarted');
+  assert.equal(await run(() => false), false, 'the app\'s own writes not acknowledged: no restart under them');
+  assert.equal(await run(() => true), true);
+});
+
+test('facts: persisted, confirmed and when the server was last heard, reset at sign-out (0.7.3)', async () => {
+  const nav = fakeNav({ persisted: false });
+  let now = 1000;
+  const { app, srv } = makeApp({ nav, options: { now: () => now } });
+  await app.onUser(() => {});
+  assert.deepEqual(app.facts(), { persisted: true, confirmed: false, heardAt: 0 });
+  await app.signIn(); await app.open('s1');
+  app.watch('s1', 'items', () => {});
+  assert.ok(await until(() => app.facts().confirmed));
+  assert.equal(app.facts().heardAt, 1000);
+  assert.ok(await until(() => app.facts().persisted === false), 'the storage guard\'s answer');
+  now = 5000; srv.set('items', { id: 'h1', text: 'Fake', updatedAt: Date.now() });
+  assert.ok(await until(() => app.facts().heardAt === 5000), 'moves on each server answer');
+  await app.signOut();
+  assert.deepEqual([app.facts().confirmed, app.facts().heardAt], [false, 0]);
+});
+
+test('flush(ms) waits ms in all, not ms for the saves being stored and ms again for their sends (0.7.3)', async () => {
+  const srv = fakeServer();
+  const adapter = { ...fakeAdapter(srv), commit: () => new Promise(r => setTimeout(() => r({ at: 1 }), 1500)) };   // a slow answer
+  const box = memOutbox(uniq() + '-outbox'), put = box.put.bind(box);
+  let slow = false;
+  box.put = async x => { if (slow) await settle(400); return put(x); };   // a slow outbox write (a busy phone)
+  const { app } = makeApp({ srv, adapter, options: { outbox: box } });
+  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+  slow = true;
+  void app.save('item', 's1', { id: 'f1', text: 'Fake' }).catch(() => {});
+  const t = Date.now();
+  assert.equal(await app.flush(300), false);
+  const took = Date.now() - t;
+  assert.ok(took < 450, 'one wait: ' + took + ' ms');
+  slow = false;
+  assert.equal(await app.flush(4000), true);
 });
