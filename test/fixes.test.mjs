@@ -367,3 +367,21 @@ test('the sign-out check stays shut while a save is still being stored', async (
   try { assert.equal(await q.flush(), false, 'a save not yet stored is unsent'); }
   finally { release(); await saving; }
 });
+
+test('the sign-out check stays shut while an earlier save of a record is still being stored, though a later one finished', async () => {
+  const rows = new Map(); const gates = []; let puts = 0;
+  const store = {
+    async put(x) { const n = puts++; if (n === 0) await new Promise(r => gates.push(r)); rows.set(x.key, structuredClone(x)); },
+    async list(o) { return [...rows.values()].filter(x => x.owner === o); },
+    async get(k) { return rows.get(k) || null; },
+    async remove(k) { rows.delete(k); },
+    async forget() { rows.clear(); },
+  };
+  const q = createWriteQueue({ store, getOwner: () => 'a', online: () => true, backend: async (_o, _k, r) => r, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const first = q.save('item', 'a', { id: 'x', v: 1 }).catch(() => {});
+  await settle();
+  await q.save('item', 'a', { id: 'x', v: 2 }).catch(() => {});
+  try { assert.equal(await q.flush(), false, 'the first save is still out'); }
+  finally { gates.forEach(r => r()); await first; }
+});
