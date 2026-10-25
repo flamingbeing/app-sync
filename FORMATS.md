@@ -65,3 +65,12 @@ separately from the API, from 0.8.0 on:
 
 The option names in brackets let an app pick another field name; whatever an app picks becomes its own stored
 format and must not change without a migration.
+
+## Files of a version (`files.json`, `entries.json`)
+
+Published beside each version at `/sync/<x.y.z>/`, for a service worker's offline list or a vendoring step. Not stored
+on a device or server; additive only.
+
+- `files.json` (0.8.0): a JSON array, the files `index.js` loads (its import graph). Unchanged.
+- `entries.json` (0.9.4): `{ "app": [...], "auth": [...], "sync": [...], "update": [...] }`, the files each entry loads,
+  sorted, the entry file included. Paths are relative to the version's folder.

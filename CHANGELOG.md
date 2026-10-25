@@ -10,9 +10,22 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 0.8.2: refused saves and job data that survive a reload, and the watch change info.
 - 0.8.3: `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
 - 0.9.x: the modules (`createApp({ config, modules })`): 0.9.0 the runner and auth, 0.9.1 sync and update, 0.9.2 the
-  entries, types and checks that freeze at 1.0, 0.9.3 two names the entries were missing.
+  entries, types and checks that freeze at 1.0, 0.9.3 two names the entries were missing, 0.9.4 a file list per entry and a refused listener that recovers.
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
+
+## 0.9.4 (2026-10-25)
+
+Additive: no stored-format change, no change to the module contract, every 0.9.3 name unchanged.
+
+- `entries.json` (served at `/sync/<v>/entries.json`, next to the unchanged `files.json`): the files each entry loads,
+  `{ app, auth, sync, update }`, each a sorted list that includes the entry itself. A page that imports only some entries
+  can precache or vendor exactly those without walking the imports. `files.json` still lists `index.js`'s graph only.
+  `test/freeze.test.mjs` checks both against the real imports. Documented in FORMATS.md.
+- Sync: a listener the server refused with `permission-denied` no longer stays silent for good. The collection and bin
+  engines remember the refusal, and the next `replan()` (page shown again, back online, or the periodic replan) listens
+  again, so a role or rules change takes effect without a reload. A healthy listener is still left alone. Test first
+  in `test/sync.test.mjs`.
 
 ## 0.9.3 (2026-10-25)
 

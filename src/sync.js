@@ -321,7 +321,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
   /** @type {SnapMeta | null} */
   let flags = null;
   /** @type {(() => void) | null} */
-  let unlisten = null;
+  let unlisten = null, refused = false;   // refused: the server said permission-denied; the next replan listens again
   /** @type {Promise<any>} */
   let chain = Promise.resolve();
   /** @type {{ full: boolean, since: number | null } | null} */
@@ -368,7 +368,8 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     if (unlisten) { unlisten(); unlisten = null; }
     const p = planNow();
     planned = p;
-    unlisten = listen(scope, coll, { since: p.since, epoch: meta.epoch, ...(server ? { field: serverField } : {}) }, s => { if (run === runs) onSnap(s); }, onError);
+    refused = false;
+    unlisten = listen(scope, coll, { since: p.since, epoch: meta.epoch, ...(server ? { field: serverField } : {}) }, s => { if (run === runs) onSnap(s); }, e => { if (run === runs && e && e.code === 'permission-denied') refused = true; onError(e); });
     if (stopped) unlisten();
   }
 
@@ -443,7 +444,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     ready,
     // a page left open for days: once a full read is due, listen again from scratch (the whole collection), which
     // also stops the open delta query's result set growing for good. -> true when it restarted
-    replan() { if (stopped || !planned || planned.full || !planNow().full) return false; start(); return true; },
+    replan() { if (stopped || !planned) return false; if (!refused && (planned.full || !planNow().full)) return false; start(); return true; },
     // deleted here (for good, or into the bin): gone at once, and copies of that version (or older) arriving later are
     // ignored; the tombstone is the deleted version's stamp (not this clock), so a restore stamped after it shows
     /** @param {string[]} ids @param {number} [at] */
@@ -515,7 +516,7 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
   /** @type {CollMeta} */
   let meta = {};
   /** @type {(() => void) | null} */
-  let unlisten = null;
+  let unlisten = null, refused = false;
   /** @type {Promise<any>} */
   let chain = Promise.resolve();
   /** @type {{ full: boolean, since: number | null } | null} */
@@ -534,6 +535,7 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
     // ahead at its last sync still hears entries others stamped since
     const p = planNow();
     planned = p;
+    refused = false;
     unlisten = listen(scope, coll, { since: p.since, epoch: meta.epoch, field: server ? serverField : 'deletedAt' }, s => {
       if (stopped || run !== runs) return;
       const entries = s.full ? s.docs || [] : (s.changes || []).filter(c => c.type !== 'removed').map(c => c.doc);
@@ -549,13 +551,13 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
           ...(server && (s.full || anchor > (Number(meta.anchor) || 0)) ? { anchor } : {}) };
         await store.write(coll, { meta });
       }).catch(e => console.warn('Tombstone feed sync failed', e));
-    }, onError);
+    }, e => { if (run === runs && e && e.code === 'permission-denied') refused = true; onError(e); });
     if (stopped) unlisten();
   }
   return {
     ready,
     // a page left open: read the whole bin again once a full read is due
-    replan() { if (stopped || !planned || planned.full || !planNow().full) return false; start(); return true; },
+    replan() { if (stopped || !planned) return false; if (!refused && (planned.full || !planNow().full)) return false; start(); return true; },
     // its store was deleted and opened again: tombstones may have been missed, so read the whole bin next time
     wiped() { if (stopped) return chain; meta = { ...meta, fullAt: 0 }; return (chain = chain.then(() => store.write(coll, { meta })).catch(e => console.warn('Tombstone feed sync failed', e))); },
     stop() { stopped = true; if (unlisten) unlisten(); return chain; },

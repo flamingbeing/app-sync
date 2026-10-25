@@ -20,7 +20,7 @@ export function createReport(options: Omit<import("./src/report.js").ReportOptio
 };
 export * from "./src/internal.js";
 export const FILES: string[];
-export const VERSION: "0.9.3";
+export const VERSION: "0.9.4";
 export { createSyncHub, replanOnWake, leaveEntry, eachSettled, SKEW } from "./src/sync.js";
 export { createWriteQueue, JOB_FORMAT, JOB_STATES } from "./src/writes.js";
 export { recordSignature, checkWrite, mergeFields, mergeHeld, describeConflict, resolvedRecord, pathOf } from "./src/conflict.js";

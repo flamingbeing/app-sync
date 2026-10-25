@@ -31,10 +31,10 @@ in 1.0.0-rc.1). 0.9.0 has the runner (`app.js`) and `auth` (`auth.js`); 0.9.1 ad
 (`update.js`).
 
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.9.3/app.js';
-import { auth } from 'https://core.anawj.com/sync/0.9.3/auth.js';
-import { sync } from 'https://core.anawj.com/sync/0.9.3/sync.js';
-import { update } from 'https://core.anawj.com/sync/0.9.3/update.js';
+import { createApp } from 'https://core.anawj.com/sync/0.9.4/app.js';
+import { auth } from 'https://core.anawj.com/sync/0.9.4/auth.js';
+import { sync } from 'https://core.anawj.com/sync/0.9.4/sync.js';
+import { update } from 'https://core.anawj.com/sync/0.9.4/update.js';
 import * as register from 'https://core.anawj.com/update/0.2.0/register.js';
 
 const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [
@@ -73,10 +73,10 @@ them once, in one import map; the version appears only there:
 ```html
 <script type="importmap">
 { "imports": {
-  "@core/app": "https://core.anawj.com/sync/0.9.3/app.js",
-  "@core/auth": "https://core.anawj.com/sync/0.9.3/auth.js",
-  "@core/sync": "https://core.anawj.com/sync/0.9.3/sync.js",
-  "@core/update": "https://core.anawj.com/sync/0.9.3/update.js"
+  "@core/app": "https://core.anawj.com/sync/0.9.4/app.js",
+  "@core/auth": "https://core.anawj.com/sync/0.9.4/auth.js",
+  "@core/sync": "https://core.anawj.com/sync/0.9.4/sync.js",
+  "@core/update": "https://core.anawj.com/sync/0.9.4/update.js"
 } }
 </script>
 ```
@@ -92,7 +92,7 @@ yet: `@core/files`, `@core/ui`, `@core/theme`, `@core/settings`, `@core/sw`, `@c
   `tsc -p .`. `npm run types` writes `types/`; Checks fail when it is stale. In a TypeScript or `checkJs` app, point
   the names at the version's types: `"paths": { "@core/*": ["<app-sync>/types/*.d.ts"] }`.
 - **Package:** `package.json` `exports` has `.`, `./app`, `./auth`, `./sync`, `./update`, each with its `types`, so
-  `npm install github:flamingbeing/app-sync#v0.9.3` works (no build step, nothing to run on install).
+  `npm install github:flamingbeing/app-sync#v0.9.4` works (no build step, nothing to run on install).
 - **Vite** is never needed to run app-sync, and a page built with `vite build` works (Checks, `test/vite/`): (a) with
   `@core/*` and `https://` imports left external (the import map loads them), and (b) with `@core/*` bundled, from
   source or from the installed package, where a page that uses only `auth` and `sync` carries no `update` code. The
@@ -121,7 +121,7 @@ yet: `@core/files`, `@core/ui`, `@core/theme`, `@core/settings`, `@core/sw`, `@c
 | `src/internal.js` | engine internals (`plan`, `applyChanges`, `createCollectionSync`, `decide`, `watchSaved`, tuning constants, …): no promise. Until 1.0 they also load from `index.js` (deprecated). |
 
 **Files of a version:** `FILES` (in `index.js`) and `sync/<x.y.z>/files.json` list every file the version loads,
-for a service worker's offline list (0.8.0).
+for a service worker's offline list (0.8.0). `entries.json` (0.9.4) lists the files each entry (`app`, `auth`, `sync`, `update`) loads, so a page that uses only some entries can precache or vendor those alone.
 
 ## Use
 
