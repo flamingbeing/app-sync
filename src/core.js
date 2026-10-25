@@ -182,6 +182,8 @@ export function createSyncCore(options, { load, user }) {
     binKinds: kinds.colls, unsent: (_scope, coll, id) => queue.unsent(kindOf(coll), id) || unsentOutside(kindOf(coll), id) > 0,
     onError: e => { try { report?.error?.(e?.code); } catch { /* never stops sync */ } console.warn('sync', e?.code || e?.message); },
     ...(backendOptions.stampMode ? { stampMode: backendOptions.stampMode } : {}), ...options.hub,
+    // a public scope's bin and feeds would list the account's records: never listened to
+    feedsIn: s => !isPublic(s) && (options.hub?.feedsIn?.(s) ?? true),
   });
   replanOnWake(hub, win);
   win?.addEventListener?.('online', () => { queue.kick(); tell(); });

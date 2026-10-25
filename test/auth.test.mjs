@@ -16,15 +16,18 @@ function fakeUser({ uid = 'u1', email = 'Fake.Person@Example.test', claims = {},
   return u;
 }
 // Auth (popup, redirect, state listeners, sign-out) and the bits of Firestore the claims watch uses
-function fakeSdk({ popupError = null, signedIn = null } = {}) {
+function fakeSdk({ popupError = null, signedIn = null, redirectError = null } = {}) {
   const calls = [], docs = new Map(), docCbs = new Map();
   let next = fakeUser();
   const auth = { currentUser: signedIn, cbs: new Set(), set(u) { this.currentUser = u; for (const cb of [...this.cbs]) cb(u); } };
   const A = {
-    GoogleAuthProvider: class { setCustomParameters(p) { this.params = p; calls.push('params ' + JSON.stringify(p)); } },
+    GoogleAuthProvider: class {
+      setCustomParameters(p) { this.params = p; calls.push('params ' + JSON.stringify(p)); }
+      static credentialFromError(e) { return e.credential || null; }
+    },
     async signInWithPopup(a) { calls.push('popup'); if (popupError) throw Object.assign(new Error('fake'), { code: popupError }); a.set(next); },
     async signInWithRedirect() { calls.push('redirect'); },
-    async getRedirectResult() { return null; },
+    async getRedirectResult() { if (redirectError) throw redirectError; return null; },
     onAuthStateChanged(a, cb) { a.cbs.add(cb); cb(a.currentUser); return () => a.cbs.delete(cb); },
     async signOut(a) { calls.push('signOut'); a.set(null); },
     // the 1.3.0 methods (a credential is what it would sign in as; linking keeps the anonymous account's uid)
@@ -348,6 +351,18 @@ test('linking google keeps the uid; a credential already taken by an account sig
   assert.deepEqual(r, { ok: false, reason: 'unsent', from: { uid: 'anon1', email: '' } });
   assert.deepEqual(u.sdk.calls.slice(-3), ['link used.fake@example.test', 'credential used.fake@example.test', 'signOut']);
   assert.deepEqual(u.device.rows, [{ id: 'guest row' }]);
+});
+
+test('a guest back from linking google by redirect, the account already taken: signs in to it (a switch, guarded as ever)', async () => {
+  const code = 'auth/credential-already-in-use', credential = { email: 'used.fake@example.test' };
+  const sdk = fakeSdk({ signedIn: fakeUser({ uid: 'anon1', email: '', anonymous: true }), redirectError: Object.assign(new Error('fake'), { code, credential }) });
+  sdk.taken.set('used.fake@example.test', 'u9');
+  const t = setup({ sdk, options: { methods: ['anonymous', 'google'] } });
+  await t.app.ready;
+  await settle(20);
+  assert.ok(t.sdk.calls.includes('credential used.fake@example.test'), 'signs in with the taken credential');
+  assert.equal(t.app.auth.user().uid, 'u9');
+  assert.ok(t.log.includes('switch anon1>u9'), 'the usual switch');
 });
 
 test('emailLink: sends the link (reason sent); on the page the link opens, signs in with it', async () => {

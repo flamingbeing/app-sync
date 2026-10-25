@@ -335,6 +335,20 @@ test('public read: read only and kept apart: no saves to public:*, no account sc
   await app.stop();
 });
 
+test('public read: a public:* scope listens to its collections only, no bin or tombstone feeds (those read account data)', async () => {
+  const srv = fakeServer(), base = fakeAdapter(srv), heard = [];
+  const adapter = { ...base, listen: (s, c, ...rest) => { heard.push(s + ' ' + c); return base.listen(s, c, ...rest); } };
+  const { app } = await modulesApp({ srv, adapter, more: { ...PUBLIC, hub: { feeds: { moved: { item: 'items' } } } } });
+  app.sync.watch('public:all', 'news', () => {});
+  await app.auth.signIn();
+  app.sync.watch('sp-u1', 'items', () => {});
+  assert.ok(await until(() => heard.includes('sp-u1 items')));
+  await settle(20);
+  assert.deepEqual([...new Set(heard.filter(h => h.startsWith('public:')))], ['public:all news'], 'no bin or feeds in the public scope (listened again at sign-in)');
+  assert.ok(heard.includes('sp-u1 bin') && heard.includes('sp-u1 moved'), 'the account scope keeps its bin and feeds');
+  await app.stop();
+});
+
 test('public read: a relisten while signed out (the public watch still listening) starts only what was running', async () => {
   const srv = fakeServer(), base = fakeAdapter(srv), heard = [];
   let t = Date.now();
@@ -351,6 +365,6 @@ test('public read: a relisten while signed out (the public watch still listening
   assert.equal(app.sync.nudge('wake'), true, 'nothing heard for a minute: listened again');
   assert.ok(await until(() => heard.includes('news')), 'the public watch listened again');
   await settle(20);
-  assert.deepEqual(heard.filter(c => c !== 'bin'), ['news'], 'the account\'s watch stays paused, signed out (the bin feed: the hub\'s)');
+  assert.deepEqual(heard, ['news'], 'the account\'s watch stays paused, signed out');
   await app.stop();
 });

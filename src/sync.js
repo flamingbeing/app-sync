@@ -571,8 +571,9 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
 // starts again (the app re-runs its start when the demo changes in another tab) keeps the same listener.
 // bin: the tombstone collection's name (null: no bin feed); binKinds: an entry's kind -> its collection. feeds:
 // { [coll]: kinds }, more tombstone feeds of the same shape (records that left a query; list them in the stores'
-// metaOnly). unstamped ('skip' | 'full'), expire ({ [coll]: { field, after } }) and stampMode ('client' | 'server',
-// with serverField; the bin and feeds too): see the top of this file.
+// metaOnly); feedsIn(scope): the scopes the bin and feeds are listened in (default: all). unstamped ('skip' | 'full'),
+// expire ({ [coll]: { field, after } }) and stampMode ('client' | 'server', with serverField; the bin and feeds too):
+// see the top of this file.
 export const GRACE = 1500;
 /**
  * @typedef {object} SyncHubOptions
@@ -585,6 +586,7 @@ export const GRACE = 1500;
  * @property {string | null} [bin]
  * @property {Record<string, string>} [binKinds]
  * @property {Record<string, Record<string, string>>} [feeds]
+ * @property {(scope: string) => boolean} [feedsIn]
  * @property {'skip' | 'full'} [unstamped]
  * @property {Record<string, { field: string, after: number }>} [expire]
  * @property {'client' | 'server'} [stampMode]
@@ -593,7 +595,7 @@ export const GRACE = 1500;
  * @property {(scope: string, coll: string, id: string, doc: Doc) => void} [onLeave]
  */
 /** @param {SyncHubOptions} options */
-export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, feeds: extraFeeds = {}, unstamped = 'skip', expire = {}, stampMode = 'client', serverField = 'serverAt', unsent = () => false, onLeave = () => {} }) {
+export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, feeds: extraFeeds = {}, feedsIn = () => true, unstamped = 'skip', expire = {}, stampMode = 'client', serverField = 'serverAt', unsent = () => false, onLeave = () => {} }) {
   /** @type {WeakMap<object, Listen>} the app's own listener of an engine (watch's own) */
   const ownListen = new WeakMap();
   const feedKinds = [...(bin ? /** @type {[string, Record<string, string>][]} */ ([[bin, binKinds]]) : []), ...Object.entries(extraFeeds || {}).filter(([c]) => c && c !== bin)];
@@ -688,7 +690,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       if (e && own && ownListen.get(e) !== own) throw new Error('watch: ' + coll + ' is already listened to another way');
       if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen: own || listen, fetchOne, now, onError, unstamped, expire: (expire && Object.hasOwn(expire, coll) && expire[coll]) || null, stampMode, serverField,
         unsent: id => unsent(scope, coll, id), onLeave: (id, doc) => onLeave(scope, coll, id, doc) }); engines.set(k, e); if (own) ownListen.set(e, own); }
-      for (const [fc, kinds] of feedKinds) {
+      for (const [fc, kinds] of feedsIn(scope) ? feedKinds : []) {
         const fk = key(scope, fc);
         if (!feeds.has(fk)) feeds.set(fk, createTombFeed({ scope, coll: fc, kinds, store: lazyStore(scope), listen, apply: tombsFor(scope), now, onError, stampMode, serverField }));
       }

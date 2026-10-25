@@ -117,7 +117,10 @@ export function auth(options = {}) {
     const x = await ctx.sdk();
     if (!listening && !stopped) {
       listening = true; s = x;
-      x.A.getRedirectResult?.(x.auth)?.catch?.((/** @type {any} */ e) => console.warn('Redirect sign-in failed', e?.code || e));
+      x.A.getRedirectResult?.(x.auth)?.catch?.(async (/** @type {any} */ e) => {
+        try { if (await signInIfGoogleTaken(x, e)) return; } catch (err) { e = err; }
+        console.warn('Redirect sign-in failed', e?.code || e);
+      });
       offAuth = x.A.onAuthStateChanged(x.auth, (/** @type {any} */ u) => { chain = chain.then(() => handle(u)).catch(e => console.warn('auth', e?.message || e)); });
     }
     return x;
@@ -208,6 +211,14 @@ export function auth(options = {}) {
       await x.A.signInWithCredential(x.auth, credential);
     }
   }
+  // linking google to the guest failed as the google account already has its own: sign in to that one instead (a
+  // normal switch, guarded as ever); the redirect brings this back as getRedirectResult's error
+  /** @param {any} x @param {any} e @returns {Promise<boolean>} */
+  async function signInIfGoogleTaken(x, e) {
+    const taken = TAKEN_CODES.includes(e?.code) ? x.A.GoogleAuthProvider.credentialFromError?.(e) : null;
+    if (taken) await x.A.signInWithCredential(x.auth, taken);
+    return !!taken;
+  }
   // the anonymous account now linked to a real one: the same uid (Auth tells no change), so no switch; the owner and
   // onUser get its email
   /** @param {any} u */
@@ -230,8 +241,7 @@ export function auth(options = {}) {
       if (!popupOnly && (redirect ?? redirectFirst())) { await away(); return { reason: 'redirect' }; }
       try { await (anon ? A.linkWithPopup(anon, provider) : A.signInWithPopup(auth, provider)); }
       catch (e) {
-        const taken = anon && TAKEN_CODES.includes(e?.code) ? A.GoogleAuthProvider.credentialFromError?.(e) : null;
-        if (taken) { await A.signInWithCredential(auth, taken); return {}; }
+        if (anon && await signInIfGoogleTaken({ A, auth }, e)) return {};
         if (popupOnly || !REDIRECT_CODES.includes(e?.code)) throw e;
         await away();
         return { reason: 'redirect' };
