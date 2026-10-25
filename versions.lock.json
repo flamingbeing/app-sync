@@ -355,5 +355,27 @@
     "src/types.js": "5a1d1d6dc9ec179ef97356fd53a853552badf17099f023710878784e1dc55e0b",
     "src/watchdog.js": "f89d77f54a3f13923b0e4830f7112990d0a9f2049d918fcf8fe9d77c1789f3a8",
     "src/writes.js": "5a6dba69c75e04e112e50dc2cd63ccdf72457e20c32c26b8e4fed20e30e50ed5"
+  },
+  "0.8.2": {
+    "LICENSE": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+    "NOTICE": "a4a91e7763c9b0d122fcb4c69fcfb4088427b73bd713f37d513669095430894c",
+    "files.json": "2935cebcadb77e997abf45fad640fb69ed9ffc4b1a925861bf05f1296458a16d",
+    "index.js": "8685ed1a04310d34cae5e76bdf02207f188c06bd7210b391d76f82405e678c57",
+    "src/app.js": "3bb2c872f16e757583583f53ee0ef3ba769979954219cc4ba0a841a00adef1d7",
+    "src/cache.js": "a2e8a213041e5ab944e69e0a87292faed59f3337a7e468330e45ed9dd10c6b55",
+    "src/conflict.js": "272198f956cb135d4597bb1b55d8ba5afab16f5fc6035e6a42dd5624f482badc",
+    "src/firestore.js": "76f3285d1f49e5c00c2607c17c206385ebef926db23d1f6d357deec643e638f9",
+    "src/forget.js": "0f9a0f128ce8eb1620f062bfff1bb49619fa63b7560a9e0feccc035538c8ce0a",
+    "src/internal.js": "11d1e47adc825665e8278a5b223bca22a21f527714d4668bf5ecacba28521d82",
+    "src/outbox.js": "fb38f5a8e1020b0acc6ba0a681335345369f2e48f7acd567789af37bb5f73a0d",
+    "src/persist.js": "c7386e6d85e967b0f2ec898034bd4d383628ba10c05478fb9394ca7e925a1209",
+    "src/registry.js": "0cd94e17ab1d0d9b8fd1a69dfcb88139071bfff279d8b8a8dd9e24929f93bcc1",
+    "src/report.js": "54b802601609d47539b3d4486586e6e7ef44f35f0d70fd0e3b7b5053a52832cb",
+    "src/status.js": "ebef20b3e9530cf4e93d0ca1f1ec1b010d2511a78b9f962a944739207e8e50ab",
+    "src/store.js": "3aa215d883895635015dc725fde5c17d5bf98c5819537122dfd173dbe8d07084",
+    "src/sync.js": "1e142de39fd37b9a50fe0ec72b08ae47cb40a7613a0a0f2770f2b6d00eceffb7",
+    "src/types.js": "cc6788ca58ef2edfeb2eb9ceb952c2d22b265a43a45886502f96bb56f6a1f6ac",
+    "src/watchdog.js": "f89d77f54a3f13923b0e4830f7112990d0a9f2049d918fcf8fe9d77c1789f3a8",
+    "src/writes.js": "974ff3a29acb4382d3d0e45571568cac8b6025a4b6b7be81d7f51212de5b0f51"
   }
 }

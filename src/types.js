@@ -23,6 +23,12 @@
  */
 
 /**
+ * A watch callback's second argument (0.8.2: changed, removed: the ids whose copy changed since the last call, and
+ * the ids gone).
+ * @typedef {SnapMeta & { changed: string[], removed: string[] }} WatchMeta
+ */
+
+/**
  * @typedef {{ type: 'added' | 'modified' | 'removed', id: string, doc?: Doc | null, pending?: boolean }} Change
  */
 
@@ -72,10 +78,11 @@
  */
 
 /**
- * A save in the outbox (writes.js). v: the job format (JOB_FORMAT; none on jobs written before 0.8.0).
+ * A save in the outbox (writes.js). v: the job format (JOB_FORMAT; none on jobs written before 0.8.0). 0.8.2 adds
+ * optional code (a refused save's error code), refused (set aside, waiting for Retry or Discard) and meta (the app's).
  * @typedef {{ v?: number, key: string, owner: string, kind: string, record: Doc, base: Doc | null, state: JobState,
  *   accepted: boolean, at: number, error?: string, result?: Doc, remote?: Doc | null, kept?: boolean, ops?: any[],
- *   realm?: string }} Job
+ *   realm?: string, code?: string, refused?: boolean, meta?: any }} Job
  */
 
 /**
@@ -124,6 +131,7 @@
  * @property {(ms: number) => Promise<void>} [delay]
  * @property {(message: string) => void} [notice]
  * @property {number} [sendTimeout]
+ * @property {string} [field] the stamp field of a backend answer, for lastSent (0.8.2; default updatedAt)
  * @property {{ recover?: string }} [labels]
  * @property {(() => Promise<any>) | null} [otherPending]
  * @property {Registry | null} [registry]

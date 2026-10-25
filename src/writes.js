@@ -20,6 +20,17 @@
 //   field (a last-write-wins collection: increments, keyed updates). They are stored with the save and handed on as
 //   backend(owner, kind, record, base, { key, ops: [ops, …] }), key the save's own id (a backend can use it to apply
 //   a save only once); a failed save replaced by a newer one passes its ops on first, so no change is lost.
+//   meta (0.8.2, optional): the app's own data about the save (a row, a label), stored with the job and returned by
+//   entries() and finished(key), after a reload too.
+// Refused saves (0.8.2): a failed save keeps the error's code on the job (code), after a reload too. refused(kind?) ->
+//   the saves the server refused that wait for the user: failed ones, and ones set aside with archive(key,
+//   { refused: true }) (state archived with refused: true, so every version's sign-out gate counts them finished;
+//   kept out of the history's pruning until discarded or sent). retry(key) sends a refused save again; discard(key)
+//   gives it up (it stays in the history as an ordinary set-aside save).
+// finished(key) (0.8.2) -> the job once synced or archived (meta included), null while it is not (or not on this
+//   device). lastSent(kind, id) (0.8.2) -> { stamp, signature } of the copy this device last sent of that record
+//   (stamp: the backend's answer's field, option field = 'updatedAt'; signature: conflict.js recordSignature), null
+//   when none is in the device history (the last 100 finished saves): after a reload too.
 //
 // watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb) -> unsubscribe (0.5.2): the engine's list of coll
 //   (hub.watch) with this device's saves of kind laid over it (queue.overlay), handed to cb(list, meta) whenever either
@@ -27,6 +38,9 @@
 //   hear the server's copy (with another device's change in it) during that time; once the save is done, only a queue
 //   change says so, and the server's copy must show then though the listener hears nothing new.
 //   A save shows from the moment save() is called (0.7.2), before it is stored or accepted.
+//   meta (0.8.2) also says { changed, removed }: the ids whose copy differs from the last list handed (all, the first
+//   time) and the ids no longer in it. The returned function also has copyOf(id) (the copy last handed) and seen(id)
+//   (the engine's copy, without this device's saves laid over it).
 import { recordSignature } from './conflict.js';
 
 /**
@@ -53,7 +67,7 @@ export const SEND_TIMEOUT = 30000;
 export const JOB_FORMAT = 1;
 export const JOB_STATES = Object.freeze(['pending', 'synced', 'failed', 'conflict', 'archived']);
 /** @param {QueueOptions} options */
-export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null, ignore = [] }) {
+export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null, ignore = [], field = 'updatedAt' }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
   /** @param {any} v */
   const bare = v => { if (!ignore.length || !v || typeof v !== 'object') return v; const out = { ...v }; for (const f of ignore) delete out[f]; return out; };
@@ -125,7 +139,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       job.state = 'archived'; jobs = jobs.filter(x => x !== job); return true;
     }
     if (stored.state === job.state || stored.state === 'pending') return false;
-    Object.assign(job, { state: stored.state, error: stored.error || '', result: stored.result, remote: stored.remote, accepted: stored.accepted, kept: stored.kept });
+    Object.assign(job, { state: stored.state, error: stored.error || '', result: stored.result, remote: stored.remote, accepted: stored.accepted, kept: stored.kept, code: stored.code, refused: stored.refused });
     return true;
   }
   /** @param {string} id @returns {Promise<void>} */
@@ -142,7 +156,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
         try {
           const result = await send(email, job.kind, copy(job.record), copy(job.base), { key: job.key, ...(job.ops ? { ops: copy(job.ops) } : {}) });
           if (!current(email, gen)) return;
-          job.result = copy(result); job.state = 'synced'; job.error = '';
+          job.result = copy(result); job.state = 'synced'; job.error = ''; delete job.code;
         } catch (error) {
           if (!current(email, gen)) return;
           // set aside while it was being sent (a save made on the other copy took its place): it stays so, the next goes
@@ -150,7 +164,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
           if (report) { try { report.error(error?.code); } catch { /* a report never stops a save */ } }
           if (transient(error)) { job.error = 'Waiting for the connection'; retryLater(id, email, gen); notify(); break; }
           job.state = error.code === 'write-conflict' ? 'conflict' : 'failed';
-          job.error = error.message || 'Could not save';
+          job.error = error.message || 'Could not save'; job.code = String(error?.code || '');
           if (error.remote !== undefined) job.remote = copy(error.remote);
         }
         try { await persist(job); } catch (error) { storageError = error.message; if (report) { try { report.error('outbox-write'); } catch { /* never stops a save */ } } }
@@ -160,7 +174,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       }
       // Keep a short device history; failed/conflicting/pending records never expire here, nor this device's own
       // versions set aside by a save made on the other copy (kept)
-      const old = ordered().filter(x => terminal.has(x.state) && !x.kept).slice(0, -KEEP);
+      const old = ordered().filter(x => terminal.has(x.state) && !x.kept && !x.refused).slice(0, -KEEP);
       for (const job of old) { await store.remove(job.key); jobs = jobs.filter(x => x !== job); }
     })().finally(() => {
       if (running.get(id) !== task) return;
@@ -196,21 +210,21 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
    * @param {string} email
    * @param {Doc} record
    * @param {Doc | null} [base]
-   * @param {{ ops?: any }} [options]
+   * @param {{ ops?: any, meta?: any }} [options]
    * @returns {Promise<Doc>}
    */
-  async function save(kind, email, record, base = null, { ops } = {}) {
+  async function save(kind, email, record, base = null, { ops, meta } = {}) {
     record = copy(normalize(kind, copy(record))); base = copy(base);
     if (getOwner() !== email) throw new Error('Account changed; the editor has not been saved');
     // shown at once (0.7.2): the lists have this save from now, before it is stored, until its job takes over
     const early = { kind, owner: email, record: copy(record) }, earlyKey = kind + ':' + record.id;
     inflight.set(earlyKey, early); notify();
     const unshow = () => { if (inflight.get(earlyKey) !== early) return false; inflight.delete(earlyKey); return true; };
-    try { return await saveNow(kind, email, record, base, ops, unshow); }
+    try { return await saveNow(kind, email, record, base, ops, meta, unshow); }
     finally { if (unshow()) notify(); }
   }
-  /** @param {string} kind @param {string} email @param {Doc} record @param {Doc | null} base @param {any} ops @param {() => boolean} unshow @returns {Promise<Doc>} */
-  async function saveNow(kind, email, record, base, ops, unshow) {
+  /** @param {string} kind @param {string} email @param {Doc} record @param {Doc | null} base @param {any} ops @param {any} meta @param {() => boolean} unshow @returns {Promise<Doc>} */
+  async function saveNow(kind, email, record, base, ops, meta, unshow) {
     await activate(email); const gen = generation, id = kind + ':' + record.id;
     let moved = false;
     for (const x of chainOf(id)) moved = await refresh(x) || moved;
@@ -228,13 +242,15 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     /** @type {Job} */
     let job;
     if (stale && same(stale.record, record)) {
-      job = stale; if (!held) { job.state = 'pending'; job.error = ''; }
+      job = stale; if (!held) { job.state = 'pending'; job.error = ''; delete job.code; }
+      if (meta !== undefined) job.meta = copy(meta);
     } else {
       job = { v: JOB_FORMAT, key: email + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2), owner: email,
         kind, record: copy(record), base: copy(stale?.state === 'failed' ? stale.base : base), state: held ? 'conflict' : 'pending', accepted: false, at: Math.max(Date.now(), ...jobs.map(x => x.at + 1)) };
       if (held) { job.remote = copy(conflict.remote ?? null); job.error = conflict.error; }
       const carried = stale && (stale.state === 'failed' || held) ? stale.ops || [] : [];   // (a held copy's ops too: 0.7.1)
       if (ops !== undefined || carried.length) job.ops = [...carried, ...(ops !== undefined ? [copy(ops)] : [])];
+      if (meta !== undefined) job.meta = copy(meta);
     }
     try { await persist(job); storageError = ''; }
     catch { storageError = 'Local storage is unavailable. Your input has not been cleared.'; notify(); throw new Error(storageError); }
@@ -300,22 +316,37 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     let job = jobs.find(x => x.key === key); const email = owner, gen = generation;
     if (!job || getOwner() !== owner || job.state === 'conflict') return;
     if (await refresh(job)) notify();
-    if (!current(email, gen) || (job.state !== 'failed' && job.state !== 'pending')) return;
+    if (!current(email, gen)) return;
+    // set aside as refused (0.8.2): back in its record's chain, in its own place (a newer save made since meets it as
+    // a change made elsewhere: the conflict check, never an overwrite)
+    if (job.state === 'archived' && job.refused) { job.state = 'failed'; delete job.refused; }
+    if (job.state !== 'failed' && job.state !== 'pending') return;
     const head = chainOf(keyOf(job))[0];
     if (head?.state === 'conflict') throw new Error('An earlier save of this record met a change made elsewhere: choose a version there first');
     // waiting behind a failed save (Retry did nothing): that one is sent again first
     if (head && head !== job && head.state === 'failed') { if (await refresh(head)) notify(); if (!current(email, gen)) return; if (head.state === 'failed') job = head; }
-    job.state = 'pending'; job.error = ''; await persist(job); notify(); await drain(keyOf(job));
+    job.state = 'pending'; job.error = ''; delete job.code; await persist(job); notify(); await drain(keyOf(job));
   }
   // sets aside that save and older ones, never a newer save (it is sent next, or meets the conflict again); from a
   // conflict also the held copies behind it (never sent, the same conflict), or the record needs a second tap
-  /** @param {string} key */
-  async function archive(key) {
+  // (0.8.2) refused: a save the server refused, set aside until the user retries or discards it
+  /** @param {string} key @param {{ refused?: boolean }} [options] */
+  async function archive(key, { refused = false } = {}) {
     const job = jobs.find(x => x.key === key); if (!job || getOwner() !== owner) return;
     const chain = chainOf(keyOf(job)), upto = chain.indexOf(job);
-    for (const item of chain.filter((x, i) => i <= upto || upto >= 0 && job.state === 'conflict' && x.state === 'conflict')) { item.state = 'archived'; await persist(item); }
+    for (const item of chain.filter((x, i) => i <= upto || upto >= 0 && job.state === 'conflict' && x.state === 'conflict')) {
+      if (refused && item.state === 'failed') item.refused = true;
+      item.state = 'archived'; await persist(item);
+    }
     notify();
     void drain(keyOf(job)).catch(error => { storageError = error.message; notify(); });
+  }
+  // a refused save given up (0.8.2): set aside for good, an ordinary entry of the history
+  /** @param {string} key */
+  async function discard(key) {
+    const job = jobs.find(x => x.key === key); if (!job || getOwner() !== owner) return;
+    if (job.state === 'archived') { if (!job.refused) return; delete job.refused; await persist(job); notify(); return; }
+    await archive(key);
   }
   async function forget() {
     const old = owner; owner = null; ++generation; loading = null; jobs = []; running.clear(); waits.clear(); storageError = ''; notify();
@@ -325,7 +356,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (registry) { try { await registry.forget(old, { except: store }); } catch (e) { error ||= e; } }
     if (error) throw error;
   }
-  const api = { activate, save, restore, overlay, retry, archive, forget, kick,
+  const api = { activate, save, restore, overlay, retry, archive, discard, forget, kick,
     /** @param {Partial<QueueOptions>} config */
     configure(config) { if (config.backend) backend = config.backend; if (config.getOwner) getOwner = config.getOwner; if (config.normalize) normalize = config.normalize; if (config.notice) notice = config.notice; },
     /** @param {() => void} fn */
@@ -372,6 +403,17 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     jobKey(kind, id) { return [...ordered()].reverse().find(x => x.kind === kind && x.record.id === id)?.key || ''; },
     /** @param {string} key */
     stateOf(key) { return jobs.find(x => x.key === key)?.state || ''; },
+    // (0.8.2) the saves the server refused that wait for the user, newest first
+    /** @param {string} [kind] @returns {Job[]} */
+    refused: kind => copy(ordered().filter(x => (!kind || x.kind === kind) && (x.state === 'failed' || x.state === 'archived' && x.refused))).reverse(),
+    /** @param {string} key @returns {Job | null} */
+    finished(key) { const job = jobs.find(x => x.key === key); return job && terminal.has(job.state) ? copy(job) : null; },
+    /** @param {string} kind @param {string} id @returns {{ stamp: any, signature: string } | null} */
+    lastSent(kind, id) {
+      const job = [...ordered()].reverse().find(x => x.kind === kind && x.record.id === id && x.state === 'synced');
+      if (!job) return null;
+      return { stamp: job.result?.[field] ?? job.record[field] ?? null, signature: signature(job.record) };
+    },
   };
   if (report) { try { report.watch(api); } catch { /* a report never stops the queue */ } }
   return api;
@@ -380,8 +422,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
 /**
  * @param {{ hub: { watch: (scope: string, coll: string, cb: (list: Doc[], meta: import('./types.js').SnapMeta) => void) => () => void },
  *   queue: ReturnType<typeof createWriteQueue>, scope: string, coll: string, kind: string, owner?: string }} options
- * @param {(list: Doc[], meta: import('./types.js').SnapMeta) => void} cb
- * @returns {() => void}
+ * @param {(list: Doc[], meta: import('./types.js').WatchMeta) => void} cb
+ * @returns {(() => void) & { copyOf: (id: string) => Doc | null, seen: (id: string) => Doc | null }}
  */
 export function watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb) {
   /** @type {Doc[] | null} */
@@ -391,15 +433,30 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb)
   /** @type {string | null} */
   let sent = null;
   let live = true;
+  // what was handed last, by id (as text: a copy nobody can change), for changed/removed and copyOf (0.8.2)
+  /** @type {Map<string, string>} */
+  let last = new Map();
   /** @param {boolean} force */
   const hand = force => {
     if (!live || !list) return;
-    const shown = queue.overlay(kind, owner, list), sig = JSON.stringify(shown);
+    const shown = queue.overlay(kind, owner, list), texts = shown.map(d => JSON.stringify(d)), sig = '[' + texts.join(',') + ']';
     if (!force && sig === sent) return;
     sent = sig;
-    cb(copy(shown), { ...meta });
+    /** @type {Map<string, string>} */
+    const now = new Map();
+    /** @type {string[]} */
+    const changed = [], removed = [];
+    shown.forEach((d, i) => { const id = String(d.id); now.set(id, texts[i]); if (last.get(id) !== texts[i]) changed.push(id); });
+    for (const id of last.keys()) if (!now.has(id)) removed.push(id);
+    last = now;
+    cb(copy(shown), { ...meta, changed, removed });
   };
   const offQueue = queue.onChange(() => hand(false));
   const offHub = hub.watch(scope, coll, (l, m) => { list = l; meta = m; hand(true); });
-  return () => { live = false; offQueue(); offHub(); };
+  return Object.assign(() => { live = false; offQueue(); offHub(); }, {
+    /** @param {string} id */
+    copyOf: id => { const t = last.get(String(id)); return t === undefined ? null : JSON.parse(t); },
+    /** @param {string} id */
+    seen: id => { const d = list?.find(x => String(x.id) === String(id)); return d ? copy(d) : null; },
+  });
 }

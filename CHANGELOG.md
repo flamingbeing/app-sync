@@ -7,10 +7,33 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 
 - 0.8.0: the lean public index, `src/internal.js`, the file manifest, the stored-format promise.
 - 0.8.1: outside writes and the sign-in/sign-out hooks.
-- 0.8.x: refused saves and job data that survive a reload, and the
-  watch change info; `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
+- 0.8.2: refused saves and job data that survive a reload, and the watch change info.
+- 0.8.x: `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
+
+## 0.8.2 (2026-10-25)
+
+Refused saves and job data that survive a reload, and the watch change info. Additive; stored formats only gain
+optional job fields (FORMATS.md), no new job state. Tests: `test/writes.test.mjs` (+4), `test/app.test.mjs` (+2).
+
+- **Refused saves** (queue): a failed save keeps the error's `code` on the job, after a reload too (createApp's
+  `onRefused` reads it there; before, it was kept in the page's memory and a refused save found after a reload said
+  `code: ''`). `onRefused` returning `'archive'` now sets the save aside with `refused: true` on the `archived` job:
+  kept out of the history's pruning, listed by `queue.refused(kind?)` (with the failed ones), sent again by
+  `queue.retry(key)` (in its own place: a newer save made since meets it through the conflict check) or given up by
+  `queue.discard(key)`. `queue.archive(key, { refused: true })` does the same by hand.
+- **Job data:** `save(kind, scope, record, base, { ops, meta })`: `meta`, the app's own data about the save, is
+  stored with the job and returned by `entries()` and `queue.finished(key)` (the job once synced or set aside, null
+  before), after a reload too.
+- **`queue.lastSent(kind, id)` and `app.lastSeen(kind, id)`**: `{ stamp, signature }` of the copy this device last
+  sent (from the device history: the last 100 finished saves) and of the server's copy as last heard (the device
+  copy after a reload). Different signatures: someone else saved since. Queue option `field` (createApp passes the
+  backend's) names the stamp.
+- **Watch change info:** `app.watch` (and `watchSaved`) callbacks' meta gains `{ changed, removed }`: the ids whose
+  copy differs from the last list handed (all of them the first time) and the ids gone. `app.copyOf(kind, id)`: that
+  record as last handed, at once.
+- Promised from `queue` (README): also `refused`, `retry`, `discard`, `entries`, `finished`, `lastSent`.
 
 ## 0.8.1 (2026-10-25)
 

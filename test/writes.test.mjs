@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createWriteQueue } from '../src/writes.js';
-import { checkWrite } from '../src/conflict.js';
+import { checkWrite, recordSignature } from '../src/conflict.js';
 // a made-up canonical form: empty arrays and false flags are left out, as a backend's cleaner might
 const cleanCase = v => Object.fromEntries(Object.entries(v).filter(([, x]) => !(x === false || (Array.isArray(x) && !x.length))));
 const clone = x => structuredClone(x);
@@ -307,4 +307,63 @@ test('one job followed by its key while a later save of the same record waits be
   for(let i=0;i<40&&f.queue.stateOf(key)==='pending';i++)await new Promise(r=>setTimeout(r,20));
   assert.equal(f.queue.stateOf(key),'conflict');assert.equal(f.queue.status('item','1'),'pending','the restore waits behind it');
   assert.equal(f.queue.stateOf('nope'),'');assert.equal(f.queue.jobKey('item','none'),'');
+});
+
+// 0.8.2: refused saves and job data that survive a reload, inside the stored-format promise (no new state)
+const coded = code => Object.assign(new Error('Missing or insufficient permissions.'), { code });
+test('a refused save keeps its code across a reload; set aside as refused it outlives 100+ finished saves; refused(), retry() (0.8.2)', async () => {
+  const f = fixture(); let deny = true;
+  const config = { ...f.config, backend: async (o, kind, record, base, extra) => { if (deny && record.id === 'r') throw coded('permission-denied'); return f.config.backend(o, kind, record, base, extra); } };
+  const q = createWriteQueue(config);
+  await assert.rejects(q.save('item', 'a', { id: 'r', text: 'Fake' }), /kept/);
+  const key = q.entries()[0].key;
+  assert.equal(q.entries()[0].code, 'permission-denied');
+  const again = createWriteQueue(config); await again.activate('a');
+  assert.equal(again.entries()[0].code, 'permission-denied', 'the code survives a reload');
+  assert.deepEqual(again.refused().map(x => x.key), [key], 'a failed save is refused');
+  await again.archive(key, { refused: true });
+  assert.equal(f.records.get(key).state, 'archived', 'no new state: older versions count it finished');
+  assert.equal(f.records.get(key).refused, true);
+  assert.deepEqual(again.refused().map(x => [x.key, x.code]), [[key, 'permission-denied']], 'still refused, set aside');
+  for (let i = 0; i < 105; i++) await again.save('item', 'a', { id: 'x' + i, text: 'Fake' });
+  assert.equal(await again.flush(), true, 'set aside: the sign-out gate is open');
+  assert.ok(f.records.has(key), 'kept out of pruning');
+  const third = createWriteQueue(config); await third.activate('a');
+  assert.deepEqual(third.refused().map(x => x.key), [key], 'and after another reload');
+  deny = false; await third.retry(key);
+  assert.equal(f.remote.get('r').text, 'Fake', 'sent (then pruned at once: the oldest finished save)');
+  assert.deepEqual(third.refused(), []); assert.equal(f.records.get(key)?.refused, undefined);
+});
+test('discard(key): a refused save leaves the refused list and becomes ordinary history (0.8.2)', async () => {
+  const f = fixture();
+  const config = { ...f.config, backend: async () => { throw coded('permission-denied'); } };
+  const q = createWriteQueue(config);
+  await assert.rejects(q.save('item', 'a', { id: 'r', text: 'Fake' }), /kept/);
+  const key = q.entries()[0].key;
+  await q.discard(key);
+  assert.equal(q.stateOf(key), 'archived'); assert.deepEqual(q.refused(), []);
+  assert.equal(f.records.get(key).refused, undefined); assert.equal(await q.flush(), true);
+  await q.archive(key, { refused: true }); await q.discard(key);   // set aside first, discarded later
+  assert.deepEqual(q.refused(), []); assert.equal(f.records.get(key).refused, undefined);
+});
+test('save(..., { meta }) is kept with the job across a reload: entries() and finished(key) (0.8.2)', async () => {
+  const f = fixture(); f.online(false);
+  await f.queue.save('item', 'a', { id: '1', text: 'Fake' }, null, { meta: { row: 3, label: 'Fake row' } });
+  const key = f.queue.jobKey('item', '1');
+  assert.equal(f.queue.finished(key), null, 'not sent yet');
+  const next = createWriteQueue(f.config); await next.activate('a');
+  assert.deepEqual(next.entries()[0].meta, { row: 3, label: 'Fake row' });
+  f.online(true); assert.equal(await next.flush(), true);
+  const done = next.finished(key);
+  assert.equal(done.state, 'synced'); assert.deepEqual(done.meta, { row: 3, label: 'Fake row' });
+});
+test('lastSent(kind, id) survives a reload: the stamp and signature this device last sent (0.8.2)', async () => {
+  const f = fixture();
+  const config = { ...f.config, backend: async (...args) => { const r = await f.config.backend(...args); return { ...r, updatedAt: 42 }; } };
+  const q = createWriteQueue(config);
+  assert.equal(q.lastSent('item', '1'), null);
+  await q.save('item', 'a', { id: '1', text: 'Fake' }); assert.equal(await q.flush(), true);
+  const next = createWriteQueue(config); await next.activate('a');
+  assert.deepEqual(next.lastSent('item', '1'), { stamp: 42, signature: recordSignature({ id: '1', text: 'Fake' }) });
+  assert.equal(next.lastSent('item', '2'), null);
 });
