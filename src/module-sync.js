@@ -92,6 +92,7 @@ export function sync(options = {}) {
           if (owed) { owed = false; reload(); return; }   // (the SDK was terminated by the switch's wipe)
           if (scopeOf) { const s = scopeOf(user); store.set('scope', s); }
           await c.signedIn(user, scopeOf);
+          c.queue.kick();   // (same account after a sign-out: its queue was kept, so open() didn't start it again)
           c.startWatches(); tell();
         }),
         ctx.on('signout', async () => { const last = c.scope() || store.get('scope') || ''; c.close(); await countStored(last); }),

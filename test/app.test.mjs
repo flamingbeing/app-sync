@@ -4,7 +4,7 @@
 // adapter over the fake server (the real adapter: test/firestore.emulator.mjs). Made-up data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp } from './factory.mjs';
+import { createApp, onModules } from './factory.mjs';
 import { ESCALATE_MS } from '../src/watchdog.js';
 import { checkWrite, recordSignature } from '../src/conflict.js';
 import { fakeServer } from './fake-server.mjs';
@@ -285,7 +285,7 @@ test('sign-out refuses while a save is unsent and deletes nothing; once sent it 
   assert.equal((await st.load('items')).docs.length, 0, 'the device copy is gone');
 });
 
-test('sign-out stops when someone else signed in meanwhile (another tab): nothing deleted, listeners back', async () => {
+test('sign-out stops when someone else signed in meanwhile (another tab): nothing deleted, listeners back', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test switch/forget' }, async () => {
   const sdkParts = fakeAuthSdk();
   const { app, srv, adapter } = await makeApp({ sdkParts });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
@@ -579,7 +579,7 @@ test('signOut({ force }): unsent saves and tracked writes are forgotten, the dev
   assert.equal(app.unsentOutside(), 0, 'forgotten with the device');
 });
 
-test('signOut({ force }) still stops when someone else signed in meanwhile (0.8.1)', async () => {
+test('signOut({ force }) still stops when someone else signed in meanwhile (0.8.1)', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test forget' }, async () => {
   const sdkParts = fakeAuthSdk();
   const { app, adapter } = await makeApp({ sdkParts });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
@@ -590,7 +590,7 @@ test('signOut({ force }) still stops when someone else signed in meanwhile (0.8.
   assert.equal(adapter.cleared, 0);
 });
 
-test('signOut({ before }): runs after the listeners stop and before the wipe; a throw is named in failed (0.8.1)', async () => {
+test('signOut({ before }): runs after the listeners stop and before the wipe; a throw is named in failed (0.8.1)', { skip: onModules() && 'one-object order; modules: auth.test forget order' }, async () => {
   const order = [];
   const { app } = await makeApp({ options: { forget: { extra: async () => order.push('extra') } } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
@@ -638,7 +638,7 @@ test('flush: a save made while outside writes settle keeps the gate shut (review
   assert.equal(r.ok, false);
 });
 
-test('signOut({ before }): someone else signed in during before stops the wipe; signed out (none) goes on (review, 0.8.1)', async () => {
+test('signOut({ before }): someone else signed in during before stops the wipe; signed out (none) goes on (review, 0.8.1)', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test forget' }, async () => {
   const sdkParts = fakeAuthSdk();
   const { app, adapter } = await makeApp({ sdkParts });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
@@ -845,7 +845,7 @@ test('reconnect: a switch past the 4 s cap keeps the lock until it settles; no s
   assert.deepEqual(calls, ['off', 'on', 'off', 'on']);
 });
 
-test('signOut: doc and claims watches are stopped before the wipe and started again when it stops (review, 0.8.3)', async () => {
+test('signOut: doc and claims watches are stopped before the wipe and started again when it stops (review, 0.8.3)', { skip: onModules() && 'one-object sign-out restarts watches; modules: sign-out keeps watches' }, async () => {
   const srv = fakeServer(), feed = docFeed(), sdkParts = fakeAuthSdk();
   const { app } = await makeApp({ srv, sdkParts, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
@@ -886,7 +886,7 @@ test('wake: true nudges the watchdog when the page comes back (online, pageshow,
   assert.equal(visible, 2, 'visible again after the throttle: listen again');
 });
 
-test('claims.watch: the role doc is listened to, the claims refreshed when it moves, onClaims told the status (0.8.3)', async () => {
+test('claims.watch: the role doc is listened to, the claims refreshed when it moves, onClaims told the status (0.8.3)', { skip: onModules() && 'one-object reads the role doc through the injected adapter; auth module uses the SDK (auth.test)' }, async () => {
   const user = fakeUser({ claims: { v: 1, g: { _: 'viewer' } } });
   const srv = fakeServer(), feed = docFeed(), posts = [], told = [];
   let status = 200;
@@ -917,3 +917,6 @@ test('claims.watch: the role doc is listened to, the claims refreshed when it mo
   assert.equal(r.ok, true);
   assert.equal(feed.live, 0, 'sign-out stops the role doc listener');
 });
+
+// (for test/modules.test.mjs's module-only tests)
+export { settle, until, fakeUser, fakeAdapter, fakeNav, memOutbox, memStorage };

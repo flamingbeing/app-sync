@@ -6,3 +6,102 @@ process.env.APP_SYNC_MODULES = '1';
 await import('./app.test.mjs');
 await import('./held.test.mjs');
 await import('./model.test.mjs');
+
+// The sync module's own: sign-out keeps the account's data, a switch wipes it, the reload owed after a wipe.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createApp } from '../app.js';
+import { auth } from '../auth.js';
+import { sync } from '../sync.js';
+import { fakeServer } from './fake-server.mjs';
+const { settle, until, fakeUser, fakeAdapter, fakeNav, memOutbox, memStorage } = await import('./app.test.mjs');   // (after the env above)
+
+let n = 0;
+// an auth SDK whose next popup signs in `next` (another account: a switch)
+function switchSdk() {
+  const calls = [];
+  const auth = { currentUser: null, cbs: new Set(), set(u) { this.currentUser = u; for (const cb of [...this.cbs]) cb(u); } };
+  const t = { calls, auth, next: fakeUser() };
+  t.A = {
+    GoogleAuthProvider: class { setCustomParameters() {} },
+    async signInWithPopup(a) { calls.push('popup'); a.set(t.next); },
+    async signInWithRedirect() { calls.push('redirect'); },
+    async getRedirectResult() { return null; },
+    onAuthStateChanged(a, cb) { a.cbs.add(cb); cb(a.currentUser); return () => a.cbs.delete(cb); },
+    async signOut(a) { calls.push('signOut'); a.set(null); },
+  };
+  return t;
+}
+async function modulesApp({ storage = memStorage(), sdk = switchSdk(), srv = fakeServer(), nav = fakeNav(), name = 'modtest' + (++n) + '-' + Date.now(), outbox = null } = {}) {
+  const adapter = fakeAdapter(srv), reloads = [];
+  const app = await createApp({
+    config: { name, storage, sdk: async () => ({ A: sdk.A, F: {}, auth: sdk.auth, db: {} }) },
+    modules: [auth({ nav, win: null }), sync({ colls: ['items'], path: (s, c) => ['spaces', s, c], kinds: { item: 'items' },
+      scope: u => 'sp-' + u.uid, adapter, nav, win: null, outbox: outbox || memOutbox(name + '-outbox'), watchEvery: 0,
+      reload: () => reloads.push('reload') })],
+  }).ready;
+  return { app, sdk, srv, adapter, nav, storage, reloads, name };
+}
+
+test('sync module: sign-out keeps the device copy, the outbox and the watch; the same account sends its unsent save after', async () => {
+  const t = await modulesApp({ nav: fakeNav({ online: false }) });
+  const { app } = t;
+  await app.auth.signIn();
+  let list = [];
+  app.sync.watch('sp-u1', 'items', l => { list = l; });
+  await app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake unsent' });
+  assert.ok(await until(() => list.some(d => d.id === 'r1')));
+  assert.deepEqual(await app.auth.signOut(), { ok: true, reason: '' });
+  await settle(10);
+  let st = null; app.status$(x => { st = x; })();
+  assert.equal(st.unsent, 1, 'still unsent, still counted (a switch waits for it)');
+  assert.equal(app.sync.queue.entries().length, 1, 'the outbox kept it');
+  assert.equal(t.adapter.cleared, 0, 'nothing wiped');
+  assert.equal(t.srv.get('items', 'r1'), undefined, 'nothing sent while signed out');
+  t.nav.onLine = true;
+  assert.deepEqual(await app.auth.signIn(), { ok: true, reason: '' });
+  assert.ok(await until(() => t.srv.get('items', 'r1')?.text === 'Fake unsent'), 'sent once the same account is back');
+  assert.ok(list.some(d => d.id === 'r1'), 'the list still has it');
+  assert.deepEqual(t.reloads, [], 'no reload: nothing was wiped');
+  await app.stop();
+});
+
+test('sync module: another account is a switch: the last one\'s device copy and outbox are wiped, the reload is owed to its sign-in', async () => {
+  const t = await modulesApp();
+  const { app } = t;
+  await app.auth.signIn();
+  await app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake first' });
+  assert.equal(await app.sync.flush(2000), true);
+  await app.auth.signOut();
+  t.sdk.next = fakeUser({ uid: 'u2', email: 'other.fake@example.test' });
+  const r = await app.auth.signIn();
+  assert.deepEqual({ ok: r.ok, reason: r.reason }, { ok: true, reason: '' });
+  assert.equal(t.adapter.cleared, 1, 'the SDK cache cleared');
+  assert.deepEqual(t.reloads, ['reload'], 'the SDK can\'t be used again: the page starts again at the new sign-in');
+  assert.equal(app.sync.queue.entries().length, 0);
+  const st = await app.sync.parts.stores.openStore('sp-u1');
+  assert.equal((await st.load('items')).docs.length, 0, 'the last account\'s device copy is gone');
+  assert.equal(t.storage.getItem(t.name + ':sync/scope'), null, 'no scope last opened');
+  await app.stop();
+});
+
+test('sync module: signed out after a reload, the stored unsent saves still refuse a switch; forget() wipes and reloads', async () => {
+  const name = 'modtest-reload-' + Date.now(), storage = memStorage(), records = new Map(), srv = fakeServer();
+  const outbox = () => memOutbox(name + '-outbox', 'default', records);
+  const a = await modulesApp({ name, storage, srv, nav: fakeNav({ online: false }), outbox: outbox() });
+  await a.app.auth.signIn();
+  await a.app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake unsent' });
+  await a.app.auth.signOut();
+  await a.app.stop();
+  const b = await modulesApp({ name, storage, srv, outbox: outbox() });   // (the page again, signed out)
+  await settle(10);
+  b.sdk.next = fakeUser({ uid: 'u2', email: 'other.fake@example.test' });
+  const r = await b.app.auth.signIn();
+  assert.deepEqual({ ok: r.ok, reason: r.reason }, { ok: false, reason: 'unsent' }, 'u1\'s stored save refuses the switch');
+  assert.equal(b.adapter.cleared, 0);
+  const f = await b.app.auth.forget({ force: true });
+  assert.equal(f.ok, true);
+  assert.equal(records.size, 0, 'the outbox forgot u1');
+  assert.ok(await until(() => b.reloads.length === 1), 'the cache was cleared: the page starts again');
+  await b.app.stop();
+});
