@@ -565,3 +565,22 @@ test('stop() during forget\'s wipes: the owner stays (a wipe may not have run)',
   assert.deepEqual(device.rows, [{ id: 'kept' }]);
   assert.match([...storage.m.values()].join(), /"uid":"u1"/);
 });
+
+test('a slow module stop: a switch the stop cut short does not make the new account the owner', async () => {
+  let release, app;
+  const slowStop = { name: 'slowStop', needs: ['auth'], start() { return {}; }, stop() { return new Promise(r => { release = r; }); } };
+  const storage = memStorage(), sdk = fakeSdk(), device = { rows: [], unsent: 0 }, log = [];
+  app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), fakeData(device, log), slowStop] });
+  await app.ready;
+  await app.auth.signIn();
+  device.rows.push({ id: 'kept' });
+  await app.auth.signOut();
+  const stopping = app.stop();
+  await settle();
+  sdk.auth.set(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  await settle();
+  release();
+  await stopping;
+  assert.deepEqual(device.rows, [{ id: 'kept' }]);
+  assert.match([...storage.m.values()].join(), /"uid":"u1"/);
+});

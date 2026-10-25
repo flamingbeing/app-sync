@@ -34,7 +34,8 @@ few lines in `src/auth.js`, `src/runner.js` and `src/signin/passcode.js` (the pa
 - **A sign-out during the app's `beforeSwitch` wins**: the switch went on (wiped, made the new account the owner, sent
   `signin`) before the sign-out. Now nothing is wiped and the old account stays the owner.
 - **A handler that stops the app ends the event**: `emit` ran the handlers after one that awaited `app.stop()`. It now
-  stops there, as it already did for an event sent after stop.
+  stops there, and names the modules it did not reach as failed (as an event sent after stop now does), so a switch
+  or forget cut short by a stop, also a slow one, keeps the old owner.
 
 ## 1.3.5 (2026-10-26)
 
