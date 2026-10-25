@@ -125,7 +125,7 @@ jobs:
           repository: flamingbeing/${{ matrix.repo }}
           ref: main
           path: app
-      - uses: flamingbeing/app-devkit/setup-node@v1.9.0
+      - uses: flamingbeing/app-devkit/setup-node@v1.9.1
         with:
           working-directory: app
           install: ${{ matrix.pw == 'project' }}
@@ -137,17 +137,17 @@ jobs:
         run: |
           if [ "${{ matrix.pw }}" = global ]; then echo "version=1.56.1" >> "$GITHUB_OUTPUT"
           else echo "version=$(node -p "require('./app/package-lock.json').packages['node_modules/playwright-core'].version")" >> "$GITHUB_OUTPUT"; fi
-      - uses: flamingbeing/app-devkit/setup-browser@v1.9.0
+      - uses: flamingbeing/app-devkit/setup-browser@v1.9.1
         with:
           playwright-version: ${{ steps.pw.outputs.version }}
           devkit-dir: ${{ matrix.repo == 'app-starter' && 'app/.devkit' || '' }}
-      - uses: flamingbeing/app-devkit/setup-emulators@v1.9.0
+      - uses: flamingbeing/app-devkit/setup-emulators@v1.9.1
         if: matrix.emulators
         with:
           emulators: ${{ matrix.emulators }}
           firebase-tools-version: ${{ matrix.firebase || '13.35.1' }}
           devkit-dir: ''
-      - uses: flamingbeing/app-devkit/serve-candidate@v1.9.0
+      - uses: flamingbeing/app-devkit/serve-candidate@v1.9.1
         id: candidate
         with:
           origin: https://core.anawj.com
@@ -156,7 +156,12 @@ jobs:
       - name: The starter's pinned engine, for the mixed-version spec
         if: matrix.repo == 'app-starter'
         run: |
-          v="$(grep -o 'core\.anawj\.com/sync/[0-9][^/]*/' app/app/sw.js | head -1 | cut -d/ -f3)"
+          # the pin: the import map in index.html (root, Vite-lite layout), else public/sw.js, else app/sw.js (0.x layout)
+          for f in app/index.html app/public/sw.js app/app/sw.js; do
+            v="$(grep -o 'core\.anawj\.com/sync/[0-9][^/]*/' "$f" 2>/dev/null | head -1 | cut -d/ -f3)"
+            if [ -n "$v" ]; then echo "pinned $v (from ${f#app/})"; break; fi
+          done
+          if [ -z "$v" ]; then echo "::error::no core.anawj.com/sync/<version>/ pin in index.html, public/sw.js or app/sw.js"; exit 1; fi
           git clone --quiet --depth 1 --branch "v$v" https://github.com/flamingbeing/app-sync pinned
       - name: ${{ matrix.row }} browser tests on this engine
         id: tests

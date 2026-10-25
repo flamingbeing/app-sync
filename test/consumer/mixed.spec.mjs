@@ -20,8 +20,9 @@ async function phone(browser, dir) {
   });
   return { context, page: await context.newPage() };
 }
+// the engine entry the page loaded: index.js, or app.js on a modules-only page (VERSION there from 0.9.3)
 const ran = page => page.evaluate(async () => {
-  const url = performance.getEntriesByType('resource').map(e => e.name).find(n => /^https:\/\/core\.anawj\.com\/sync\/[^/]+\/index\.js$/.test(n));
+  const url = performance.getEntriesByType('resource').map(e => e.name).find(n => /^https:\/\/core\.anawj\.com\/sync\/[^/]+\/(index|app)\.js$/.test(n));
   return url ? (await import(url)).VERSION : null;
 });
 async function edit(page, from, to) {

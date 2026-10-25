@@ -81,3 +81,14 @@ test('every new job carries the job format number', async () => {
     assert.ok(index.JOB_STATES.includes(job.state));
   }
 });
+
+// 0.9.3 (additive): a modules-only app imports only the entries, so what it needs from index.js is there too.
+test("the entries carry what a modules-only app needs: app.js VERSION (= index.js's), sync.js leaveEntry (index.js's)", async () => {
+  const app = await import('../app.js'), sync = await import('../sync.js');
+  assert.equal(app.VERSION, index.VERSION);
+  assert.equal(sync.leaveEntry, index.leaveEntry);
+  assert.deepEqual(Object.keys(app).sort(), ['VERSION', 'createApp']);
+  assert.deepEqual(Object.keys(sync).sort(), ['leaveEntry', 'sync']);
+  assert.match(read('types/app.d.ts'), /export const VERSION: "/);
+  assert.match(read('types/sync.d.ts'), /leaveEntry/);
+});

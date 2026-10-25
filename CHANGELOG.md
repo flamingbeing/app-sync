@@ -10,9 +10,24 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 0.8.2: refused saves and job data that survive a reload, and the watch change info.
 - 0.8.3: `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
 - 0.9.x: the modules (`createApp({ config, modules })`): 0.9.0 the runner and auth, 0.9.1 sync and update, 0.9.2 the
-  entries, types and checks that freeze at 1.0.
+  entries, types and checks that freeze at 1.0, 0.9.3 two names the entries were missing.
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
+
+## 0.9.3 (2026-10-25)
+
+Additive: a modules-only app (one that imports only the entries, never `index.js`) gets the two names it needed from
+`index.js`. No `src/` change, no stored-format change; every 0.9.2 name is unchanged.
+
+- `app.js` exports `VERSION` (the same value as `index.js`; `test/freeze.test.mjs` checks they agree), so an app and
+  the consumer checks can tell which engine a modules-only page really ran.
+- `sync.js` exports `leaveEntry` (the delete-to-bin entry, the same function as `index.js`'s).
+- Types: `types/app.d.ts` and `types/sync.d.ts` carry both (`test/types/consumer.js` uses them through `@core/*`).
+  `files.json` is unchanged (it lists what `index.js` loads, and that graph did not change).
+- Checks: the mixed-version spec accepts a page that loaded `/sync/<v>/app.js` as having run the engine, not only
+  `index.js`; the consumer job reads the starter's pinned version from the import map in `index.html` (root layout),
+  else `public/sw.js`, else `app/sw.js` (the 0.x layout keeps working), and fails clearly if none pins one. The
+  consumer matrix uses app-devkit v1.9.1 (serve-candidate checks a page's `app.js` entry too).
 
 ## 0.9.2 (2026-10-25)
 
