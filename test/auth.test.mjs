@@ -456,3 +456,45 @@ test('stop() while the app\'s beforeSwitch runs: the switch goes no further, no 
   assert.equal(t.sdk.docCbs.size, 0, 'no claims watch after stop');
   assert.deepEqual(t.log, ['signin u1', 'signout u1']);
 });
+
+test('a sign-out during the SDK\'s own sign-in wins too: the late account is signed straight out, no switch, no wipe', async () => {
+  const t = setup();
+  await t.app.ready;
+  await t.app.auth.signIn();
+  t.app.data.save({ id: 'kept' });
+  t.app.data.sent();
+  await t.app.auth.signOut();
+  await t.app.stop();
+  let land;
+  t.sdk.A.signInWithCustomToken = (a, token) => new Promise(r => { land = () => { a.set(fakeUser({ uid: 'guest-' + token, email: '' })); r(); }; });
+  const late = { name: 'late', signIn: async () => ({ token: 'tok2' }) };
+  const t2 = setup({ storage: t.storage, sdk: t.sdk, device: t.device, log: t.log, options: { methods: [late] } });
+  await t2.app.ready;
+  const pending = t2.app.auth.signIn({ method: 'late' });
+  await settle();
+  await t2.app.auth.signOut();
+  land();
+  assert.deepEqual(await pending, { ok: false, reason: 'refused' });
+  await settle();
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.deepEqual(t.device.rows, [{ id: 'kept' }]);
+  assert.ok(!t.log.some(l => l.startsWith('switch') || l === 'signin guest-tok2'), t.log.join());
+});
+
+test('stop() while the switch\'s wipes run: the new account is not made the owner', async () => {
+  let release, entered;
+  const inWipe = new Promise(r => { entered = r; });
+  const slow = { name: 'slow', needs: ['auth'], start(ctx) { ctx.on('switch', () => { entered(); return new Promise(r => { release = r; }); }); return {}; }, stop() {} };
+  const storage = memStorage(), sdk = fakeSdk();
+  const app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), slow] });
+  await app.ready;
+  await app.auth.signIn();
+  await app.auth.signOut();
+  sdk.as(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  void app.auth.signIn();
+  await inWipe;
+  await app.stop();
+  release();
+  await settle();
+  assert.match([...storage.m.values()].join(), /"uid":"u1"/);
+});

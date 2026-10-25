@@ -30,8 +30,8 @@
 //   'unsent' | 'wipe' | 'sent' | 'refused', from? }: method one of methods (default 'google'); hint is Google's
 //   login_hint; 'redirect': the page is leaving to sign in; 'unsent' | 'wipe': refused switch (from: the account whose
 //   data stays); 'sent': the email link is on its way; 'refused': the passcode was not taken, or signOut() or forget()
-//   came while the method was out (1.3.6: it signs nobody in). Signed in anonymously,
-//   another method links its account to the anonymous one (1.3.0): the uid stays, so does the device's data, no switch;
+//   came while the sign-in was out (1.3.6: it signs nobody in; an account that lands anyway is signed out again).
+//   Signed in anonymously, another method links its account to the anonymous one (1.3.0): the uid stays, so does the device's data, no switch;
 //   the owner and onUser get the account's email. An account that exists already signs in instead (a switch, guarded
 //   as any). A passcode's token can't link: it signs in (a switch).
 //   signOut() -> { ok, reason }: Auth signs out; signout is emitted; nothing is wiped, nothing refused.
@@ -115,8 +115,10 @@ export function auth(options = {}) {
   // Auth's answers, handled one at a time (a switch's wipe finishes before the next answer is looked at)
   /** @type {Promise<void>} */
   let chain = Promise.resolve();
-  // counts signOut() and forget() calls: a sign-in that was out when one came signs nobody in
-  let signOuts = 0;
+  // the sign-ins still out; signOut() and forget() mark them overtaken: those sign nobody in
+  /** @type {Set<{ overtaken: boolean }>} */
+  const signIns = new Set();
+  const overtakeSignIns = () => { for (const t of signIns) t.overtaken = true; };
 
   const load = async () => {
     const x = await ctx.sdk();
@@ -140,6 +142,8 @@ export function auth(options = {}) {
     // every module has started (and reported its unsent saves, and listens) before an answer is looked at
     try { await ctx.ready; } catch { return; }
     if (stopped) return;
+    // an account that lands after a sign-out overtook its sign-in: straight out again, before any switch or signin
+    if (u && [...signIns].some(t => t.overtaken)) { seen = null; await s.A.signOut(s.auth); return; }
     const uid = u?.uid || null;
     if (uid === seen) { if (u && current) current = userOf(u); return; }
     seen = uid;
@@ -162,6 +166,7 @@ export function auth(options = {}) {
       if (stopped) return;   // (the app stopped during its step: nothing is wiped)
       if (unsent() > 0) return refuse(from, user, 'unsent');   // (a save made during the app's step)
       const wipes = await ctx.emit('switch', { from, to: user });
+      if (stopped) return;   // (a module may have stopped before its wipe: the old account stays the owner)
       failed.push(...wipes);
       if (failed.length) ctx.report({ event: 'switch', failed });
       // a wipe that threw left old data: the old account stays the owner, the switch is tried again next sign-in
@@ -190,19 +195,31 @@ export function auth(options = {}) {
 
   /** @param {SignInRequest} [request] */
   async function signIn(request = {}) {
-    const asked = signOuts;
+    const ticket = { overtaken: false };
+    signIns.add(ticket);
+    try {
+      const reason = await signInWith(request, ticket);
+      if (reason) return { ok: false, reason };
+    } finally { signIns.delete(ticket); }
+    return blocked ? { ok: false, reason: blocked.reason, from: blocked.from } : { ok: true, reason: '' };
+  }
+  /** @param {SignInRequest} request @param {{ overtaken: boolean }} ticket @returns {Promise<string>} the reason nobody is signed in by it, or '' */
+  async function signInWith(request, ticket) {
     const how = await methodOf(request.method || 'google');
     const x = await load();
     blocked = /** @type {{ from: Owner, to: AppUser, reason: 'unsent' | 'wipe' } | null} */ (null);
     const anon = x.auth.currentUser?.isAnonymous && how.name !== 'anonymous' ? x.auth.currentUser : null;
     const { credential = null, token = '', reason = '' } = await how.signIn(x, request, anon);
-    if (reason) return { ok: false, reason };
-    if (signOuts !== asked) return { ok: false, reason: 'refused' };
+    if (reason) return reason;
+    if (ticket.overtaken) return 'refused';
     if (token) await x.A.signInWithCustomToken(x.auth, token);
     else if (credential) await (anon ? linkOrSignIn(x, anon, credential) : x.A.signInWithCredential(x.auth, credential));
     if (anon && x.auth.currentUser?.uid === anon.uid) linked(x.auth.currentUser);
     await chain;
-    return blocked ? { ok: false, reason: blocked.reason, from: blocked.from } : { ok: true, reason: '' };
+    if (!ticket.overtaken) return '';
+    // (Auth may tell of the late account after the chain was read: signed out here then)
+    if (x.auth.currentUser) { await x.A.signOut(x.auth); await chain; }
+    return 'refused';
   }
   /** @param {string} name @returns {Promise<AuthMethod>} */
   async function methodOf(name) {
@@ -264,7 +281,7 @@ export function auth(options = {}) {
   const redirectFirst = options.redirectFirst || (() => standalone() || (/Android/i.test(nav?.userAgent || '') && /Firefox\//i.test(nav?.userAgent || '')));
 
   async function signOut() {
-    signOuts++;
+    overtakeSignIns();
     const { A, auth } = await load();
     await A.signOut(auth);
     await chain;
@@ -281,7 +298,7 @@ export function auth(options = {}) {
     const failed = [];
     if (before) { try { await before(); } catch (e) { failed.push('before'); console.warn('forget: before', e); } }
     if (!force && unsent() > 0) return { ok: false, reason: 'unsent', failed };   // (a save made during the app's step)
-    signOuts++;
+    overtakeSignIns();
     const user = current ? { uid: current.uid, email: current.email } : owner();
     if (x?.auth.currentUser) { await x.A.signOut(x.auth); await chain; }
     const wipes = await ctx.emit('forget', { user, force });

@@ -1383,7 +1383,7 @@
     "entries.json": "d0d1e36b71f8a4e111bae9da9843bdd13dfd0a5ab924d706b4776dcad6ec5153",
     "files.json": "f6d6c9d3c5aca1dff47875802df3b163faf938e735ad52b65e602094aed358a4",
     "index.js": "592387627c7014a1a2c2d447c3d0de24967b9e1e29b9dffea90f0eb8329e9535",
-    "src/auth.js": "7904d8e8c5c8c8d26620f638c5a7500b3bbc899fb8b20e0ac1ddcad2180ee284",
+    "src/auth.js": "bf5921e879fbc7c2eed6f7eca08094aa3c0a164b590607a1bcee1fc9927f20fb",
     "src/cache.js": "298d04d133e45ab90290981f2a7d786aac814a084e991e26a3014b994165d91a",
     "src/conflict.js": "8b6a1c52262016d260567a3d3bd4500ad5e8b9e9888f50f221cf46df9e06efeb",
     "src/core.js": "b92990ce9cf591ade36bacfdcc1ae156e1cd2ce65e83b373754a1c5cfaa8a14e",

@@ -21,13 +21,15 @@ few lines in `src/auth.js` and `src/signin/passcode.js` (the passcode method sti
 
 - **A sign-out wins over a sign-in still out**: a passcode sign-in whose token came back after `signOut()` or
   `forget()` signed the account back in. A sign-in that was out when either came now signs nobody in and answers
-  `{ ok: false, reason: 'refused' }`. The passcode method hands its token to the auth module (`{ token }`, an optional
-  field of a sign-in method's answer) instead of signing in itself, so the check covers it.
+  `{ ok: false, reason: 'refused' }`, whatever the method: an account that lands anyway (a popup, an SDK call already
+  out) is signed straight out again, before any switch or `signin`. The passcode method hands its token to the auth
+  module (`{ token }`, an optional field of a sign-in method's answer) instead of signing in itself.
 - **A failed forget keeps the owner**: a module whose `forget` wipe threw still cleared the device's owner, so the next
   account's sign-in was no switch and the old account's rows stayed under the new one. The owner now stays when a wipe
   threw (`failed` names it, as before): another account's sign-in is a switch that wipes again.
 - **`stop()` during the app's `beforeSwitch` ends the switch**: the switch went on after `app.stop()` and left a live
-  claims watch. Nothing is wiped and nothing more is started once the app has stopped.
+  claims watch; a stop during the switch's wipes still made the new account the owner. Once the app has stopped, nothing
+  is wiped, the owner stays and nothing more is started.
 
 ## 1.3.5 (2026-10-26)
 
