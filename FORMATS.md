@@ -7,7 +7,8 @@ separately from the API, from 0.8.0 on:
 - **Until 2.0, nothing below changes or goes away.** A 1.x version may add an optional field that older versions
   ignore; it never renames a key, a prefix, a field or a state, and never adds a job state.
 - A change that breaks this is a new major version (2.0) with its own migration, never a 1.x release.
-- `test/freeze.test.mjs` pins these values; a change there is a format change.
+- `test/freeze.test.mjs` pins these values and `test/formats.test.mjs` the sections below (0.9.2); a change there is
+  a format change.
 
 ## On the device
 
@@ -19,6 +20,19 @@ separately from the API, from 0.8.0 on:
 | Outbox list | localStorage `app-sync:outboxes` (`REGISTRY_KEY`): `[{ name, realm }]` | every app on the origin |
 | Module storage (0.9.0) | localStorage `<name>:<module>[:<ns>]/<key>`, a JSON value (the runner's `ctx.storage(ns)`). The auth module keeps `<name>:auth/owner` = `{ uid, email }`: the account whose data this device holds (kept at sign-out, removed by `forget()`). The sync module (0.9.1) keeps `<name>:sync/scope` = the scope last opened, a string (so, signed out, its unsent saves are still counted, and a switch wipes that scope's outbox; removed by the wipe); its device copy and outbox are the ones above, same names | this app's tabs |
 | Offline cache step | localStorage `app-sync-cache` (`CACHE_KEY`): `'multi'`, `'single'` or `'memory'` | this origin |
+
+### Which scope holds a record (frozen at 0.9.2)
+
+- A record in the device copy belongs to exactly one scope: the scope whose database holds it
+  (`<name>-sync:<realm><scope>`, the scope trimmed and lower-cased). The same id in two scopes is two records. The
+  scope is in the database name, never in the record: the engine stores the record as the server sent it.
+- **A delete is only a tombstone:** an id in `meta.gone` on the device, a `_deleted` answer or a bin entry on the
+  server. A record missing from the device copy without a `gone` entry is not deleted: it was never fetched, or it
+  was dropped from the device (eviction). No version treats a missing record as a delete or sends one for it.
+- Reserved for 1.x (optional, older versions ignore them; [SHAPES.md](SHAPES.md)): `meta.keep`
+  `{ mode: 'recent' | 'part', since?, part? }`, what this device keeps of a collection, and `meta.fetchedBy`
+  `{ [id]: part }`, which part fetched a record; scope names starting `public:` for data read without sign-in (read
+  only, so wiping them at a switch loses nothing).
 
 ### A job (one save in the outbox)
 

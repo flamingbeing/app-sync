@@ -175,7 +175,7 @@ export function createStores({ prefix, colls, metaOnly = ['bin'], realm = '', re
     try { for (const n of JSON.parse(localStorage.getItem(REGISTRY) || '[]')) names.add(n); } catch { /* storage blocked */ }
     try { if (indexedDB.databases) for (const d of await indexedDB.databases()) if (d.name && d.name.startsWith(prefix)) names.add(d.name); } catch { /* not supported */ }
     const mine = [...names].filter(n => ours(n) && !kept.includes(n));
-    await Promise.all(mine.map(n => new Promise(resolve => {
+    await Promise.all(mine.map(n => new Promise((/** @type {(value?: any) => void} */ resolve) => {
       try {
         const r = indexedDB.deleteDatabase(n);
         r.onsuccess = r.onerror = () => resolve();

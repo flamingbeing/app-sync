@@ -54,7 +54,7 @@ export function createOutbox({ name, realm = 'default' }) {
   }
   /** @param {string} owner @returns {Job[]} */
   const fallbackRecords = owner => Object.keys(localStorage).filter(k => k.startsWith(PREFIX))
-    .map(k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } })
+    .map(k => { try { return JSON.parse(/** @type {string} */ (localStorage.getItem(k))); } catch { return null; } })
     .filter(x => x && x.owner === owner);
   return {
     name, realm,
@@ -84,7 +84,7 @@ export function createOutbox({ name, realm = 'default' }) {
     async get(key) {
       /** @type {Job | null} */
       let record = null;
-      try { record = JSON.parse(localStorage.getItem(PREFIX + key)); } catch { /* storage blocked */ }
+      try { record = JSON.parse(/** @type {string} */ (localStorage.getItem(PREFIX + key))); } catch { /* storage blocked */ }
       record ||= await transaction('readonly', store => store.get(key));
       return record && record.realm === realm ? record : null;
     },

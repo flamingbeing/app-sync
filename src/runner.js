@@ -175,7 +175,7 @@ export function createApp({ config, modules } = /** @type {any} */ ({})) {
       return () => { set.delete(h); };
     },
     emit: (/** @type {string} */ event, /** @type {any} */ data) => emit(m.name, event, data),
-    storage: (/** @type {string} */ ns) => storage(m.name, ns),
+    storage: (/** @type {string | undefined} */ ns) => storage(m.name, ns),
     status: Object.freeze({
       set: (/** @type {ModuleStatus | null} */ st) => { if (st) parts.set(m.name, { ...st }); else parts.delete(m.name); tell(); },
       get: statusNow,

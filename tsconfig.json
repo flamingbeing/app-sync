@@ -7,11 +7,12 @@
     "module": "es2022",
     "moduleResolution": "bundler",
     "lib": ["es2022", "dom"],
-    "strict": false,
+    "strict": true,
+    "useUnknownInCatchVariables": false,
     "noImplicitAny": true,
     "noImplicitThis": true,
     "strictBindCallApply": true,
     "skipLibCheck": true
   },
-  "include": ["index.js", "app.js", "auth.js", "src/**/*.js"]
+  "include": ["index.js", "app.js", "auth.js", "sync.js", "update.js", "src/**/*.js"]
 }

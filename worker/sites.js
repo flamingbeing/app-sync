@@ -7,7 +7,8 @@ import { handleReport } from './report.js';
 
 const NOINDEX = 'noindex, nofollow';
 // a released version's files never change: browsers and the CDN may keep them for a year. The list of versions can.
-const VERSIONED = /^\/sync\/\d+\.\d+\.\d+\/.+\.(js|json)$|^\/sync\/\d+\.\d+\.\d+\/(LICENSE|NOTICE)$|^\/update\/\d+\.\d+\.\d+\/(sw-core|register)\.js$/;
+// .d.ts: the type declarations (types/, from 0.9.2), served as text/plain
+const VERSIONED = /^\/sync\/\d+\.\d+\.\d+\/.+\.(js|json|d\.ts)$|^\/sync\/\d+\.\d+\.\d+\/(LICENSE|NOTICE)$|^\/update\/\d+\.\d+\.\d+\/(sw-core|register)\.js$/;
 const LISTING = ['/sync/versions.json', '/update/versions.json'];
 // public code, no cookies or credentials, so any app origin may import it
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Cross-Origin-Resource-Policy': 'cross-origin' };

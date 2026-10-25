@@ -1,6 +1,7 @@
 # Status
 
 ## Now
+- 0.9.2 (25 Oct): the freeze: entries + import-map names `@core/*` (reserved UI-kit names), strict JSDoc + generated `types/`, package `exports`, modularity check, Vite check (external / source / git-installed), FORMATS.md scope rule pinned by hash, SHAPES.md (1.x additions); no runtime change.
 - 0.7.0 (25 Oct): JSDoc types across `src/` and `index.js`, `tsc --checkJs` (`npm run typecheck`) as a Checks step; no runtime change.
 - 0.6.4 (25 Oct): `firestoreCache` helper (multi-tab cache, steps down to single-tab then memory on quota or "Unexpected state", remembered per device, report codes) and README on what the watchdog covers.
 

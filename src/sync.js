@@ -94,7 +94,7 @@ const stamp = d => timeOf(d && d.updatedAt);
  * @returns {{ full: boolean, since: number | null }}
  */
 export function plan(meta, now, newest = 0) {
-  const m = meta || {};
+  const m = /** @type {{ fullAt: number, syncAt: number, anchor: number }} */ (meta || {});
   const full = !(m.fullAt > 0) || !(m.syncAt > 0) || now - m.fullAt > FULL_EVERY || m.fullAt > now + SKEW;
   return { full, since: full ? null : Math.min(Math.min(m.syncAt, now) - SKEW, newest > 0 ? newest : Infinity) };
 }
@@ -107,7 +107,7 @@ export function plan(meta, now, newest = 0) {
  * @returns {{ full: boolean, since: number | null }}
  */
 export function planServer(meta, now) {
-  const m = meta || {};
+  const m = /** @type {{ fullAt: number, syncAt: number, anchor: number }} */ (meta || {});
   const full = !(m.fullAt > 0) || !(m.anchor > 0) || now - m.fullAt > FULL_EVERY || m.fullAt > now + SKEW;
   return { full, since: full ? null : m.anchor - 1 };
 }
@@ -310,7 +310,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
   /** @param {string} id */
   const holding = id => { try { return docs.has(id) && !!unsent(id); } catch { return docs.has(id); } };
   /** @param {string} id */
-  const left = id => { try { onLeave(id, copy(docs.get(id))); } catch (e) { console.warn('onLeave', e); } };
+  const left = id => { try { onLeave(id, copy(/** @type {Doc} */ (docs.get(id)))); } catch (e) { console.warn('onLeave', e); } };
   /** @type {Set<(list: Doc[], meta: SnapMeta) => void>} */
   const subs = new Set();
   const local = new Set();   // local: ids last seen with this device's write pending
@@ -382,11 +382,11 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     if (s.full) {
       const list = s.docs || [], there = new Set(list.map(d => d.id));
       const kept = [...docs.keys()].filter(id => !there.has(id) && holding(id));
-      const r = replaceAll(docs, [...list, ...kept.map(id => docs.get(id))]);
+      const r = replaceAll(docs, [...list, .../** @type {Doc[]} */ (kept.map(id => docs.get(id)))]);
       for (const id of kept) left(id);
       meta = { ...meta, syncAt: t, fullAt: t, gone: pruneGone(meta.gone, t), ...(meta.later ? { later: pruneGone(meta.later, t) } : {}), ...(s.epoch !== undefined ? { epoch: s.epoch } : {}),
         ...(server ? { anchor: newestServer(s.docs || [], pending, serverField) } : {}) };
-      const swept = expireDocs(docs, meta.gone, expire, t);
+      const swept = expireDocs(docs, /** @type {Record<string, number>} */ (meta.gone), expire, t);
       if (swept.length) r.put = r.put.filter(d => !swept.includes(d.id)), r.del.push(...swept);
       changed = !!(r.put.length || r.del.length);
       persist({ ...r, meta });
@@ -641,7 +641,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       const kept = drop ? [] : (list || []).filter(t => t && t.id && held(t));
       const del = applyTombs(docs, meta.gone ||= {}, drop ? dropTombs(docs, list, now()) : list.filter(t => !kept.includes(t)));
       let m = kept.length ? { ...meta, later: deferTombs(meta.later, kept) } : meta;
-      for (const t of kept) { try { onLeave(scope, coll, t.id, copy(docs.get(t.id))); } catch (e) { console.warn('onLeave', e); } }
+      for (const t of kept) { try { onLeave(scope, coll, t.id, copy(/** @type {Doc} */ (docs.get(t.id)))); } catch (e) { console.warn('onLeave', e); } }
       // (and deferred ones whose saves are done: a settle, here while the collection isn't running)
       const settled = settleTombs(docs, m, null, id => { try { return docs.has(id) && !!unsent(scope, coll, id); } catch { return docs.has(id); } });
       if (settled) { m = settled.meta; del.push(...settled.del); }

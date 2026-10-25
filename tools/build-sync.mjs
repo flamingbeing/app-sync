@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 export const ROOT = process.env.SYNC_ROOT || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const PUBLISHED = ['index.js', 'app.js', 'auth.js', 'sync.js', 'update.js', 'files.json', 'src', 'LICENSE', 'NOTICE'];   // what a version contains (files.json from 0.8.0; app.js, auth.js from 0.9.0; sync.js, update.js from 0.9.1)
+const PUBLISHED = ['index.js', 'app.js', 'auth.js', 'sync.js', 'update.js', 'files.json', 'src', 'types', 'LICENSE', 'NOTICE'];   // what a version contains (files.json from 0.8.0; app.js, auth.js from 0.9.0; sync.js, update.js from 0.9.1; types/ from 0.9.2)
 const LOCK = path.join(ROOT, 'versions.lock.json');
 const git = (args, opts = {}) => execFileSync('git', args, { cwd: ROOT, maxBuffer: 1 << 26, ...opts });
 const sha = buf => crypto.createHash('sha256').update(buf).digest('hex');

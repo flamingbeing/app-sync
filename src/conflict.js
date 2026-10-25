@@ -63,7 +63,7 @@ export function keysOf(path) {
 /** @param {any} v @returns {v is Record<string, any>} */
 const isMap = v => !!v && typeof v === 'object' && !Array.isArray(v);
 /** @template T @param {T} v @returns {T} */
-const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+const clone = v => v === undefined ? /** @type {T} */ (undefined) : JSON.parse(JSON.stringify(v));
 /**
  * @param {Doc | null} current
  * @param {Doc | null} record
@@ -214,7 +214,7 @@ const setFrom = (record, path, from) => {
  */
 export function clashingFields(current, record, base, options = {}) {
   try { mergeHeld(current, record, base, { ...options, pick: null }); return []; }
-  catch (e) { const error = /** @type {CodedError} */ (e); if (error.code === 'write-conflict') return error.fields; throw error; }
+  catch (e) { const error = /** @type {CodedError} */ (e); if (error.code === 'write-conflict') return /** @type {string[]} */ (error.fields); throw error; }
 }
 
 // A time as people read it, in a time zone (default Singapore): 'Sun 25 Oct, 14:05'. '' for no time.

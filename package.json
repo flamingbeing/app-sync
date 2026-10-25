@@ -7,19 +7,42 @@
     "test": "node --test 'worker/test/*.test.mjs' && npm run test:unit",
     "test:unit": "node --test test/*.test.mjs update/test/*.test.mjs",
     "test:update-browser": "node update/test/e2e.mjs",
-    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-app-sync \"node test/firestore.emulator.mjs && node test/app.emulator.mjs\""
+    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-app-sync \"node test/firestore.emulator.mjs && node test/app.emulator.mjs\"",
+    "types": "tsc -p tsconfig.types.json",
+    "modularity": "node tools/modularity.mjs",
+    "vite": "node test/vite/build.mjs external && node test/vite/build.mjs source"
   },
   "devDependencies": {
     "firebase": "11.10.0",
     "firebase-tools": "13.35.1",
-    "typescript": "5.8.3"
+    "typescript": "5.8.3",
+    "vite": "6.3.5"
   },
   "name": "app-sync",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "Offline-first sync engine for web apps: delta listeners, a durable outbox, tombstones, conflict checks; backend injected (Firestore adapter included).",
   "license": "Apache-2.0",
   "exports": {
-    ".": "./index.js",
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./index.js"
+    },
+    "./app": {
+      "types": "./types/app.d.ts",
+      "default": "./app.js"
+    },
+    "./auth": {
+      "types": "./types/auth.d.ts",
+      "default": "./auth.js"
+    },
+    "./sync": {
+      "types": "./types/sync.d.ts",
+      "default": "./sync.js"
+    },
+    "./update": {
+      "types": "./types/update.d.ts",
+      "default": "./update.js"
+    },
     "./*": "./src/*"
   },
   "files": [
@@ -29,6 +52,7 @@
     "sync.js",
     "update.js",
     "src/",
+    "types/",
     "LICENSE",
     "NOTICE",
     "README.md",

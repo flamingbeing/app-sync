@@ -28,12 +28,44 @@ jobs:
           install: 'false'
       - name: Types (JSDoc, tsc --checkJs)
         run: npm install --no-save --no-package-lock typescript@5.8.3 && npx tsc -p .   # same as package.json
+      - name: Types are up to date (types/, generated from the JSDoc)
+        run: |
+          npx tsc -p tsconfig.types.json && git add -N types && git diff --exit-code --stat -- types || { echo "types/ is stale: run npm run types and commit it"; exit 1; }
+      - name: Types through the import-map names (@core/* via paths)
+        run: npx tsc -p test/types
+      - name: Modularity rules (side-effect-free entries, no cross-entry imports, literal URLs, .js)
+        run: node tools/modularity.mjs
       - name: Repo check (with the Worker tests)
         run: node tools/check.mjs
       - name: Unit tests
         run: node --test test/*.test.mjs update/test/*.test.mjs
       - name: Proof-read (pages and documents)
         run: node tools/proofread.mjs
+
+  vite:
+    # Vite is a dev dependency only: nothing shipped needs it. (a) core external by URL, (b) core bundled from source
+    # with the unused update module shaken out, (c) the same from the package installed from this commit's git ref.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flamingbeing/app-devkit/setup-node@v1
+        with:
+          install: 'false'
+      - name: Vite (dev dependency, not saved)
+        run: npm install --no-save --no-package-lock vite@6.3.5
+      - name: (a) core external by URL
+        run: node test/vite/build.mjs external
+      - name: (b) core aliased to source, update shaken out
+        run: node test/vite/build.mjs source
+      - name: (c) installed from the git ref (package exports)
+        env:
+          REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          dir="$RUNNER_TEMP/vite-package" && mkdir -p "$dir" && cp test/vite/index.html test/vite/main.js test/vite/build.mjs "$dir/"
+          cd "$dir" && echo '{ "private": true, "type": "module" }' > package.json
+          npm install --no-package-lock vite@6.3.5 "app-sync@github:flamingbeing/app-sync#$REF"
+          node build.mjs package
 
   emulator:
     runs-on: ubuntu-24.04
