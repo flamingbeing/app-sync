@@ -15,7 +15,7 @@
     "typescript": "5.8.3"
   },
   "name": "app-sync",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Offline-first sync engine for web apps: delta listeners, a durable outbox, tombstones, conflict checks; backend injected (Firestore adapter included).",
   "license": "Apache-2.0",
   "exports": {

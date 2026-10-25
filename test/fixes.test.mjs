@@ -185,3 +185,35 @@ test('a record deleted elsewhere and saved again here is stamped above the delet
     assert.equal(next.updatedAt, doc.updatedAt + 1);
   }
 });
+
+test('a save shows in the lists from the moment save() is called, before it is stored or accepted (0.7.2, #19)', async () => {
+  const records = new Map();
+  let release = null;
+  const gate = () => new Promise(r => { release = r; });
+  const store = { async put(x) { if (!x.accepted && x.state === 'pending' && release === null) await gate(); records.set(x.key, structuredClone(x)); },
+    async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; }, async remove(k) { records.delete(k); }, async forget() {} };
+  const q = createWriteQueue({ store, getOwner: () => 'a', online: () => false, delay: ms => new Promise(r => setTimeout(r, ms === 180 ? 30 : 100)),
+    backend: async (_o, _k, record) => record });
+  await q.activate('a');
+  const list = [{ id: 'p1', order: 1 }, { id: 'p2', order: 2 }];
+  const handed = [];
+  q.onChange(() => handed.push(q.overlay('place', 'a', list).find(x => x.id === 'p1').order));
+  const saving = q.save('place', 'a', { id: 'p1', order: 3 }, list[0]);
+  // not stored yet (the outbox write waits): already shown
+  assert.equal(q.overlay('place', 'a', list).find(x => x.id === 'p1').order, 3, 'shown before it is stored');
+  assert.equal(handed.at(-1), 3, 'and the lists were told');
+  while (!release) await new Promise(r => setTimeout(r, 1));
+  assert.equal(q.overlay('place', 'a', list).find(x => x.id === 'p1').order, 3, 'still shown while it is being stored');
+  release(); await new Promise(r => setTimeout(r, 5));
+  // stored, offline, not accepted yet (save() has not returned): still shown
+  assert.equal(q.overlay('place', 'a', list).find(x => x.id === 'p1').order, 3, 'shown while not accepted');
+  await saving;
+  assert.equal(q.overlay('place', 'a', list).find(x => x.id === 'p1').order, 3);
+  // a save the queue refuses at once (storage) leaves the lists again
+  const q2 = createWriteQueue({ store: { ...store, async put() { throw new Error('quota'); } }, getOwner: () => 'a', online: () => false, backend: async (_o, _k, r) => r });
+  await q2.activate('a');
+  const p = q2.save('place', 'a', { id: 'p2', order: 9 }, list[1]);
+  assert.equal(q2.overlay('place', 'a', list).find(x => x.id === 'p2').order, 9);
+  await assert.rejects(p);
+  assert.equal(q2.overlay('place', 'a', list).find(x => x.id === 'p2').order, 2, 'refused: the list shows the server copy again');
+});
