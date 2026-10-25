@@ -479,7 +479,7 @@
     "src/outbox.js": "122d3d534637f17d6e904bfa7a080dad53bec94fef726fc4df6553377b41ded6",
     "src/persist.js": "c7386e6d85e967b0f2ec898034bd4d383628ba10c05478fb9394ca7e925a1209",
     "src/registry.js": "3a9c89c5b4fbc5e9f923ebf20e1bb20bc003cfa3531bbfca4ebd494053e9fb81",
-    "src/report.js": "c357513cd834ba39d019cf1749d8125d4a7c63087edf9334c590372dc3f86ef1",
+    "src/report.js": "8cc9919204054698d6a8a53701ef67944d564add106068a83fc51502be8aff44",
     "src/runner.js": "4f6ce14844d9b7dcf97d92efa4e2a7571425e46206ec30fe47c1e597dfb0036f",
     "src/status.js": "ebef20b3e9530cf4e93d0ca1f1ec1b010d2511a78b9f962a944739207e8e50ab",
     "src/store.js": "ad2f56d7e6a0c38b9dd6e3c5251a945c363b0b6b5cae7d02a5d35ef0836c54a9",

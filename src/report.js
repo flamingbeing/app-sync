@@ -165,7 +165,7 @@ export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOI
       }
     },
     stop() {
-      clearInterval(/** @type {number | undefined} */ (timer)); timer = null;
+      clearInterval(/** @type {ReturnType<typeof setInterval> | undefined} */ (timer)); timer = null;
       if (hide) { document.removeEventListener('visibilitychange', hide); globalThis.removeEventListener?.('pagehide', hide); hide = null; }
     },
   };
