@@ -2,7 +2,7 @@
 // held conflicts, as one closure. The sync module (module-sync.js) is built on it; it does not sign in (auth.js does).
 //
 // The sync options (sync(options), module-sync.js; 1.0.0-rc.1: moved here from the one-object createApp, removed):
-// sync({ colls, path, kinds, scope, backend, adapter, commit, outbox, hub, stores, queue, onRefused, forget, report,
+// sync({ colls, path, kinds, scope, public, backend, adapter, commit, outbox, hub, stores, queue, onRefused, forget, report,
 //        device, outside, wake, watchEvery, nav, now, win, reload })
 //   config.name (createApp's): the app's id: device copy `<name>-sync:`, outbox `<name>-outbox`. colls: the
 //   collections synced. path(scope, coll) -> the collection's path segments. config.sdk: async () -> { A, F, auth, db,
@@ -18,6 +18,10 @@
 //   hub, stores, queue: more options for createSyncHub, createStores, createWriteQueue (e.g. bin, binKinds,
 //   unstamped, expire; metaOnly; otherPending, sendTimeout, labels).
 //   scope(user) -> the scope opened at sign-in (e.g. the account's email); without it the app calls open(scope).
+//   public (1.3.0): colls read with no account, in scopes named `public:<name>` (FORMATS.md): watched as any scope,
+//   never opened or saved to (read only), and only these collections there. Their watches run signed out too, are
+//   listened again at sign-in (under the account) and stay through a switch or forget() (their copy is wiped with
+//   the rest: read only, it loses nothing).
 //   onRefused(err, entry) -> 'archive' | anything: a save the server refused (err.code, as the backend threw it);
 //   'archive' sets it aside, kept with its code for queue.refused(), retry(key) and discard(key) (0.8.2; after a
 //   reload too: the code is on the job, and a refused save found then is told once more). The outbox is then its only
@@ -86,6 +90,10 @@ import { viewOf } from './view.js';
 import { kindMap } from './kinds.js';
 import { createFirestoreBackend } from './firestore.js';
 
+// (1.3.0) scope names starting `public:` hold data read without sign-in (FORMATS.md), so read only
+/** @param {string} s */
+const isPublic = s => String(s).startsWith('public:');
+
 /**
  * @typedef {import('./types.js').Doc} Doc
  * @typedef {import('./types.js').Job} Job
@@ -110,6 +118,7 @@ import { createFirestoreBackend } from './firestore.js';
  * @property {Record<string, any>} [stores] more options for createStores
  * @property {Record<string, any>} [queue] more options for createWriteQueue
  * @property {(user: AppUser) => string} [scope] the scope opened at sign-in
+ * @property {string[]} [public] (1.3.0) colls read with no account, in `public:*` scopes
  * @property {(err: { code: string, message?: string }, entry: Job) => any} [onRefused] 'archive' sets a refused save aside
  * @property {{ extra?: (() => Promise<any>) | null, keep?: string[] | (() => string[] | Promise<string[]>) }} [forget]
  * @property {import('./types.js').Report | null} [report] the nothing-lost report (createReport), opt-in
@@ -127,6 +136,7 @@ import { createFirestoreBackend } from './firestore.js';
 /** @param {SyncCoreOptions} options @param {{ load: () => Promise<AppSdk>, user: () => AppUser | null }} host */
 export function createSyncCore(options, { load, user }) {
   const { name, colls, path } = options;
+  const publicColls = new Set(options.public || []);
   const {
     backend: backendOptions = {}, commit = null,
     onRefused = null, report = null, nav = globalThis.navigator, now = Date.now, watchEvery = 3000,
@@ -289,8 +299,9 @@ export function createSyncCore(options, { load, user }) {
   }
   /** @param {DocWatch} w */
   const dropDoc = w => { const off = w.off; w.off = null; off?.(); docWatches.delete(w); };
-  const stopWatches = () => {
-    for (const w of watches) { w.off?.(); w.off = null; }
+  // keepPublic: the public scopes' watches carry on (sign-out)
+  const stopWatches = (keepPublic = false) => {
+    for (const w of watches) if (!(keepPublic && isPublic(w.scope))) { w.off?.(); w.off = null; }
     for (const w of docWatches) { const off = w.off; w.off = null; off?.(); }
   };
   // (the ones on the app's own listener first: a plain watch of that collection then joins it, never the other way)
@@ -299,6 +310,7 @@ export function createSyncCore(options, { load, user }) {
   function watch(s, coll, cb, options) {
     const listen = options?.listen ?? null;
     if (listen !== null && typeof listen !== 'function') throw new Error('watch: listen is a function');
+    if (isPublic(s) && !publicColls.has(coll)) throw new Error('watch: ' + coll + ' is not a public collection');
     /** @type {Watch} */
     const w = { scope: s, coll, cb, view: viewOf(options), listen, off: null };
     start(w); watches.add(w);
@@ -395,6 +407,7 @@ export function createSyncCore(options, { load, user }) {
   const saving = new Set();
   /** @param {string} kind @param {string} s @param {Doc} record @param {Doc | null} [base] @param {{ ops?: any }} [opts] @returns {Promise<Doc>} */
   function save(kind, s, record, base = null, opts = undefined) {
+    if (isPublic(s)) return Promise.reject(new Error('save: ' + s + ' is read only'));
     const k = kind + ':' + s + ':' + record.id;
     const run = (chains.get(k) || Promise.resolve()).then(() => queue.save(kind, s, record, base, opts));
     const tail = run.catch(() => {}).finally(() => { if (chains.get(k) === tail) chains.delete(k); saving.delete(tail); });
@@ -410,7 +423,9 @@ export function createSyncCore(options, { load, user }) {
     return sent && !unsentOutside() && !saving.size;   // (a save still being stored is not sent)
   }
   /** @param {string} s */
-  async function open(s) { scope = s; await queue.activate(s); tell(); }
+  async function open(s) {
+    if (isPublic(s)) throw new Error('open: ' + s + ' is read only');
+    scope = s; await queue.activate(s); tell(); }
 
   // held conflicts (0.6.3): this device's own, one per record (the first held save: entries() is newest first, so
   // reversed it is oldest first; later saves on this device's own version wait behind it, and the newest is "mine")
@@ -481,10 +496,16 @@ export function createSyncCore(options, { load, user }) {
     persistGuard(nav).then(r => { persisted = !!(r.persisted || !r.supported); tell(); }, () => {});
     if (scopeOf) { try { await open(scopeOf(u)); } catch (e) { console.warn('open', /** @type {any} */ (e)?.message); } }
   }
-  // what a wipe leaves: no watches, no scope, nothing heard or tracked
-  const reset = () => { stopWatches(); watches.clear(); docWatches.clear(); scope = ''; heard = false; heardAt = 0; inStepAt = 0; told.clear(); deleting.clear(); tracked.clear(); };
+  // (1.3.0) the public watches stopped and their engines ended, so startWatches() listens to them again (sign-in)
+  const stopPublic = async () => {
+    const pub = [...watches].filter(w => isPublic(w.scope));
+    for (const w of pub) { w.off?.(); w.off = null; }
+    await Promise.all([...new Set(pub.map(w => w.scope))].map(s => hub.stopScope(s)));
+  };
+  // what a wipe leaves: no scope, nothing heard or tracked, no watches but the public ones (stopped: startWatches())
+  const reset = () => { stopWatches(); for (const w of watches) if (!isPublic(w.scope)) watches.delete(w); docWatches.clear(); scope = ''; heard = false; heardAt = 0; inStepAt = 0; told.clear(); deleting.clear(); tracked.clear(); };
   // signed out, data kept (the sync module): nothing is sent or listened to until the next sign-in
-  const close = () => { stopWatches(); scope = ''; heard = false; tell(); };
+  const close = () => { stopWatches(true); scope = ''; heard = false; tell(); };
   const parts = { hub, queue, stores, adapter, watchdog, registry, outbox };
   return {
     api: {
@@ -493,6 +514,6 @@ export function createSyncCore(options, { load, user }) {
       lastSeen, watchDoc, reconnect,
     },
     hub, queue, stores, adapter, outbox, registry, saving, statusNow, tell, signedIn, reset, close, addDoc, dropDoc,
-    startWatches, stopWatches, scope: () => scope, watching: () => watches.size + docWatches.size,
+    startWatches, stopWatches, stopPublic, scope: () => scope, watching: () => watches.size + docWatches.size,
   };
 }

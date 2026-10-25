@@ -666,6 +666,14 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       }
     };
   }
+  // an engine stopped and forgotten; a watch of its collection waits for that before it opens the store again
+  /** @param {string} k @param {ReturnType<typeof createCollectionSync>} e */
+  function end(k, e) {
+    engines.delete(k);
+    const done = e.stop().finally(() => { if (stopping.get(k) === done) stopping.delete(k); });
+    stopping.set(k, done);
+    return done;
+  }
   /** @param {string} scope */
   function idle(scope) {
     if ([...engines.keys()].some(k => k.startsWith(scope + '\n'))) return;
@@ -693,9 +701,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
         timers.set(k, setTimeout(() => {
           timers.delete(k);
           if (e.size || engines.get(k) !== e) return;
-          engines.delete(k); idle(scope);
-          const done = e.stop().finally(() => { if (stopping.get(k) === done) stopping.delete(k); });
-          stopping.set(k, done);
+          end(k, e); idle(scope);
         }, grace));
       };
     },
@@ -726,6 +732,14 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       for (const t of timers.values()) clearTimeout(t);
       const waits = [...engines.values(), ...feeds.values()].map(x => x.stop());
       engines.clear(); feeds.clear(); stores.clear(); timers.clear(); stopping.clear(); waiting.clear();
+      await Promise.all(waits).catch(() => {});
+    },
+    // (1.3.0) stop one scope's engines now, unwatched or not (a public scope, listened again under the account)
+    /** @param {string} scope @returns {Promise<void>} */
+    async stopScope(scope) {
+      const waits = [];
+      for (const [k, e] of [...engines]) if (k.startsWith(scope + '\n')) { clearTimeout(timers.get(k)); timers.delete(k); waits.push(end(k, e)); }
+      idle(scope);
       await Promise.all(waits).catch(() => {});
     },
     // the page woke (shown again, back online): every engine due a full read starts it. -> how many restarted
