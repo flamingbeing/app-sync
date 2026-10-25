@@ -8,9 +8,29 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 0.8.0: the lean public index, `src/internal.js`, the file manifest, the stored-format promise.
 - 0.8.1: outside writes and the sign-in/sign-out hooks.
 - 0.8.2: refused saves and job data that survive a reload, and the watch change info.
-- 0.8.x: `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
+- 0.8.3: `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
+
+## 0.8.3 (2026-10-25)
+
+One document, reconnect, wake and the claims watch. Additive; no stored format changes. Tests: `test/app.test.mjs`
+(+5), `test/firestore.emulator.mjs` (+1).
+
+- **`app.watchDoc(path, cb, onError)`**: one document (path as segments or `'a/b'`), `cb(doc | null, meta)` when its
+  copy changes. `null` ("gone") comes once, only when the server says the document is not there or the listener fails
+  (then `onError(e)` too; that watch is finished), never from the device copy alone. It feeds `facts()`, the status
+  and the watchdog, which restarts it like the lists; sign-out stops it. The Firestore adapter gains `listenDoc`
+  (an injected adapter needs one for `watchDoc`).
+- **`app.reconnect({ why })`**: restarts the connection (the SDK's network off and on, as the watchdog does) and
+  resolves `true` after it, then sends what waits. `false` offline, without the switch, or while a write outside the
+  queue is unsent (a restart may send it twice). One restart at a time: a call during one shares it.
+- **`wake: true`** (createApp, default off): `online`, `pageshow` and the page shown again nudge the watchdog
+  (`nudge('wake')`) and send what waits.
+- **Claims watch:** `claims: { watch: true, doc: user => path }` reads the role doc live (the default `entry`; nothing
+  is asked before its first answer) and checks the token again whenever it changes; stopped at sign-out.
+  `claims.onClaims({ asked, status })` after each check: whether new claims were asked, and the HTTP status (0: none).
+- `replanOnWake`'s timer no longer keeps a Node process alive (`unref`; no change in a browser).
 
 ## 0.8.2 (2026-10-25)
 

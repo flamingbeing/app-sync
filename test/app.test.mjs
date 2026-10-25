@@ -723,3 +723,150 @@ test('a refused save set aside in another registered outbox keeps this app\'s si
   assert.ok(await until(() => one.app.queue.refused()[0]?.state === 'archived'));
   assert.equal(await two.app.flush(300), false);
 });
+
+// ---- 0.8.3: watchDoc, reconnect, wake, the claims watch ----
+
+// one document's listener, as the adapter's listenDoc hands it: the test sends its snapshots
+function docFeed() {
+  const feed = { opened: [], live: 0 };
+  feed.listenDoc = (segments, onSnap, onError) => {
+    const l = { segments, onSnap, onError, on: true };
+    feed.opened.push(l); feed.live++;
+    return () => { if (l.on) { l.on = false; feed.live--; } };
+  };
+  const last = () => feed.opened.filter(l => l.on).at(-1);
+  feed.send = (doc, { fromCache = false, hasPendingWrites = false } = {}) => last()?.onSnap({ doc, fromCache, hasPendingWrites });
+  feed.fail = e => last()?.onError(e);
+  return feed;
+}
+
+test('watchDoc: "gone" only when the server says so or the listener fails, never from the device copy (0.8.3)', async () => {
+  const srv = fakeServer(), feed = docFeed();
+  const { app } = makeApp({ srv, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc } });
+  const seen = [], errors = [];
+  const off = app.watchDoc(['households', 'h1'], (d, m) => seen.push([d, m.fromCache]), e => errors.push(e.code));
+  await settle();
+  assert.deepEqual(feed.opened[0].segments, ['households', 'h1']);
+  feed.send(null, { fromCache: true });
+  assert.deepEqual(seen, [], 'nothing on the device: not gone');
+  assert.equal(app.facts().confirmed, false);
+  feed.send({ id: 'h1', name: 'Fake home' });
+  feed.send({ id: 'h1', name: 'Fake home' });
+  assert.deepEqual(seen, [[{ id: 'h1', name: 'Fake home' }, false]], 'handed once while the same');
+  assert.equal(app.facts().confirmed, true, 'the server answered: it feeds the facts');
+  feed.send(null);
+  feed.send(null);
+  assert.deepEqual(seen.slice(1), [[null, false]], 'gone once, when the server said so');
+  feed.send({ id: 'h1', name: 'Fake home 2' });
+  assert.equal(seen.length, 3, 'back again: handed again');
+  feed.fail(Object.assign(new Error('denied'), { code: 'permission-denied' }));
+  assert.deepEqual(seen.at(-1)[0], null, 'a listener that fails: gone');
+  assert.deepEqual(errors, ['permission-denied']);
+  off();
+  assert.equal(feed.live, 0);
+  // the path also as a string
+  app.watchDoc('households/h2', () => {});
+  await settle();
+  assert.deepEqual(feed.opened.at(-1).segments, ['households', 'h2']);
+});
+
+test('watchDoc: the watchdog restarts a doc watch stuck on the device copy; sign-out stops it (0.8.3)', async () => {
+  const srv = fakeServer(), feed = docFeed();
+  let now = Date.now();
+  const { app } = makeApp({ srv, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc }, options: { now: () => now } });
+  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+  const seen = [];
+  app.watchDoc(['households', 'h1'], d => seen.push(d));
+  await settle();
+  feed.send({ id: 'h1', name: 'Fake home' }, { fromCache: true });
+  now += 60000;
+  assert.equal(app.nudge(), true, 'a doc watch alone is watched: stuck on the device copy, listen again');
+  await settle(20);
+  assert.equal(feed.opened.length, 2, 'listening again');
+  assert.equal(feed.live, 1, 'the old listener stopped');
+  feed.send({ id: 'h1', name: 'Fake home' });
+  assert.equal(seen.length, 1, 'the same copy is not handed again after the restart');
+  const r = await app.signOut();
+  assert.equal(r.ok, true);
+  assert.equal(feed.live, 0, 'sign-out stops it');
+});
+
+test('reconnect: restarts the connection and resolves after it; never under an unsent outside write (0.8.3)', async () => {
+  const calls = [];
+  const F = { disableNetwork: async () => { calls.push('off'); }, enableNetwork: async () => { calls.push('on'); } };
+  const sdk = fakeAuthSdk();
+  const { app, nav } = makeApp({ sdkParts: sdk, options: { sdk: async () => ({ A: sdk.A, F, auth: sdk.auth, db: {} }) } });
+  assert.equal(await app.reconnect({ why: 'Sync now' }), true);
+  assert.deepEqual(calls, ['off', 'on'], 'resolved after the network was off and on again');
+  let done; app.track(new Promise(r => { done = r; }));
+  assert.equal(await app.reconnect(), false, 'an outside write may be sent twice by a restart: not now');
+  assert.equal(calls.length, 2);
+  done(); await settle();
+  nav.onLine = false;
+  assert.equal(await app.reconnect(), false, 'offline: nothing to restart');
+  nav.onLine = true;
+  const both = await Promise.all([app.reconnect(), app.reconnect()]);
+  assert.deepEqual(both, [true, true]);
+  assert.equal(calls.length, 4, 'one restart at a time: the second call waits for the first');
+  const { app: bare } = makeApp();
+  assert.equal(await bare.reconnect(), false, 'an SDK without the network switch: false');
+});
+
+// a browser window: its listeners, a page that can be hidden
+function fakeWin() {
+  const on = {}, doc = { visibilityState: 'visible', addEventListener: (t, f) => (on[t] ||= []).push(f), removeEventListener() {} };
+  return { on, document: doc, addEventListener: (t, f) => (on[t] ||= []).push(f), removeEventListener() {}, fire: t => (on[t] || []).forEach(f => f()) };
+}
+
+test('wake: true nudges the watchdog when the page comes back (online, pageshow, visible); off by default (0.8.3)', async () => {
+  const run = async wake => {
+    const srv = fakeServer(), win = fakeWin();
+    let now = Date.now();
+    const { app } = makeApp({ srv, options: { now: () => now, win, ...(wake ? { wake } : {}) } });
+    await app.onUser(() => {}); await app.signIn(); await app.open('s1');
+    app.watch('s1', 'items', () => {});
+    await settle(20);
+    now += 20000;   // nothing heard from the server for a while
+    win.fire('pageshow');
+    win.document.visibilityState = 'hidden'; now += 40000; win.fire('visibilitychange');
+    const hidden = app.relistens();
+    win.document.visibilityState = 'visible'; win.fire('visibilitychange');
+    return [hidden, app.relistens()];
+  };
+  assert.deepEqual(await run(false), [0, 0], 'off by default: the app wires its own');
+  const [hidden, visible] = await run(true);
+  assert.equal(hidden, 1, 'pageshow after a quiet spell: listen again; a hidden page is not a wake');
+  assert.equal(visible, 2, 'visible again after the throttle: listen again');
+});
+
+test('claims.watch: the role doc is listened to, the claims refreshed when it moves, onClaims told the status (0.8.3)', async () => {
+  const user = fakeUser({ claims: { v: 1, g: { _: 'viewer' } } });
+  const srv = fakeServer(), feed = docFeed(), posts = [], told = [];
+  let status = 200;
+  const fetch = async (url, o) => { posts.push(url); if (status === 200) user.claims = { v: 2, g: { _: 'admin' } }; return { ok: status === 200, status }; };
+  const { app } = makeApp({ srv, sdkParts: fakeAuthSdk({ user }), adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc },
+    options: { fetch, claims: { url: '/api/claims', watch: true, doc: u => ['members', u.uid], onClaims: x => told.push(x) } } });
+  await app.onUser(() => {}); await app.signIn();
+  await settle(10);
+  assert.deepEqual(feed.opened.map(l => l.segments), [['members', 'u1']], 'the signed-in account\'s role doc');
+  assert.deepEqual(posts, [], 'nothing asked before the role doc is heard');
+  feed.send(null, { fromCache: true });
+  await settle(10);
+  assert.deepEqual(posts, [], 'not on the device: not known yet');
+  feed.send({ id: 'u1', role: 'viewer', v: 1 });
+  await settle(10);
+  assert.deepEqual(posts, [], 'the token is up to date');
+  assert.deepEqual(told.map(x => [x.asked, x.status]), [[false, 0]]);
+  feed.send({ id: 'u1', role: 'admin', v: 2 });
+  assert.ok(await until(() => told.length === 2));
+  assert.deepEqual(posts, ['/api/claims'], 'v moved: new claims asked');
+  assert.equal(user.refreshed, 1, 'and the token refreshed');
+  assert.deepEqual(told.map(x => [x.asked, x.status]).at(-1), [true, 200]);
+  status = 503;
+  feed.send({ id: 'u1', role: 'member', v: 3 });
+  assert.ok(await until(() => told.length === 3));
+  assert.deepEqual(told.at(-1).status, 503, 'the HTTP status reaches the app (e.g. 503: not set up)');
+  const r = await app.signOut();
+  assert.equal(r.ok, true);
+  assert.equal(feed.live, 0, 'sign-out stops the role doc listener');
+});

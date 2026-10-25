@@ -24,4 +24,4 @@ export * from './src/internal.js';
 export const FILES = ['index.js', 'src/app.js', 'src/cache.js', 'src/conflict.js', 'src/firestore.js', 'src/forget.js', 'src/internal.js',
   'src/outbox.js', 'src/persist.js', 'src/registry.js', 'src/report.js', 'src/status.js', 'src/store.js', 'src/sync.js',
   'src/watchdog.js', 'src/writes.js'];
-export const VERSION = '0.8.2';
+export const VERSION = '0.8.3';
