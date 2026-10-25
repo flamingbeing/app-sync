@@ -123,3 +123,43 @@ test('sync module: a save counts as unsent in the app\'s status from the moment 
   await p; off();
   await t.app.stop();
 });
+
+test('sync module: saveMany (1.1.0) saves each record as save does, through the outbox, one result per record', async () => {
+  const t = await modulesApp();
+  const { app } = t;
+  await app.auth.signIn();
+  t.srv.set('items', { id: 'r1', text: 'Fake old', updatedAt: 1 });
+  let list = [];
+  app.sync.watch('sp-u1', 'items', l => { list = l; });
+  assert.ok(await until(() => list.length === 1));
+  const results = await app.sync.saveMany('item', 'sp-u1', [{ id: 'r1', text: 'Fake new' }, { id: 'r2', text: 'Fake added' }]);
+  assert.deepEqual(results.map(r => r.status), ['fulfilled', 'fulfilled']);
+  assert.equal(results[1].value.text, 'Fake added');
+  assert.ok(await app.sync.flush(2000));
+  assert.equal(t.srv.get('items', 'r1').text, 'Fake new', 'made on the copy this device shows: no conflict');
+  assert.equal(t.srv.get('items', 'r2').text, 'Fake added');
+  assert.equal(t.adapter.commits.length, 2, 'one job each, sent by the queue');
+  const other = await app.sync.saveMany('item', 'sp-other', [{ id: 'r3', text: 'Fake' }]);
+  assert.equal(other[0].status, 'rejected', 'a scope not open is refused, as save refuses it');
+  await app.stop();
+});
+
+test('sync module: watch(scope, coll, cb, { query, limit }) (1.1.0) narrows what the callback gets, never the device copy', async () => {
+  const t = await modulesApp();
+  const { app } = t;
+  await app.auth.signIn();
+  for (const [id, tag] of [['r1', 'a'], ['r2', 'b'], ['r3', 'a'], ['r4', 'a']]) t.srv.set('items', { id, tag, updatedAt: 1 });
+  let view = [], viewMeta = null, all = [];
+  app.sync.watch('sp-u1', 'items', (l, m) => { view = l; viewMeta = m; }, { query: { tag: 'a' }, limit: 2 });
+  app.sync.watch('sp-u1', 'items', l => { all = l; });
+  assert.ok(await until(() => all.length === 4 && view.length === 2));
+  assert.ok(view.every(d => d.tag === 'a'));
+  assert.deepEqual(viewMeta.changed.sort(), view.map(d => d.id).sort(), 'changed names only what is in view');
+  const leaving = view[0].id;
+  t.srv.set('items', { id: leaving, tag: 'b', updatedAt: 2 });
+  assert.ok(await until(() => !view.some(d => d.id === leaving)));
+  assert.equal(view.length, 2, 'the next one matching takes its place');
+  assert.ok(viewMeta.removed.includes(leaving), 'one leaving the view is removed from it');
+  assert.equal(all.length, 4, 'the other watch still has every record');
+  await app.stop();
+});
