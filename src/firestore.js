@@ -187,7 +187,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     sdk().then(({ db, F }) => {
       if (stopped) return;
       const col = colRef(db, F, scope, coll), fs = filters(F, scope, coll);
-      const from = server && field === serverField ? F.Timestamp.fromMillis(Math.max(0, since)) : at(since);
+      const from = server && field === serverField ? F.Timestamp.fromMillis(Math.max(0, /** @type {number} */ (since))) : at(/** @type {number} */ (since));
       const q = since === null ? (fs.length ? F.query(col, ...fs) : col) : F.query(col, ...fs, F.where(field, '>', from));
       stop = F.onSnapshot(q, { includeMetadataChanges: true }, /** @param {any} snap */ snap => {
         const server = !snap.metadata.fromCache, full = since === null && first && server;
@@ -273,7 +273,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     const { db, F } = await sdk();
     const ref = F.doc(colRef(db, F, scope, coll), id);
     /** @param {any} v */
-    const bare = v => { if (!v) return null; const { [mark]: _m, ...rest } = v; return canonical(coll, mark ? rest : v); };
+    const bare = v => { if (!v) return null; const { [/** @type {string} */ (mark)]: _m, ...rest } = v; return canonical(coll, mark ? rest : v); };
     return F.runTransaction(db, async (/** @type {any} */ tx) => {
       const snap = await tx.get(ref);
       const current = snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
@@ -294,7 +294,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   /** @param {string} scope @param {string} coll @param {Doc} record @param {Doc | null} base @param {{ counters?: string[] }} rule @param {string} key @param {any} ops @param {number} after @returns {Promise<Doc>} */
   async function commitHeld(scope, coll, record, base, { counters = [] }, key, ops, after) {
     const id = String(record.id), deleted = record._deleted === true;
-    const skip = [stampField, serverField, mark, edits].filter(Boolean);
+    const skip = /** @type {string[]} */ ([stampField, serverField, mark, edits].filter(Boolean));
     /** @param {any} v */
     const without = v => { if (!v) return null; const out = { ...v }; for (const f of skip) delete out[f]; return out; };
     /** @param {any} v */
@@ -343,7 +343,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   /** @param {string} scope @param {string} coll @param {Doc} record @param {Doc | null} base @param {MergeFn} merging @param {string} key @param {any} ops @param {number} after @returns {Promise<Doc>} */
   async function commitHeldMerged(scope, coll, record, base, merging, key, ops, after) {
     const id = String(record.id), deleted = record._deleted === true;
-    const skip = [stampField, serverField, mark, edits].filter(Boolean);
+    const skip = /** @type {string[]} */ ([stampField, serverField, mark, edits].filter(Boolean));
     /** @param {any} v */
     const without = v => { if (!v) return null; const out = { ...v }; for (const f of skip) delete out[f]; return out; };
     /** @param {any} v */

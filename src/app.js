@@ -136,7 +136,7 @@ export { userOf, claimsBehind } from './user.js';
  * @property {Record<string, any>} [queue] more options for createWriteQueue
  * @property {(user: AppUser) => string} [scope] the scope opened at sign-in
  * @property {ClaimsOptions | null} [claims]
- * @property {(err: { code: string, message: string }, entry: Job) => any} [onRefused] 'archive' sets a refused save aside
+ * @property {(err: { code: string, message?: string }, entry: Job) => any} [onRefused] 'archive' sets a refused save aside
  * @property {{ extra?: (() => Promise<any>) | null, keep?: string[] | (() => string[] | Promise<string[]>) }} [forget]
  * @property {import('./types.js').Report | null} [report] the nothing-lost report (createReport), opt-in
  * @property {(() => boolean)} [redirectFirst]
@@ -205,7 +205,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
     stopClaimsWatch();
     if (!claims?.watch || !claims.doc || !adapter.listenDoc) return false;
     const uid = u.uid;
-    roleWatch = addDoc(claims.doc(userOf(u)), (d, m) => { if (!m.error && (current?.uid || null) === uid) { roleDoc = d; void refreshClaims(); } });
+    roleWatch = addDoc(claims.doc(/** @type {AppUser} */ (userOf(u))), (d, m) => { if (!m.error && (current?.uid || null) === uid) { roleDoc = d; void refreshClaims(); } });
     return true;
   }
   async function refreshClaims() {
@@ -216,7 +216,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
       const { auth } = await load(), u = auth.currentUser;
       if (!u) return;
       if (claims.watch && !claims.entry && roleDoc === undefined && roleWatch) return;   // (the role doc's first answer asks)
-      const entry = claims.entry ? await claims.entry(userOf(u)) : claims.watch ? roleDoc ?? null : null;
+      const entry = claims.entry ? await claims.entry(/** @type {AppUser} */ (userOf(u))) : claims.watch ? roleDoc ?? null : null;
       const { claims: tokenClaims = {} } = await u.getIdTokenResult();
       const key = u.uid + ':' + (entry ? entry.v ?? 0 : '-');
       if ((claims.behind || claimsBehind)(entry, tokenClaims) && claimsAsked !== key) {

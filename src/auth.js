@@ -144,7 +144,7 @@ export function auth(options = {}) {
     const { A, auth } = await load();
     const provider = new A.GoogleAuthProvider();
     provider.setCustomParameters?.({ prompt: 'select_account', ...(hint ? { login_hint: hint } : {}) });
-    blocked = null;
+    blocked = /** @type {{ from: Owner, to: AppUser, reason: 'unsent' | 'wipe' } | null} */ (null);
     if (!popupOnly && (redirect ?? redirectFirst())) { await A.signInWithRedirect(auth, provider); return { ok: false, reason: 'redirect' }; }
     try { await A.signInWithPopup(auth, provider); }
     catch (e) {

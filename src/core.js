@@ -16,6 +16,7 @@ import { createFirestoreBackend } from './firestore.js';
 
 /**
  * @typedef {import('./types.js').Doc} Doc
+ * @typedef {import('./types.js').Job} Job
  * @typedef {import('./types.js').AppSdk} AppSdk
  * @typedef {import('./types.js').SyncStatus} SyncStatus
  * @typedef {import('./types.js').ConflictChoice} ConflictChoice
@@ -143,7 +144,7 @@ export function createSyncCore(options, { load, user }) {
   const watches = new Set();
   const heardHub = { watch: (/** @type {string} */ s, /** @type {string} */ coll, /** @type {(list: Doc[], meta: any) => void} */ fn) => hub.watch(s, coll, (list, m) => { if (m) onSnap(m); fn(list, m); }) };
   /** @param {Watch} w */
-  const start = w => { w.off = watchSaved({ hub: heardHub, queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll) }, (list, m) => w.cb(list.map(strip), m || {})); };
+  const start = w => { w.off = watchSaved({ hub: heardHub, queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll) }, (list, m) => w.cb(/** @type {Doc[]} */ (list.map(strip)), m || {})); };
   // (0.8.3) one document: handed when its copy changes, null ("gone") once when the server says it is not there or the
   // listener fails (a failed one is finished); a device-copy answer that it is not there is never "gone"
   /** @typedef {{ segments: string[], cb: (d: Doc | null, meta: any) => void, onError: ((e: any) => void) | null, last: string, failed: boolean, off: (() => void) | null }} DocWatch */
@@ -158,7 +159,7 @@ export function createSyncCore(options, { load, user }) {
       const meta = { fromCache: !!m.fromCache, hasPendingWrites: !!m.hasPendingWrites };
       if (!m.doc) { if (!m.fromCache && w.last !== 'gone') { w.last = 'gone'; w.cb(null, meta); } return; }
       const d = strip(m.doc), j = JSON.stringify(d);
-      if (j !== w.last) { w.last = j; w.cb(d, meta); }
+      if (j !== w.last) { w.last = j; w.cb(/** @type {Doc} */ (d), meta); }
     }, (/** @type {any} */ e) => {
       if (!w.off) return;
       const off = w.off; w.off = null; w.failed = true; off();
@@ -308,7 +309,7 @@ export function createSyncCore(options, { load, user }) {
     // (0.7.1: also the saves queued behind it before it was held, so the answer carries them; a merge collection's
     // ops of the whole chain, in order, so the merge function replays every change of this device's)
     const chain = all.filter(x => x.kind === first.kind && x.record.id === first.record.id && (x.state === 'conflict' || x.state === 'pending' && x.at > first.at));
-    return { first, held: { record: chain.at(-1).record, base: first.base ?? null, remote: first.remote ?? null, at: chain.at(-1).at, ...(chain.every(x => x.ops) ? { ops: chain.flatMap(x => x.ops) } : {}) } };
+    return { first, held: { record: /** @type {Job} */ (chain.at(-1)).record, base: first.base ?? null, remote: first.remote ?? null, at: /** @type {Job} */ (chain.at(-1)).at, ...(chain.every(x => x.ops) ? { ops: chain.flatMap(x => x.ops) } : {}) } };
   };
   // the merge function of a merge collection named in held (0.7.1: its clashes are found and answered through it)
   /** @param {string} kind */

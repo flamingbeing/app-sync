@@ -40,7 +40,7 @@ export function createOutboxRegistry({ storage = globalThis.localStorage, open =
   /** @type {Map<string, import('./types.js').Outbox>} */
   const opened = new Map();
   /** @param {OutboxId} x */
-  const outbox = x => { const id = x.name + '\n' + x.realm; if (!opened.has(id)) opened.set(id, open(x.name, x.realm)); return opened.get(id); };
+  const outbox = x => { const id = x.name + '\n' + x.realm; if (!opened.has(id)) opened.set(id, open(x.name, x.realm)); return /** @type {import('./types.js').Outbox} */ (opened.get(id)); };
   /** @param {OutboxId | null | undefined} except */
   const others = except => read().filter(x => !(except && except.name && same(x, except)));
   /** @param {Promise<any>} p */

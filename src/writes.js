@@ -79,7 +79,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   const same = (a, b) => signature(a) === signature(b);
   const recover = labels.recover || 'Recover';
   /** @param {Job} job */
-  const failure = job => new Error(new RegExp('in ' + recover + '\\b').test(job.error) ? job.error : job.error + ' — a copy is kept in ' + recover);
+  const failure = job => new Error(new RegExp('in ' + recover + '\\b').test(/** @type {string} */ (job.error)) ? job.error : job.error + ' — a copy is kept in ' + recover);
   // a backend call that never settles counts as a dropped connection after sendTimeout (it may still land: sending
   // the same content again is harmless, checkWrite sees it is already there)
   /** @param {Parameters<import('./types.js').QueueBackend>} args */
@@ -156,7 +156,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
         if (!current(email, gen)) return;
         if (moved) { notify(); continue; }
         try {
-          const result = await send(email, job.kind, copy(job.record), copy(job.base), { key: job.key, ...(job.ops ? { ops: copy(job.ops) } : {}) });
+          const result = await send(/** @type {string} */ (email), job.kind, copy(job.record), copy(job.base), { key: job.key, ...(job.ops ? { ops: copy(job.ops) } : {}) });
           if (!current(email, gen)) return;
           job.result = copy(result); job.state = 'synced'; job.error = ''; delete job.code;
         } catch (error) {
@@ -262,7 +262,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     for (const x of over ? chain : stale && stale !== job ? [stale] : []) { x.state = 'archived'; if (over) x.kept = true; await persist(x); }
     if (!jobs.includes(job)) jobs.push(job);
     unshow(); notify();
-    if (over && !same(previous.record, record)) notice('Your version from this device is kept in ' + recover);
+    if (over && !same(/** @type {Job} */ (previous).record, record)) notice('Your version from this device is kept in ' + recover);
     if (held) throw failure(job);
     await Promise.race([drain(keyOf(job)), delay(180)]);
     if (!current(email, gen)) throw new Error('Account changed; the editor has not been saved');
@@ -283,7 +283,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     const chain = chainOf(id), conflict = chain.find(x => x.state === 'conflict');
     const stuck = !conflict && chain.length > 1 && chain[0].state === 'failed';
     const saved = await save(kind, email, record, conflict ? conflict.remote ?? null : stuck ? chain[0].base ?? null : base);
-    if (conflict || stuck) await archive(chain.at(-1).key);
+    if (conflict || stuck) await archive(/** @type {Job} */ (chain.at(-1)).key);
     return saved;
   }
   /** @param {string} kind @param {string} email @param {Doc[]} list @returns {Doc[]} */
@@ -300,7 +300,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
         // the same content saved again elsewhere, as by a restore, has a newer stamp), or its delete took it off.
         const cur = result.get(id), sig = signature(cur || null);
         /** @param {Job} x */
-        const started = x => signature(x.base) === sig && (x.base?.updatedAt ?? null) === (cur.updatedAt ?? null);
+        const started = x => signature(x.base) === sig && (x.base?.updatedAt ?? null) === (/** @type {Doc} */ (cur).updatedAt ?? null);
         if (cur ? group.some(x => signature(x.record) === sig || started(x)) : group.some(x => x.record._deleted)) {
           const { remote } = conflicts[0]; if (remote) result.set(id, remote); else result.delete(id);
         } else if (cur) for (const x of conflicts) if (signature(x.remote) !== sig) x.remote = copy(cur);   // the conflict's other copy

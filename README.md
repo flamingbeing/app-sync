@@ -31,10 +31,10 @@ in 1.0.0-rc.1). 0.9.0 has the runner (`app.js`) and `auth` (`auth.js`); 0.9.1 ad
 (`update.js`).
 
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.9.1/app.js';
-import { auth } from 'https://core.anawj.com/sync/0.9.1/auth.js';
-import { sync } from 'https://core.anawj.com/sync/0.9.1/sync.js';
-import { update } from 'https://core.anawj.com/sync/0.9.1/update.js';
+import { createApp } from 'https://core.anawj.com/sync/0.9.2/app.js';
+import { auth } from 'https://core.anawj.com/sync/0.9.2/auth.js';
+import { sync } from 'https://core.anawj.com/sync/0.9.2/sync.js';
+import { update } from 'https://core.anawj.com/sync/0.9.2/update.js';
 import * as register from 'https://core.anawj.com/update/0.2.0/register.js';
 
 const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [
@@ -63,6 +63,41 @@ watchDoc, save, flush, conflicts, status and the rest) and the same stored forma
 `scope(user)` opens the account's scope at each sign-in. `update` registers the service worker with register.js
 (passed in) and holds the take-over reload while any module has unsent saves. Details: the comments at the top of
 `src/runner.js`, `src/auth.js`, `src/module-sync.js` and `src/module-update.js`.
+
+### Entries, the import map, types and Vite (0.9.2)
+
+Each version serves four entries at `/sync/<x.y.z>/`: `app.js` (the runner), `auth.js`, `sync.js`, `update.js`,
+plus `files.json` and the types under `types/` (`types/app.d.ts` and the rest, generated from the JSDoc). A page names
+them once, in one import map; the version appears only there:
+
+```html
+<script type="importmap">
+{ "imports": {
+  "@core/app": "https://core.anawj.com/sync/0.9.2/app.js",
+  "@core/auth": "https://core.anawj.com/sync/0.9.2/auth.js",
+  "@core/sync": "https://core.anawj.com/sync/0.9.2/sync.js",
+  "@core/update": "https://core.anawj.com/sync/0.9.2/update.js"
+} }
+</script>
+```
+
+The import-map names `@core/app`, `@core/auth`, `@core/sync` and `@core/update` are frozen. Reserved, nothing built
+yet: `@core/files`, `@core/ui`, `@core/theme`, `@core/settings`, `@core/sw`, `@core/devkit` ([SHAPES.md](SHAPES.md)).
+**The UI reads only the modules' public APIs; the engine never knows the UI.**
+
+- **Modularity rules** (`node tools/modularity.mjs`, in Checks): importing an entry has no side effects (the SDK and
+  storage load inside `start`), no top-level await, no entry imports another module's entry (shared code under
+  `src/` is fine), only literal `new URL(x, import.meta.url)` and `import(x)`, and `.js` on every import.
+- **Types:** `strict` JSDoc, TS-erasable style (`@typedef`, `@import`; no enums or namespaces), checked by
+  `tsc -p .`. `npm run types` writes `types/`; Checks fail when it is stale. In a TypeScript or `checkJs` app, point
+  the names at the version's types: `"paths": { "@core/*": ["<app-sync>/types/*.d.ts"] }`.
+- **Package:** `package.json` `exports` has `.`, `./app`, `./auth`, `./sync`, `./update`, each with its `types`, so
+  `npm install github:flamingbeing/app-sync#v0.9.2` works (no build step, nothing to run on install).
+- **Vite** is never needed to run app-sync, and a page built with `vite build` works (Checks, `test/vite/`): (a) with
+  `@core/*` and `https://` imports left external (the import map loads them), and (b) with `@core/*` bundled, from
+  source or from the installed package, where a page that uses only `auth` and `sync` carries no `update` code. The
+  bare `@core/*` names do not resolve in a bundler by themselves; one alias maps them to the package's exports:
+  `resolve: { alias: [{ find: /^@core\/(app|auth|sync|update)$/, replacement: 'app-sync/$1' }] }`.
 
 ## Modules
 

@@ -67,8 +67,8 @@ export function firestoreCache(F, { app = null, settings = {}, report = null, st
   const say = code => { try { report?.error?.(code); } catch { /* the report never breaks the app */ } };
   const saved = store.get(key);
   let from = Math.max(0, CACHE_MODES.indexOf(/** @type {CacheMode} */ (saved)));
-  /** @type {{ db: any, cache: any, mode: CacheMode } | null} */
-  let out = null;
+  /** @type {{ db: any, cache: any, mode: CacheMode }} */
+  let out = /** @type {any} */ (null);
   for (let i = from; i < CACHE_MODES.length; i++) {
     const mode = CACHE_MODES[i];
     try {

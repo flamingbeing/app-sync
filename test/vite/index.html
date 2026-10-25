@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>app-sync Vite fixture</title>
+<!-- one import map per page; the version folder is the only place a version appears -->
+<script type="importmap">
+{ "imports": {
+  "@core/app": "https://core.anawj.com/sync/0.9.2/app.js",
+  "@core/auth": "https://core.anawj.com/sync/0.9.2/auth.js",
+  "@core/sync": "https://core.anawj.com/sync/0.9.2/sync.js",
+  "@core/update": "https://core.anawj.com/sync/0.9.2/update.js"
+} }
+</script>
+</head>
+<body>
+<p id="out"></p>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
