@@ -277,3 +277,27 @@ test('a refused save another tab retried is cleared here too (1.2.2)', async () 
   a.kick();
   assert.equal(await a.flush(), true, 'nothing waits here any more');
 });
+
+test('stopAll waits for an engine that was already stopping (its late writes must not reopen a wiped store)', async () => {
+  const { openStore, wipeStores } = createStores({ prefix: 'fix-b3a:', colls: ['items'] });
+  const srv = fakeServer();
+  srv.set('items', { id: 'a', updatedAt: T0 }); srv.set('items', { id: 'b', updatedAt: T0 });
+  let hold = null, opened = 0;
+  const gated = async scope => {
+    opened++;
+    const st = await openStore(scope);
+    return { ...st, write: async (coll, op) => { if (hold) await hold; return st.write(coll, op); } };
+  };
+  const hub = createSyncHub({ openStore: gated, listen: srv.listen, fetchOne: srv.fetchOne, now: () => T0 + H, grace: 0, bin: null });
+  let release; hold = new Promise(r => { release = r; });
+  const off = hub.watch(S, 'items', () => {});
+  await settle();
+  off(); await settle();   // grace 0: the engine is stopping, its writes are held
+  const all = hub.stopAll();
+  await settle();
+  let ended = false; all.then(() => { ended = true; });
+  await settle(20);
+  assert.equal(ended, false, 'stopAll resolves only when the stopping engine\'s writes are done');
+  release(); await all;
+  await wipeStores();
+});

@@ -14,6 +14,16 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.2 (2026-10-26)
+
+Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is one line
+in `src/sync.js` (the hub).
+
+- **Sign-out waits for an engine that is already stopping**: `stopAll()` stopped the running engines but forgot those
+  whose grace period had ended and whose last local writes were still going, so it resolved and the stores were wiped
+  while those writes were pending; they then reopened the wiped store and left the signed-out copy on the device.
+  It now waits for them too.
+
 ## 1.3.1 (2026-10-26)
 
 Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is inside
