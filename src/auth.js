@@ -211,7 +211,7 @@ export function auth(options = {}) {
     const anon = x.auth.currentUser?.isAnonymous && how.name !== 'anonymous' ? x.auth.currentUser : null;
     const { credential = null, token = '', reason = '' } = await how.signIn(x, request, anon);
     if (reason) return reason;
-    if (ticket.overtaken) return 'refused';
+    if (ticket.overtaken && (token || credential)) return 'refused';   // (a self-signing method is signed out below)
     if (token) await x.A.signInWithCustomToken(x.auth, token);
     else if (credential) await (anon ? linkOrSignIn(x, anon, credential) : x.A.signInWithCredential(x.auth, credential));
     if (anon && x.auth.currentUser?.uid === anon.uid) linked(x.auth.currentUser);

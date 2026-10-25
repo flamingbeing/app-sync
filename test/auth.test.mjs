@@ -498,3 +498,32 @@ test('stop() while the switch\'s wipes run: the new account is not made the owne
   await settle();
   assert.match([...storage.m.values()].join(), /"uid":"u1"/);
 });
+
+test('a sign-out during a self-signing method wins too: the account it signed in is signed straight out, no switch', async () => {
+  const t = setup();
+  await t.app.ready;
+  await t.app.auth.signIn();
+  t.app.data.save({ id: 'kept' });
+  t.app.data.sent();
+  await t.app.auth.signOut();
+  await t.app.stop();
+  let land;
+  // signs in by itself (a popup's own sign-in): Auth has the account when its promise ends, and tells of it later
+  const self = { name: 'self', signIn: x => new Promise(r => { land = () => {
+    const u = fakeUser({ uid: 'u2', email: 'other@example.test' });
+    x.auth.currentUser = u;
+    setTimeout(() => { for (const cb of [...x.auth.cbs]) cb(x.auth.currentUser); }, 0);
+    r({});
+  }; }) };
+  const t2 = setup({ storage: t.storage, sdk: t.sdk, device: t.device, log: t.log, options: { methods: [self] } });
+  await t2.app.ready;
+  const pending = t2.app.auth.signIn({ method: 'self' });
+  await settle();
+  await t2.app.auth.signOut();
+  land();
+  assert.deepEqual(await pending, { ok: false, reason: 'refused' });
+  await settle();
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.deepEqual(t.device.rows, [{ id: 'kept' }]);
+  assert.ok(!t.log.some(l => l.startsWith('switch') || l === 'signin u2'), t.log.join());
+});

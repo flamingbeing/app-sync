@@ -112,6 +112,7 @@ export function createApp({ config, modules } = /** @type {any} */ ({})) {
     const failed = [];
     for (const m of order) {
       for (const fn of [...handlers.get(m.name)?.get(event) || []]) {
+        if (stopped) return failed;   // (a handler stopped the app: nothing more runs after stop)
         try { await fn(d); } catch (e) { if (!failed.includes(m.name)) failed.push(m.name); console.warn(`${m.name}: ${event}`, e?.message || e); }
       }
     }
