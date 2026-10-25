@@ -31,9 +31,9 @@
 //   login_hint; 'redirect': the page is leaving to sign in; 'unsent' | 'wipe': refused switch (from: the account whose
 //   data stays); 'sent': the email link is on its way; 'refused': the passcode was not taken, or signOut() or forget()
 //   came while the sign-in was out (1.3.6: it signs nobody in; an account that lands anyway is signed out again).
-//   Signed in anonymously, another method links its account to the anonymous one (1.3.0): the uid stays, so does the device's data, no switch;
-//   the owner and onUser get the account's email. An account that exists already signs in instead (a switch, guarded
-//   as any). A passcode's token can't link: it signs in (a switch).
+//   Signed in anonymously, another method links its account to the anonymous one (1.3.0): the uid stays, so does the
+//   device's data, no switch; the owner and onUser get the account's email. An account that exists already signs in
+//   instead (a switch, guarded as any). A passcode's token can't link: it signs in (a switch).
 //   signOut() -> { ok, reason }: Auth signs out; signout is emitted; nothing is wiped, nothing refused.
 //   forget({ force, before }) -> { ok, reason: '' | 'unsent', failed }: wipe this device on purpose: refused while
 //   anything is unsent unless force; then before() (the app's step; a throw is named in failed; a save made during it
