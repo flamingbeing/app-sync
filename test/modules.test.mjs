@@ -24,13 +24,13 @@ function switchSdk() {
   };
   return t;
 }
-async function modulesApp({ storage = memStorage(), sdk = switchSdk(), srv = fakeServer(), nav = fakeNav(), name = 'modtest' + (++n) + '-' + Date.now(), outbox = null } = {}) {
-  const adapter = fakeAdapter(srv), reloads = [];
+async function modulesApp({ storage = memStorage(), sdk = switchSdk(), srv = fakeServer(), nav = fakeNav(), name = 'modtest' + (++n) + '-' + Date.now(), outbox = null, adapter = fakeAdapter(srv), F = {}, db = {}, more = {} } = {}) {
+  const reloads = [];
   const app = await createApp({
-    config: { name, storage, sdk: async () => ({ A: sdk.A, F: {}, auth: sdk.auth, db: {} }) },
+    config: { name, storage, sdk: async () => ({ A: sdk.A, F, auth: sdk.auth, db }) },
     modules: [auth({ nav, win: null }), sync({ colls: ['items'], path: (s, c) => ['spaces', s, c], kinds: { item: 'items' },
       scope: u => 'sp-' + u.uid, adapter, nav, win: null, outbox: outbox || memOutbox(name + '-outbox'), watchEvery: 0,
-      reload: () => reloads.push('reload') })],
+      reload: () => reloads.push('reload'), ...more })],
   }).ready;
   return { app, sdk, srv, adapter, nav, storage, reloads, name };
 }
@@ -160,5 +160,119 @@ test('sync module: watch(scope, coll, cb, { query, limit }) (1.1.0) narrows what
   assert.equal(view.length, 2, 'the next one matching takes its place');
   assert.ok(viewMeta.removed.includes(leaving), 'one leaving the view is removed from it');
   assert.equal(all.length, 4, 'the other watch still has every record');
+  await app.stop();
+});
+
+test('sync module: facts().inStepAt (1.2.0) is the last time this device was in step: heard, nothing waiting', async () => {
+  const t = await modulesApp();
+  const { app } = t;
+  assert.equal(app.sync.facts().inStepAt, 0, 'never in step before the server answered');
+  await app.auth.signIn();
+  let list = [];
+  app.sync.watch('sp-u1', 'items', l => { list = l; });
+  t.srv.set('items', { id: 'r1', text: 'Fake', updatedAt: 1 });
+  assert.ok(await until(() => list.length === 1 && app.sync.facts().confirmed));
+  const before = app.sync.facts().inStepAt;
+  assert.ok(before > 0 && before <= Date.now(), 'in step now');
+  t.nav.onLine = false;
+  await app.sync.save('item', 'sp-u1', { id: 'r2', text: 'Fake offline' });
+  const kept = app.sync.facts().inStepAt;
+  assert.ok(kept >= before);
+  await settle(20);
+  assert.equal(app.sync.facts().inStepAt, kept, 'a save waiting: not in step, the time stays');
+  t.nav.onLine = true;
+  assert.ok(await app.sync.flush(2000));
+  assert.ok(app.sync.facts().inStepAt > kept, 'in step again once the save is sent');
+  await app.stop();
+});
+
+test('sync module: reopen (1.2.0) swaps the SDK instance after a wipe cleared its cache, without a reload', async () => {
+  const net = [], F = { async disableNetwork(db) { net.push(db.name); }, async enableNetwork() {} };
+  const opened = [];
+  const reopen = async ({ memory }) => { opened.push(memory); return { name: 'reopened' }; };
+  const t = await modulesApp({ F, db: { name: 'first' }, more: { reopen } });
+  const { app } = t;
+  await app.auth.signIn();
+  await app.auth.signOut();
+  t.sdk.next = fakeUser({ uid: 'u2', email: 'other.fake@example.test' });
+  assert.equal((await app.auth.signIn()).ok, true);
+  assert.equal(t.adapter.cleared, 1);
+  assert.deepEqual(opened, [false], 'the cache was cleared: a persistent one again');
+  assert.deepEqual(t.reloads, [], 'no reload');
+  assert.equal(await app.sync.reconnect(), true);
+  assert.deepEqual(net, ['reopened'], 'the sync module uses the new instance');
+  await app.sync.save('item', 'sp-u2', { id: 'r1', text: 'Fake after' });
+  assert.ok(await app.sync.flush(2000), 'and sends on it');
+  await app.stop();
+});
+
+test('sync module: reopen falls back to a memory-only cache when the old cache could not be cleared or reopened', async () => {
+  const srv = fakeServer(), adapter = { ...fakeAdapter(srv), async clearCache() { throw Object.assign(new Error('another tab'), { code: 'deadline-exceeded' }); } };
+  const opened = [];
+  const t = await modulesApp({ srv, adapter, more: { reopen: async ({ memory }) => { opened.push(memory); return {}; } } });
+  await t.app.auth.signIn();
+  await t.app.auth.forget();
+  assert.ok(await until(() => opened.length === 1));
+  assert.deepEqual(opened, [true], 'not cleared (another tab holds it): memory only, never the old account\'s cache');
+  assert.deepEqual(t.reloads, []);
+  await t.app.stop();
+  const tries = [];
+  const u = await modulesApp({ more: { reopen: async ({ memory }) => { tries.push(memory); if (!memory) throw new Error('fake: cache in use'); return {}; } } });
+  await u.app.auth.signIn();
+  await u.app.auth.forget();
+  assert.ok(await until(() => tries.length === 2));
+  assert.deepEqual(tries, [false, true], 'a persistent cache that will not open: memory only');
+  assert.deepEqual(u.reloads, []);
+  const w = await modulesApp({ more: { reopen: async () => { throw new Error('fake: no instance'); } } });
+  await w.app.auth.signIn();
+  await w.app.auth.forget();
+  assert.ok(await until(() => w.reloads.length === 1), 'no new instance at all: the page reloads, as without reopen');
+  await w.app.stop();
+});
+
+test('sync module: watch(scope, coll, cb, { listen }) (1.2.0) runs on the app\'s own listener, keeping the device copy, the status and the watchdog', async () => {
+  const srv = fakeServer(), base = fakeAdapter(srv), heard = [];
+  const adapter = { ...base, listen: (s, c, plan, onSnap, onError) => { heard.push('engine:' + c); return srv.listen(s, c, plan, onSnap, onError); } };
+  const t = await modulesApp({ srv, adapter });
+  const { app } = t;
+  await app.auth.signIn();
+  srv.set('items', { id: 'r1', text: 'Fake', updatedAt: 1 });
+  const mine = (s, c, plan, onSnap, onError) => { heard.push('app:' + c); return srv.listen(s, c, plan, onSnap, onError); };
+  let list = [];
+  app.sync.watch('sp-u1', 'items', l => { list = l; }, { listen: mine });
+  assert.ok(await until(() => list.length === 1));
+  assert.deepEqual(heard, ['app:items'], 'the app\'s listener, not the adapter\'s');
+  assert.equal(app.sync.facts().confirmed, true, 'what it hears feeds facts and the status');
+  let other = [];
+  app.sync.watch('sp-u1', 'items', l => { other = l; });
+  assert.ok(await until(() => other.length === 1), 'a plain watch of the same collection shares it');
+  assert.throws(() => app.sync.watch('sp-u1', 'items', () => {}, { listen: (...a) => srv.listen(...a) }), /already listened to/);
+  const st = await app.sync.parts.stores.openStore('sp-u1');
+  assert.equal((await st.load('items')).docs.length, 1, 'kept in the device copy');
+  await app.auth.signOut();
+  await app.sync.parts.hub.stopAll();
+  heard.length = 0;
+  await app.auth.signIn();
+  assert.ok(await until(() => heard.length > 0));
+  assert.deepEqual(heard, ['app:items'], 'listening again (sign-in, the watchdog) uses the app\'s listener again');
+  await app.stop();
+});
+
+test('sync module: kinds[kind] = { coll, path } (1.2.0) saves that kind to its own path, through the same queue', async () => {
+  const srv = fakeServer(), base = fakeAdapter(srv), sent = [];
+  const adapter = { ...base, async commit(scope, coll, record, b, extra) { sent.push({ scope, coll, id: record.id, path: extra?.path }); return base.commit(scope, coll, record, b); } };
+  const nav = fakeNav({ online: false });
+  const t = await modulesApp({ srv, adapter, nav, more: { kinds: { item: 'items', answer: { coll: 'answers', path: (s, c, r) => ['links', r.token, c] } } } });
+  const { app } = t;
+  await app.auth.signIn();
+  await app.sync.save('answer', 'sp-u1', { id: 'a1', token: 'fake-token', text: 'Fake answer' });
+  assert.equal(app.sync.queue.pending(), 1, 'waits in the outbox like any save');
+  nav.onLine = true;
+  assert.ok(await app.sync.flush(2000));
+  assert.deepEqual(sent, [{ scope: 'sp-u1', coll: 'answers', id: 'a1', path: ['links', 'fake-token', 'answers'] }]);
+  await app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake' });
+  assert.ok(await app.sync.flush(2000));
+  assert.equal(sent[1].path, undefined, 'a plain kind keeps the scope\'s path');
+  assert.throws(() => sync({ colls: ['items'], path: () => [], kinds: { bad: { coll: 'x' } } }), /path/);
   await app.stop();
 });
