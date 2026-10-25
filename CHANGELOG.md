@@ -20,8 +20,9 @@ Fix, no API, module contract or stored-format change; modular: yes, shaken: no n
 lines in `src/writes.js` (the outbox).
 
 - **A forget waits for saves still being stored**: a sign-out wipe could run while a save's first write to the device
-  was still out; the row then landed after the wipe. `forget()` now waits for every write already started before it
-  clears the store. An account switch is unchanged: its unsent saves stay.
+  was still out; the row then landed after the wipe. `forget()` now waits (4 s at most, a write that never ends does not
+  hold the sign-out) for every write already started before it clears the store, and a save step that comes after the
+  forget stores nothing. An account switch is unchanged: its unsent saves stay.
 
 ## 1.3.4 (2026-10-26)
 
