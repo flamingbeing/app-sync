@@ -61,7 +61,7 @@ test('stop during start waits for it, then stops what started; a failing stop do
   await assert.rejects(app.ready, /stopped/);
 });
 
-test('ctx is frozen and small: name, module, config (frozen), one shared lazy sdk(), user, on, emit, storage, status, report', async () => {
+test('ctx is frozen and small: name, module, config (frozen), one shared lazy sdk(), user, on, emit, storage, status, report, ready', async () => {
   let loads = 0, fails = 1;
   const sdk = async () => { loads++; if (fails-- > 0) throw new Error('offline'); return { fake: true }; };
   const facts = [];
@@ -69,7 +69,7 @@ test('ctx is frozen and small: name, module, config (frozen), one shared lazy sd
   await app.ready;
   const { ctx } = app.a;
   assert.ok(Object.isFrozen(ctx) && Object.isFrozen(ctx.config));
-  assert.deepEqual(Object.keys(ctx).sort(), ['config', 'emit', 'module', 'name', 'on', 'report', 'sdk', 'status', 'storage', 'user']);
+  assert.deepEqual(Object.keys(ctx).sort(), ['config', 'emit', 'module', 'name', 'on', 'ready', 'report', 'sdk', 'status', 'storage', 'user']);
   assert.equal(ctx.name, 'fake-app'); assert.equal(ctx.module, 'a');
   assert.equal(loads, 0, 'nothing loads before a module asks');
   await assert.rejects(ctx.sdk(), /offline/);
@@ -77,6 +77,21 @@ test('ctx is frozen and small: name, module, config (frozen), one shared lazy sd
   assert.equal(x, y); assert.equal(loads, 2, 'a failed load is tried again; then one load for every module');
   ctx.report({ what: 'thing' });
   assert.deepEqual(facts, [{ module: 'a', what: 'thing' }]);
+});
+
+test('ctx.ready: resolves once every module has started (a slow one too), rejects when a start fails', async () => {
+  const log = [];
+  const slow = { name: 'slow', needs: [], async start() { await new Promise(r => setTimeout(r, 10)); log.push('slow started'); return {}; } };
+  let ctxA;
+  const a = { name: 'a', needs: [], start(ctx) { ctxA = ctx; ctx.ready.then(() => log.push('a: ready')); return {}; } };
+  const app = createApp({ config: config(), modules: [a, slow] });
+  await app.ready;
+  await ctxA.ready;
+  assert.deepEqual(log, ['slow started', 'a: ready']);
+  let ctxB;
+  const bad = createApp({ config: config(), modules: [{ name: 'b', needs: [], start(ctx) { ctxB = ctx; return {}; } }, { name: 'c', needs: [], start() { throw new Error('no'); } }] });
+  await assert.rejects(bad.ready, /no/);
+  await assert.rejects(ctxB.ready, /no/);
 });
 
 test('storage(ns) is namespaced <app>:<module>[:ns], JSON values, kept across apps on the same storage', async () => {

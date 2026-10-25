@@ -7,7 +7,8 @@
 //   needs: a module never imports another module's entry. A start that throws stops the ones already started.
 // ctx (frozen, one per module): name (config.name), module (its own name), config (frozen), sdk() (the app's Firebase
 //   SDK, config.sdk, loaded once for every module; a failed load is tried again next time), user(), on(event, fn) ->
-//   off, emit(event, data) -> the names of the modules whose handler threw, storage(ns), status, report(fact).
+//   off, emit(event, data) -> the names of the modules whose handler threw, storage(ns), status, report(fact), ready
+//   (resolves once every module has started, rejects if one failed or the app stopped first; never awaited in start).
 // events: signin { user } | signout { user } (the device keeps its data) | switch { from, to } (another account:
 //   the old one's data is wiped) | forget { user } (wiped on purpose). Only the module named auth emits these four;
 //   handlers run one at a time in start order and are awaited (a wipe is done when emit resolves). user() is set
@@ -16,7 +17,8 @@
 //   localStorage; null: memory) under `<name>:<module>[:<ns>]/<key>` (FORMATS.md). One namespace per module; a
 //   module keeps each account's data apart inside it.
 // status: set(st) reports this module's { state, count, unsent? } (null: none); get() -> the app's one status:
-//   { state (the most urgent), count (that state's), unsent (all modules'), parts }. app.status$(fn) -> off.
+//   { state (the most urgent), count (that state's), unsent (all modules'), parts }. app.status$(fn) -> off. A module
+//   holding unsent saves reports them before its start resolves (the auth module reads them before a switch).
 // report(fact): config.report(fact) with the module's name, if the app gave one; never throws.
 
 /** @typedef {{ uid: string, email?: string } & Record<string, any>} EventUser */
@@ -32,6 +34,7 @@
  * @property {(ns?: string) => { name: string, get: (key: string) => any, set: (key: string, value: any) => void, remove: (key: string) => void }} storage
  * @property {{ set: (st: ModuleStatus | null) => void, get: () => AppStatus }} status
  * @property {(fact: Record<string, any>) => void} report
+ * @property {Promise<void>} ready
  * @typedef {{ state: string, count?: number, unsent?: number }} ModuleStatus
  * @typedef {{ state: string, count: number, unsent: number, parts: Record<string, ModuleStatus> }} AppStatus
  * @typedef {{ name: string, needs?: string[], start: (ctx: Ctx, deps: Record<string, any>) => any, stop?: () => any }} Module
@@ -178,7 +181,17 @@ export function createApp({ config, modules } = /** @type {any} */ ({})) {
       get: statusNow,
     }),
     report: (/** @type {Record<string, any>} */ fact) => { try { if (typeof config.report === 'function') config.report({ module: m.name, ...fact }); } catch { /* never stops the app */ } },
+    ready: startedAll,
   });
+
+  // every module started: what ctx.ready waits for (before app.ready, which is set further down)
+  /** @type {(v: void) => void} */
+  let allStarted = () => {};
+  /** @type {(e: any) => void} */
+  let notStarted = () => {};
+  /** @type {Promise<void>} */
+  const startedAll = new Promise((res, rej) => { allStarted = res; notStarted = rej; });
+  startedAll.catch(() => {});
 
   /** @type {Module[]} */
   const started = [];
@@ -208,6 +221,7 @@ export function createApp({ config, modules } = /** @type {any} */ ({})) {
     if (stopping) throw new Error('createApp: stopped before it was ready');
     return app;
   })();
+  ready.then(() => allStarted(), notStarted);
   ready.catch(() => {});   // (an app that never awaits ready is told by its modules' apis, not an unhandled rejection)
   const stop = () => stopping ||= (async () => {
     await ready.catch(() => {});

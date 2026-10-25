@@ -84,6 +84,8 @@ export function auth(options = {}) {
 
   /** @param {any} u */
   async function handle(u) {
+    // every module has started (and reported its unsent saves, and listens) before an answer is looked at
+    try { await ctx.ready; } catch { return; }
     if (stopped) return;
     const uid = u?.uid || null;
     if (uid === seen) { if (u && current) current = userOf(u); return; }
@@ -101,7 +103,13 @@ export function auth(options = {}) {
       // the last account's unsent saves would go with its data: refuse, sign the new account out, wipe nothing
       if (unsent() > 0) {
         blocked = { from, to: user, reason: 'unsent' };
+        seen = null;   // (Auth's answer to this sign-out changes nothing more)
         await s.A.signOut(s.auth);
+        stopClaimsWatch();
+        const was = current;
+        current = null;
+        if (was) await ctx.emit('signout', { user: was });
+        tellUser();
         return;
       }
       /** @type {string[]} */

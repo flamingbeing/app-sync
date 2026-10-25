@@ -43,7 +43,7 @@ await app.auth.forget();                      // wipes this device (refused whil
 
 A module is `{ name, needs, start(ctx, deps) -> api, stop() }`: started in `needs` order, stopped in reverse; `deps`
 holds only the apis it needs. `ctx` is small and frozen: `name, module, config, sdk(), user(), on(event, fn),
-emit(event, data), storage(ns), status, report(fact)`. Events: `signin { user }`, `signout { user }` (data kept),
+emit(event, data), storage(ns), status, report(fact), ready` (every module started). Events: `signin { user }`, `signout { user }` (data kept),
 `switch { from, to }` (another account: the old data is wiped after `auth({ beforeSwitch })`), `forget { user }`.
 Another account's sign-in is refused while the last one has unsent saves (`app.auth.blocked()` says so). Details:
 the comments at the top of `src/runner.js` and `src/auth.js`.

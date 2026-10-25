@@ -25,14 +25,18 @@ Stored formats only gain one key (FORMATS.md). Tests: `test/runner.test.mjs`, `t
   `stop()` and `status$`. A module is `{ name, needs, start(ctx, deps), stop() }`: started one at a time in `needs`
   order, stopped in reverse (`stop()` once, however often it is called); a cycle, a missing or duplicate name throws
   at once. `ctx` (frozen, one per module): `name, module, config, sdk(), user(), on(event, fn), emit(event, data),
-  storage(ns), status, report(fact)`. Events `signin`, `signout`, `switch`, `forget` (emitted by the auth module,
-  awaited in start order).
+  storage(ns), status, report(fact), ready` (`ready` resolves once every module has started; a module holding unsent
+  saves reports them in `status` before its start resolves). Events `signin`, `signout`, `switch`, `forget` (emitted
+  by the auth module, awaited in start order).
 - **`auth.js`** (new entry): `auth({ claims, beforeSwitch, popupOnly, redirectFirst })` with `signIn({ hint })`,
   `signOut()`, `forget({ force, before })`, `onUser`, `user`, `blocked`, `refreshClaims` (the claims and the claims
   watch as in 0.8.3). **Sign-out keeps the device's data**: the device copy and unsent saves stay and send when the same
   account signs in again. Another account signing in is a `switch`: the app's `beforeSwitch`, then the old data wiped,
   then `signin`; refused (the new account signed out again, nothing wiped, `blocked()` says why) while the old account
-  has unsent saves. `forget()` is the wipe on purpose (refused while unsent unless `force`).
+  has unsent saves. `forget()` is the wipe on purpose (refused while unsent unless `force`). Auth's answers wait for
+  every module to start (`ctx.ready`): found by the model test, a page opening with another account in Auth (signed
+  in from another tab) could otherwise switch before a slow module had reported its unsent saves or listened for
+  the wipe. A refused switch tells `onUser` (null) and emits `signout` for the account it replaced at once.
 - `userOf` and `claimsBehind` moved to `src/user.js` (still exported from `index.js`, same values).
 - Size budget for `src/` raised from 240000 to 262000 bytes (the runner and the auth module; the old createApp goes
   at 1.0).

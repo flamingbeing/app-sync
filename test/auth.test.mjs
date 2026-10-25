@@ -131,6 +131,26 @@ test('a different account already signed in when the page opens (another tab) is
   assert.deepEqual(log, ['switch u1>u2', 'signin u2']);
 });
 
+test('a slow module (reading its data at start) is started before Auth\'s first answer is handled: its unsent saves refuse the switch', async () => {
+  const storage = memStorage(), device = { rows: [], unsent: 0 };
+  const t = setup({ storage, device });
+  await t.app.ready;
+  await t.app.auth.signIn();
+  t.app.data.save({ id: 'a' });
+  await t.app.stop();
+  // the page opens again with another account in Auth; the data module takes a while to read its device copy
+  const sdk = fakeSdk({ signedIn: fakeUser({ uid: 'u2' }) }), log = [];
+  const data = fakeData(device, log), start = data.start;
+  data.start = async ctx => { await settle(10); return start(ctx); };
+  const again = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), data] });
+  await again.ready;
+  await settle(20);
+  assert.equal(again.auth.user(), null);
+  assert.equal(again.auth.blocked()?.from.uid, 'u1');
+  assert.deepEqual(device, { rows: [{ id: 'a' }], unsent: 1 });
+  assert.deepEqual(log, []);
+});
+
 test('forget(): refused while unsent unless forced; the hook, sign-out, then forget wipes; the next account is no switch', async () => {
   const t = setup();
   await t.app.ready;
