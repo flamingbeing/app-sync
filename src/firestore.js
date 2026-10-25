@@ -2,7 +2,7 @@
 // its own SDK module (the modular API: collection, doc, query, where, onSnapshot, getDocFromServer, runTransaction),
 // so this file works with whichever SDK build and version the app loads.
 //
-// createFirestoreBackend({ sdk, path, field = 'updatedAt', time = 'ms', stamp, canonical, where, merge, mark, stampMode, serverField, onCommit, onSnapshotMeta, onRead })
+// createFirestoreBackend({ sdk, path, field = 'updatedAt', time = 'ms', stamp, canonical, where, merge, mark, stampMode, serverField, writeId, onCommit, onSnapshotMeta, onRead })
 //   sdk: async () => ({ db, F }), F the SDK's functions. path(scope, coll) -> the collection's path segments
 //   (e.g. ['accounts', scope, coll]). stamp(doc, coll) -> the doc as written (default: updatedAt = max(now, the
 //   server copy's updatedAt + 1), taken inside the commit transaction, so a stamp only ever moves forward even when
@@ -21,11 +21,16 @@
 //   serverTimestamp(), in the same transaction, beside the usual stamp; reads give it as ms (null while this
 //   device's own write is not on the server yet), a query on it compares server Timestamps, and the conflict check
 //   leaves it out (only the content and the usual stamp count). Rules can then require serverAt == request.time.
-//   onCommit({ scope, coll, before, after, at, fields }) -> [{ path, data, merge } | { path, delete: true }]: more
-//   writes in the same transaction as a record's write (e.g. a leave entry with a lock, so no device ever sees one
-//   without the other). before: the server's copy (null: none); after: what is written (null: a delete); at: its
-//   stamp; fields: the stamp fields for those writes (stampFields). path: the document's path segments. Not called
-//   when nothing is written (the server already has this content).
+//   writeId: false leaves the id field out of the document written (the id is the document's id; reads add it), for
+//   rules that whitelist fields without id.
+//   onCommit({ scope, coll, before, after, at, fields, key, ops }) -> [{ path, data, merge } | { path, delete: true }]:
+//   more writes in the same transaction as a record's write (e.g. a leave entry with a lock, so no device ever sees
+//   one without the other). before: the server's copy (null: none); after: what is written (null: a delete); at: its
+//   stamp; fields: the stamp fields for those writes (stampFields); key, ops: the save's own id and ops (writes.js),
+//   e.g. an audit entry with the save's change, stored under key so it lands once. path: the document's path
+//   segments. Not called when nothing is written (the server already has this content).
+//   A merge function may refuse a change it can't apply (a status changed elsewhere) by throwing { code:
+//   'write-conflict', remote: current }: the queue keeps the save as a conflict for the user, never failed.
 // -> { listen, fetchOne, commit, stamp, stampFields, clearCache }
 //   commit(scope, coll, record, base, { key, ops }): a transaction that writes record (record._deleted: deletes it)
 //   only when the server's copy still matches base; throws { code: 'write-conflict', remote } otherwise (conflict.js).
@@ -36,16 +41,19 @@
 //   alike); with prev (the record's stamp before this write), max(now, prev + 1).
 //   stampFields(prev) -> Promise of the fields to add to such a write: { [field]: stamp(prev) } and, in server mode,
 //   { [serverField]: serverTimestamp() } (bin entries and leave entries too).
-//   clearCache() -> terminates the SDK and clears its offline cache (sign-out on a shared device); the SDK instance
-//   can't be used afterwards, so the app reloads (or builds a new one) before reading again.
+//   clearCache({ timeout = 3000 }) -> terminates the SDK and clears its offline cache (sign-out on a shared device); the
+//   SDK instance can't be used afterwards, so the app reloads (or builds a new one) before reading again. Clearing
+//   waits while another tab of the origin still uses the cache: after timeout ms it throws { code:
+//   'deadline-exceeded' } (the cache stays until those tabs close), so sign-out can go on and reload.
 import { checkWrite, mergeFields, recordSignature } from './conflict.js';
 
 const plain = v => JSON.parse(JSON.stringify(v));
 
 const MARKS = 20;
+export const CLEAR_TIMEOUT = 3000;   // ms clearCache waits for the offline cache to clear
 const timeOf = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;   // save keys kept on a merged record (mark)
 
-export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', onCommit = null, onSnapshotMeta = () => {}, onRead = () => {} }) {
+export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', writeId = true, onCommit = null, onSnapshotMeta = () => {}, onRead = () => {} }) {
   if (typeof sdk !== 'function' || typeof path !== 'function') throw new Error('createFirestoreBackend needs sdk and path');
   if (time !== 'ms' && time !== 'iso') throw new Error("createFirestoreBackend: time is 'ms' or 'iso'");
   if (stampMode !== 'client' && stampMode !== 'server') throw new Error("createFirestoreBackend: stampMode is 'client' or 'server'");
@@ -59,6 +67,8 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   const unstampServer = v => { if (!server || !v || !Object.hasOwn(v, serverField)) return v; const { [serverField]: _s, ...rest } = v; return rest; };
   const canonical = (coll, v) => canonOf(coll, unstampServer(v));
   const withServer = (F, doc) => server ? { ...doc, [serverField]: F.serverTimestamp() } : doc;
+  // what the document holds: without the id field when writeId is false (the id stays the document's id; reads add it)
+  const stored = doc => { if (writeId) return doc; const { id: _id, ...rest } = doc; return rest; };
   const at = ms => time === 'iso' ? new Date(ms).toISOString() : ms;
   const next = prev => at(Math.max(Date.now(), timeOf(prev) + 1));
   const stampDoc = stamp || (doc => ({ ...doc, [stampField]: next() }));
@@ -125,8 +135,8 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
       const current = snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
       const doc = deleted ? stamped : forward(stamped, current);
       if (!checkWrite(canon(current), deleted ? null : canon(doc), canon(base))) return current || doc;
-      if (deleted) tx.delete(ref); else tx.set(ref, withServer(F, doc));
-      extra(F, db, tx, { scope, coll, before: current, after: deleted ? null : doc });
+      if (deleted) tx.delete(ref); else tx.set(ref, withServer(F, stored(doc)));
+      extra(F, db, tx, { scope, coll, before: current, after: deleted ? null : doc, key, ops });
       return doc;
     });
   }
@@ -140,14 +150,14 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return F.runTransaction(db, async tx => {
       const snap = await tx.get(ref);
       const current = snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
-      if (deleted) { if (current) { tx.delete(ref); extra(F, db, tx, { scope, coll, before: current, after: null }); } return { id, _deleted: true }; }
+      if (deleted) { if (current) { tx.delete(ref); extra(F, db, tx, { scope, coll, before: current, after: null, key, ops }); } return { id, _deleted: true }; }
       if (mark && key && Array.isArray(current?.[mark]) && current[mark].includes(key)) return current;   // applied already
       if (base && !current) { const e = new Error('This record was deleted elsewhere; your version is kept'); e.code = 'not-found'; throw e; }
       const merged = forward(unstampServer(plain(stampDoc(plain({ ...merging(current ? plain(current) : null, plain(record), base ? plain(base) : null, ops), id }), coll))), current);
       if (mark) { if (key) merged[mark] = [...(Array.isArray(current?.[mark]) ? current[mark] : []), key].slice(-MARKS); else if (current?.[mark]) merged[mark] = current[mark]; }
       if (current && recordSignature(bare(current)) === recordSignature(bare(merged))) return current;   // nothing changed
-      tx.set(ref, withServer(F, merged));
-      extra(F, db, tx, { scope, coll, before: current, after: merged });
+      tx.set(ref, withServer(F, stored(merged)));
+      extra(F, db, tx, { scope, coll, before: current, after: merged, key, ops });
       return merged;
     });
   }
@@ -157,10 +167,11 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return withServer(F, { [stampField]: next(prev) });
   }
 
-  async function clearCache() {
-    const { db, F } = await sdk();
-    await F.terminate(db);
-    await F.clearIndexedDbPersistence(db);
+  async function clearCache({ timeout = CLEAR_TIMEOUT } = {}) {
+    let timer;
+    const late = new Promise((_, reject) => { timer = setTimeout(() => { const e = new Error('The offline cache could not be cleared in time (another tab still uses it)'); e.code = 'deadline-exceeded'; reject(e); }, timeout); });
+    const clear = async () => { const { db, F } = await sdk(); await F.terminate(db); await F.clearIndexedDbPersistence(db); };
+    return Promise.race([clear(), late]).finally(() => clearTimeout(timer));
   }
 
   return { listen, fetchOne, commit, stamp: prev => next(prev), stampFields, clearCache };

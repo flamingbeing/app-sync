@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.2 (2026-10-25)
+
+Several apps on one origin. Nothing changes for 0.4.1 callers that leave the new options out, except the fix below.
+Each change has a test in `test/origin.test.mjs` that failed before it.
+
+- Fixed: `clearCache` (adapter) gives up after `timeout` ms (default 3000) with `{ code: 'deadline-exceeded' }`, and
+  `forgetDevice` counts `clearBackendCache` as failed after its `timeout` (default 3000): clearing the SDK's cache
+  waits while another tab of the origin uses it, so sign-out never reached `extra` or the reload.
+- `createOutboxRegistry({ storage, open, timeout })` (`src/registry.js`): the origin's list of outboxes, kept in
+  localStorage. A write queue given `registry` refuses sign-out (`flush`) while any registered outbox has unsent
+  saves for this user (unreadable or no answer counts as unsent), and `forget` forgets this user in all of them.
+  Opt-in: apps that don't register, and queues without `registry`, work as before.
+- `createOutbox` returns its `name` and `realm` (the registry's key).
+- Adapter `writeId: false`: the id stays the document's id only, not a field (rules whose field whitelist has no
+  `id`). Default as before.
+- Adapter `onCommit` is also given the save's `key` and `ops` (an audit entry from the save, stored under its key).
+- Docs and test: a merge function refuses a change it can't apply by throwing `{ code: 'write-conflict', remote }`;
+  the save ends as a conflict for the user (discard or try again), not as failed, which would keep sign-out shut.
+
 ## 0.4.1 (2026-10-25)
 
 Fault-injection tests (`test/faults.test.mjs`): the network dropping and coming back mid-queue, two devices writing one
