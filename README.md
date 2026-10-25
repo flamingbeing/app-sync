@@ -44,7 +44,7 @@ What it does:
 ## Use
 
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.6.1/index.js';
+import { createApp } from 'https://core.anawj.com/sync/0.6.2/index.js';
 
 const app = createApp({
   name: 'myapp', colls: ['items'], path: (space, coll) => ['spaces', space, coll],

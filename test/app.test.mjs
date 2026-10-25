@@ -110,6 +110,16 @@ test('sign-in: popup first; a blocked popup falls back to redirect; an installed
   await assert.rejects(d.app.signIn(), e => e.code === 'auth/popup-closed-by-user');
 });
 
+test('sign-in with popupOnly: never a redirect, even blocked or installed (a page served away from the auth domain)', async () => {
+  const a = makeApp({ sdkParts: fakeAuthSdk({ popupError: 'auth/popup-blocked' }), options: { popupOnly: true, redirectFirst: () => true } });
+  await assert.rejects(a.app.signIn(), e => e.code === 'auth/popup-blocked');
+  assert.deepEqual(a.sdk.calls.filter(c => c !== 'redirect-result'), ['popup']);
+  const b = makeApp({ options: { popupOnly: true } });
+  await b.app.signIn();
+  assert.deepEqual(b.sdk.calls.filter(c => c !== 'redirect-result'), ['popup']);
+  assert.equal(b.app.user()?.uid, 'u1');
+});
+
 test('user: the account as the app needs it (email lower-cased), heard through onUser; a redirect sign-in is finished on load', async () => {
   const { app, sdk } = makeApp();
   const seen = [];
