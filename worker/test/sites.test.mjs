@@ -13,6 +13,8 @@ const FILES = {
   '/sync/0.1.0/secret.txt': 'x',
   '/update/0.1.0/sw-core.js': 'self.AppUpdate = {};',
   '/update/0.1.0/register.js': 'export const CORE_VERSION = "0.1.0";',
+  '/sync/1.0.0-rc.1/index.js': 'export const VERSION = "1.0.0-rc.1";',
+  '/update/1.0.0-rc.1/sw-core.js': 'self.AppUpdate = {};',
   '/update/0.1.0/other.js': 'x',
   '/update/versions.json': '{"latest":"0.1.0","versions":["0.1.0"]}',
 };
@@ -71,4 +73,14 @@ test('the update module: two files per version, immutable, CORS; its version lis
   assert.equal((await get(`${H}/update/versions.json`)).headers.get('Cache-Control'), 'public, max-age=300');
   for (const u of [`${H}/update/0.1.0/other.js`, `${H}/update/0.1.0/`, `${H}/update/`, `${H}/update/9.9.9/sw-core.js`, `${H}/update/latest/sw-core.js`])
     assert.equal((await get(u)).status, 404, u);
+});
+
+test('pre-release versions (1.0.0-rc.1) are served like releases; malformed ones are not', async () => {
+  for (const p of ['/sync/1.0.0-rc.1/index.js', '/update/1.0.0-rc.1/sw-core.js']) {
+    const r = await get(`${H}${p}`);
+    assert.equal(r.status, 200, p);
+    assert.equal(r.headers.get('Cache-Control'), 'public, max-age=31536000, immutable');
+  }
+  assert.equal((await get(`${H}/sync/1.0.0-rc..1/index.js`)).status, 404);
+  assert.equal((await get(`${H}/sync/1.0.0-/index.js`)).status, 404);
 });
