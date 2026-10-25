@@ -12,6 +12,7 @@ export { syncStatus, attentionCount } from './src/status.js';
 export { forgetDevice } from './src/forget.js';
 export { createOutboxRegistry, REGISTRY_KEY } from './src/registry.js';
 export { createFirestoreBackend } from './src/firestore.js';
+// createApp: deprecated from 0.9.0 (app.js and the modules replace it; removed in 1.0.0-rc.1)
 export { createApp, userOf, claimsBehind } from './src/app.js';
 import { createReport as createReportOf } from './src/report.js';
 export { REPORT_ENDPOINT } from './src/report.js';
@@ -23,5 +24,5 @@ export * from './src/internal.js';
 // the files this version loads (index.js and what it imports), for a service worker's list; also sync/<v>/files.json
 export const FILES = ['index.js', 'src/app.js', 'src/cache.js', 'src/conflict.js', 'src/firestore.js', 'src/forget.js', 'src/internal.js',
   'src/outbox.js', 'src/persist.js', 'src/registry.js', 'src/report.js', 'src/status.js', 'src/store.js', 'src/sync.js',
-  'src/watchdog.js', 'src/writes.js'];
-export const VERSION = '0.8.3';
+  'src/user.js', 'src/watchdog.js', 'src/writes.js'];
+export const VERSION = '0.9.0';

@@ -24,13 +24,39 @@ What it does:
   writes through `track`), then `forgetDevice` stops everything, checks again, and deletes every store but the
   account kept, the outbox, the SDK's offline cache (`clearCache`) and the app's own lists, in every tab.
 
+## The modules (0.9.0, the 1.0 shape)
+
+From 0.9.0 an app is a list of modules started by one runner; the one-object `createApp` below is deprecated (removed
+in 1.0.0-rc.1). 0.9.0 has the runner (`app.js`) and `auth` (`auth.js`); `sync` and `update` follow in 0.9.1.
+
+```js
+import { createApp } from 'https://core.anawj.com/sync/0.9.0/app.js';
+import { auth } from 'https://core.anawj.com/sync/0.9.0/auth.js';
+
+const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [auth()] });
+await app.ready;
+app.auth.onUser(user => show(user));
+await app.auth.signIn({ hint: lastEmail });   // { ok, reason: '' | 'redirect' | 'unsent' | 'wipe' }
+await app.auth.signOut();                     // keeps this device's data; the same account carries on
+await app.auth.forget();                      // wipes this device (refused while anything is unsent, unless force)
+```
+
+A module is `{ name, needs, start(ctx, deps) -> api, stop() }`: started in `needs` order, stopped in reverse; `deps`
+holds only the apis it needs. `ctx` is small and frozen: `name, module, config, sdk(), user(), on(event, fn),
+emit(event, data), storage(ns), status, report(fact), ready` (every module started). Events: `signin { user }`, `signout { user }` (data kept),
+`switch { from, to }` (another account: the old data is wiped after `auth({ beforeSwitch })`), `forget { user }`.
+Another account's sign-in is refused while the last one has unsent saves (also one made during `beforeSwitch`) or
+when a module's wipe throws (the next sign-in tries again); `app.auth.blocked()` says which. Each tab switches its
+own data, even after another tab switched first. Details:
+the comments at the top of `src/runner.js` and `src/auth.js`.
+
 ## Modules
 
 `index.js` is the public API (everything below); each module also loads on its own (`src/<name>.js`).
 
 | Module | Public |
 |---|---|
-| `src/app.js` | `createApp` (everything below wired in one call), `userOf`, `claimsBehind` |
+| `src/app.js` | `createApp` (everything below wired in one call; deprecated from 0.9.0), `userOf`, `claimsBehind` |
 | `src/sync.js` | `createSyncHub`, `replanOnWake`, `leaveEntry`, `eachSettled`, `SKEW` |
 | `src/writes.js` | `createWriteQueue`, `JOB_FORMAT`, `JOB_STATES` |
 | `src/conflict.js` | `checkWrite`, `recordSignature`, `mergeFields`; held conflicts: `mergeHeld`, `describeConflict`, `resolvedRecord`, `pathOf` |
