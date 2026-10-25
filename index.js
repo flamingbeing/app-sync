@@ -10,8 +10,9 @@ export { syncStatus, attentionCount } from './src/status.js';
 export { forgetDevice, FORGET_TIMEOUT } from './src/forget.js';
 export { createOutboxRegistry, REGISTRY_KEY, REGISTRY_TIMEOUT } from './src/registry.js';
 export { createFirestoreBackend, CLEAR_TIMEOUT } from './src/firestore.js';
+export { createApp, userOf, claimsBehind } from './src/app.js';
 import { createReport as createReportOf } from './src/report.js';
 export { buildReport, errorCode, REPORT_ENDPOINT, REPORT_EVERY, UNCONFIRMED_MS, MAX_CODES } from './src/report.js';
 // the nothing-lost report, with this engine's version filled in
 export const createReport = options => createReportOf({ sync: VERSION, ...options });
-export const VERSION = '0.5.1';
+export const VERSION = '0.6.0';

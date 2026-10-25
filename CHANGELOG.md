@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.0 (2026-10-25)
+
+`createApp`, the one call that wires the safe path, so an app's cloud module becomes config. Adds only: every 0.5.1
+call and module works as before. Tests: `test/app.test.mjs` (written first, failed before) and
+`test/app.emulator.mjs` (Auth + Firestore emulators: sign in, save offline, sync, sign out and wipe).
+
+- `createApp({ name, colls, path, sdk, … })` (`src/app.js`): Google sign-in (popup, redirect when the popup is blocked
+  or the app is installed; a redirect is finished on load), the account as `{ uid, email, name, photo, verified }`,
+  the storage guard at sign-in, a claims refresh (`claims: { url, entry }`: asked once per uid and role version, then
+  the token is refreshed), the device copy, the outbox (named in the origin-wide list by default) and the queue, the
+  hub with `replanOnWake` and the unsent-records hook, the watchdog, `status$` (never synced before the server has
+  answered once), one save at a time per record, `onRefused` for saves the server refused, and `signOut` (refuses
+  while anything is unsent, stops if someone else signed in meanwhile, then `forgetDevice` and the SDK's sign-out).
+- Escape hatches, not flags: `adapter`, `commit` (an app's own transactions), `outbox`, and the `backend`, `hub`,
+  `stores`, `queue` option objects are passed through; `parts` hands back the hub, queue, stores, adapter, watchdog
+  and registry. `userOf` and `claimsBehind` are exported for apps that keep their own sign-in.
+- Not in this version: the two-phone view lag and the double report on page hide seen in one app (a separate fix).
+- Emulator script now starts the Auth emulator too (`firebase.json`, `test:emulator`).
+
 ## 0.5.1 (2026-10-25)
 
 Two adapter calls, so apps stop reaching past the adapter for them. Nothing changes for 0.5.0 callers. Tests:

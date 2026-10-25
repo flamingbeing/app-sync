@@ -42,7 +42,7 @@ function fakeAdapter(srv, { refuse = null } = {}) {
     listen: srv.listen, fetchOne: srv.fetchOne,
     async commit(scope, coll, record, base) {
       if (refuse) throw Object.assign(new Error('Missing or insufficient permissions.'), { code: refuse });
-      const current = srv.get(coll, record.id) || null;
+      const held = srv.get(coll, record.id), current = held ? (({ updatedAt, serverAt, _saves, ...rest }) => rest)(held) : null;   // (the content, as the real adapter compares)
       checkWrite(current, record._deleted ? null : record, base);
       const at = Date.now();
       commits.push({ scope, coll, id: record.id });
@@ -57,6 +57,17 @@ const fakeNav = ({ online = true, persisted = true } = {}) => {
   const nav = { onLine: online, asked: 0, storage: { persisted: async () => { nav.asked++; return persisted; }, persist: async () => persisted } };
   return nav;
 };
+// an outbox in memory, shaped like createOutbox's (the real one needs IndexedDB or localStorage)
+function memOutbox(name, realm = 'default', records = new Map()) {
+  return {
+    name, realm, records,
+    async put(x) { records.set(x.key, structuredClone(x)); },
+    async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); },
+    async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; },
+    async remove(k) { records.delete(k); },
+    async forget(o) { for (const [k, x] of records) if (x.owner === o) records.delete(k); },
+  };
+}
 function memStorage() { const m = new Map(); return { getItem: k => m.has(k) ? m.get(k) : null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k), m }; }
 
 // an app as a cloud.js would make it: only config
@@ -69,7 +80,7 @@ function makeApp(over = {}) {
   const app = createApp({
     name, colls: ['items'], path: (scope, coll) => ['spaces', scope, coll],
     sdk: async () => ({ A: sdk.A, F: {}, auth: sdk.auth, db: {} }),
-    adapter, nav, storage: memStorage(), watchEvery: 0,
+    kinds: { item: 'items' }, adapter, nav, storage: memStorage(), outbox: memOutbox(name + '-outbox'), watchEvery: 0,
     ...over.options,
   });
   return { app, srv, sdk, adapter, nav, name };
@@ -176,12 +187,13 @@ test('save: a record\'s saves go out one at a time in the order made, and the st
   const states = [];
   app.status$(st => states.push(st.state));
   const off = app.watch('s1', 'items', () => {});
-  await Promise.all([1, 2, 3].map(i => app.save('item', 's1', { id: 'r', text: 'Fake ' + i })));
+  const v = i => ({ id: 'r', text: 'Fake ' + i });
+  await Promise.all([1, 2, 3].map(i => app.save('item', 's1', v(i), i > 1 ? v(i - 1) : null)));   // each made on the one before
   assert.equal(await app.flush(2000), true);
   assert.equal(srv.get('items', 'r').text, 'Fake 3', 'the last one made wins');
   assert.equal(adapter.commits.length, 3);
   assert.ok(await until(() => states.at(-1) === 'synced'), states.join());
-  assert.ok(!states.slice(0, states.indexOf('saving')).includes('synced'), 'never synced before the saves were sent');
+  assert.ok(states.includes('saving'), 'saving while the saves were on their way: ' + states.join());
   off();
 });
 
@@ -219,7 +231,7 @@ test('a refused save with no onRefused stays failed and keeps the sign-out shut 
   const srv = fakeServer();
   const { app } = makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }) });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
-  await app.save('item', 's1', { id: 'r1', text: 'Fake' });
+  await assert.rejects(app.save('item', 's1', { id: 'r1', text: 'Fake' }), /kept/, 'the caller hears of it');
   await settle(50);
   assert.equal(await app.flush(200), false);
   const r = await app.signOut();
@@ -317,9 +329,9 @@ test('watchdog: a listener stuck on the device copy while online is replaced, an
   let list = [];
   app.watch('s1', 'items', l => { list = l; });
   await settle(20);
-  stuck = false; srv.set('items', { id: 'w', text: 'Fake', updatedAt: Date.now() });
   now += 60000;
-  app.nudge();
+  assert.equal(app.nudge(), true, 'stuck on the device copy for a minute while online: listen again');
+  stuck = false; srv.set('items', { id: 'w', text: 'Fake', updatedAt: Date.now() });
   assert.ok(await until(() => list.some(d => d.id === 'w')));
   assert.ok(app.relistens() >= 1);
 });
