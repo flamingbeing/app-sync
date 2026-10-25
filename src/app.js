@@ -53,7 +53,7 @@ import { createWatchdog } from './watchdog.js';
 import { persistGuard } from './persist.js';
 import { syncStatus, attentionCount } from './status.js';
 import { forgetDevice } from './forget.js';
-import { describeConflict, resolvedRecord } from './conflict.js';
+import { describeConflict, mergeFields, resolvedRecord } from './conflict.js';
 import { createFirestoreBackend } from './firestore.js';
 
 /**
@@ -364,8 +364,17 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   const heldOf = key => {
     const all = queue.entries().reverse(), first = all.find(x => x.key === key && x.state === 'conflict');
     if (!first) return null;
-    const chain = all.filter(x => x.kind === first.kind && x.record.id === first.record.id && x.state === 'conflict');
-    return { first, held: { record: chain.at(-1).record, base: first.base ?? null, remote: first.remote ?? null, at: chain.at(-1).at } };
+    // (0.7.1: also the saves queued behind it before it was held, so the answer carries them; a merge collection's
+    // ops of the whole chain, in order, so the merge function replays every change of this device's)
+    const chain = all.filter(x => x.kind === first.kind && x.record.id === first.record.id && (x.state === 'conflict' || x.state === 'pending' && x.at > first.at));
+    return { first, held: { record: chain.at(-1).record, base: first.base ?? null, remote: first.remote ?? null, at: chain.at(-1).at, ...(chain.every(x => x.ops) ? { ops: chain.flatMap(x => x.ops) } : {}) } };
+  };
+  // the merge function of a merge collection named in held (0.7.1: its clashes are found and answered through it)
+  /** @param {string} kind */
+  const mergeOfHeld = kind => {
+    const h = backendOptions.held, m = backendOptions.merge, coll = collOf(kind);
+    if (!h || h === true || !Object.hasOwn(h, coll) || !h[coll] || !m || !Object.hasOwn(m, coll) || !m[coll]) return null;
+    return m[coll] === true ? mergeFields : m[coll];
   };
   /** @param {string} kind @returns {string[]} */
   const countersOf = kind => { const h = backendOptions.held, c = h && h !== true ? h[collOf(kind)] : null; return c && c !== true ? c.counters || [] : []; };
@@ -387,14 +396,14 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   function describe(key, { timeZone } = {}) {
     const h = heldOf(key);
     if (!h) return null;
-    return { key, kind: h.first.kind, id: h.first.record.id, ...describeConflict(h.held, { counters: countersOf(h.first.kind), skip, edits: backendOptions.edits || null, me: { by: current?.name || current?.email || '', device }, timeZone }) };
+    return { key, kind: h.first.kind, id: h.first.record.id, ...describeConflict(h.held, { counters: countersOf(h.first.kind), skip, edits: backendOptions.edits || null, me: { by: current?.name || current?.email || '', device }, timeZone, merge: mergeOfHeld(h.first.kind) }) };
   }
   /** @param {string} key @param {ConflictChoice} choice */
   async function resolve(key, choice) {
     const h = heldOf(key);
     if (!h) throw new Error('This save is no longer waiting for a choice');
     if (choice !== 'mine' && choice !== 'theirs' && (!choice || typeof choice !== 'object')) throw new Error("resolve: choice is 'mine', 'theirs' or { [field]: 'mine' | 'theirs' }");
-    const record = resolvedRecord(h.held, choice, { counters: countersOf(h.first.kind), skip });
+    const record = resolvedRecord(h.held, choice, { counters: countersOf(h.first.kind), skip, merge: mergeOfHeld(h.first.kind) });
     return queue.restore(h.first.kind, h.first.owner, record);
   }
 

@@ -30,6 +30,12 @@
 //   once); a field changed on both sides to different values throws { code: 'write-conflict', remote, fields } and the
 //   queue holds the save for the user (nothing is written, nothing overwritten). A delete meets any change made
 //   elsewhere as a conflict, and an edit of a record deleted elsewhere is one too (remote null), as with checkWrite.
+//   A merge collection named in held (0.7.1; held: true still leaves them last-write-wins) keeps its merge function,
+//   which applies the save's ops to the server's copy as before, and is held only where that would overwrite a change
+//   made elsewhere: a path changed on both sides to different values where the merge takes this device's value
+//   (conflict.js mergeClashes). Increments the merge adds up never clash. The merge function must be pure: it also
+//   runs on base (to know what this save changed), so the app passes the copy the edit started from as base (null:
+//   every field sent counts as changed). counters are not used there (the merge function does that).
 //   edits (0.6.3, opt-in, with held): a field name (e.g. '_edits'): each write also records who changed each top-level
 //   field and when, edits[field] = { by, device, at } (at: ms), for the conflict popup (conflict.js describeConflict).
 //   A data-shape change: rules that whitelist fields must allow it. editor() -> { by, device }: who this device's
@@ -68,7 +74,7 @@
 //   SDK instance can't be used afterwards, so the app reloads (or builds a new one) before reading again. Clearing
 //   waits while another tab of the origin still uses the cache: after timeout ms it throws { code:
 //   'deadline-exceeded' } (the cache stays until those tabs close), so sign-out can go on and reload.
-import { checkWrite, mergeFields, mergeHeld, recordSignature } from './conflict.js';
+import { checkWrite, mergeFields, mergeFnClashes, mergeHeld, recordSignature } from './conflict.js';
 
 /**
  * @typedef {import('./types.js').Doc} Doc
@@ -119,7 +125,8 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   if (stampMode !== 'client' && stampMode !== 'server') throw new Error("createFirestoreBackend: stampMode is 'client' or 'server'");
   const server = stampMode === 'server';
   /** @param {string} coll @returns {{ counters?: string[] } | null} */
-  const heldOf = coll => { if (mergeOf(coll) || !held) return null; const h = held === true ? {} : Object.hasOwn(held, coll) && held[coll]; return h ? (h === true ? {} : h) : null; };
+  // (held: true leaves merge collections last-write-wins; naming one in held holds its clashes too, 0.7.1)
+  const heldOf = coll => { if (!held || held === true && mergeOf(coll)) return null; const h = held === true ? {} : Object.hasOwn(held, coll) && held[coll]; return h ? (h === true ? {} : h) : null; };
   if (held && held !== true && Object.values(held).some(h => /** @type {any} */ (h)?.counters?.length) && !mark) throw new Error('createFirestoreBackend: held counters need mark (a resend would count twice)');
   // server mode: the server's stamp as ms (a Timestamp; null while pending), never part of the conflict check
   /** @param {any} data */
@@ -219,9 +226,9 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
    * @returns {Promise<Doc>}
    */
   async function commit(scope, coll, record, base, { key = '', ops, after = 0 } = {}) {
-    const merging = mergeOf(coll);
+    const merging = mergeOf(coll), holding = heldOf(coll);
+    if (merging && holding) return commitHeldMerged(scope, coll, record, base, merging, key, ops, after);
     if (merging) return commitMerged(scope, coll, record, base, merging, key, ops, after);
-    const holding = heldOf(coll);
     if (holding) return commitHeld(scope, coll, record, base, holding, key, ops, after);
     const deleted = record && record._deleted === true;
     const stamped = deleted ? { id: String(record.id), _deleted: true } : unstampServer(plain(stampDoc(plain(record), coll)));
@@ -292,14 +299,61 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
       if (current && recordSignature(bare(current)) === recordSignature(bare(merged))) return current;   // nothing changed
       const doc = forward(unstampServer(plain(stampDoc(merged, coll))), current, after);
       if (mark) { if (key) doc[mark] = [...(Array.isArray(current?.[mark]) ? current[mark] : []), key].slice(-MARKS); else if (current?.[mark]) doc[mark] = current[mark]; }
-      if (edits) {
-        const who = (editor && editor()) || {}, at = Date.now(), log = { ...(current?.[edits] || {}) }, from = was || {};
-        for (const k of new Set([...Object.keys(rec), ...Object.keys(from)])) {
-          if (k === 'id' || k === 'updatedAt' || recordSignature(rec[k] ?? null) === recordSignature(from[k] ?? null) && k in rec === k in from) continue;
-          log[k] = { by: String(who.by || ''), device: String(who.device || ''), at };
-        }
-        doc[edits] = log;
+      if (edits) doc[edits] = editsLog(current, rec, was);
+      tx.set(ref, withServer(F, stored(doc)));
+      extra(F, db, tx, { scope, coll, before: current, after: doc, key, ops });
+      return doc;
+    });
+  }
+
+  // who changed each top-level field and when (edits): the server's log with this device's changes since base
+  /** @param {any} current @param {any} rec @param {any} was */
+  function editsLog(current, rec, was) {
+    const who = (editor && editor()) || {}, at = Date.now(), log = { ...(current?.[/** @type {string} */ (edits)] || {}) }, from = was || {};
+    for (const k of new Set([...Object.keys(rec), ...Object.keys(from)])) {
+      if (k === 'id' || k === 'updatedAt' || recordSignature(rec[k] ?? null) === recordSignature(from[k] ?? null) && k in rec === k in from) continue;
+      log[k] = { by: String(who.by || ''), device: String(who.device || ''), at };
+    }
+    return log;
+  }
+
+  // held conflicts for a merge collection (0.7.1): the merge function writes the save into the server's copy as
+  // commitMerged does, but a path this device changed that was changed elsewhere to a different value, and that the
+  // merge would overwrite, is held for the user (conflict.js mergeClashes), never overwritten; increments and other
+  // changes the merge combines never clash. Deletes and edits of a record deleted elsewhere are as commitHeld's.
+  /** @param {string} scope @param {string} coll @param {Doc} record @param {Doc | null} base @param {MergeFn} merging @param {string} key @param {any} ops @param {number} after @returns {Promise<Doc>} */
+  async function commitHeldMerged(scope, coll, record, base, merging, key, ops, after) {
+    const id = String(record.id), deleted = record._deleted === true;
+    const skip = [stampField, serverField, mark, edits].filter(Boolean);
+    /** @param {any} v */
+    const without = v => { if (!v) return null; const out = { ...v }; for (const f of skip) delete out[f]; return out; };
+    /** @param {any} v */
+    const bare = v => v ? canonical(coll, without(v)) : null;
+    const { db, F } = await sdk();
+    const ref = F.doc(colRef(db, F, scope, coll), id);
+    return F.runTransaction(db, async (/** @type {any} */ tx) => {
+      const snap = await tx.get(ref);
+      const current = snap.exists() ? { ...read(snap.data()), id: snap.id } : null;
+      if (mark && key && Array.isArray(current?.[mark]) && current[mark].includes(key)) return current;   // applied already
+      if (deleted) {
+        if (!checkWrite(bare(current), null, bare(base))) return { id, _deleted: true };
+        tx.delete(ref); extra(F, db, tx, { scope, coll, before: current, after: null, key, ops });
+        return { id, _deleted: true };
       }
+      if (base && !current) { const e = /** @type {CodedError} */ (new Error('This record was deleted elsewhere; both versions are kept')); e.code = 'write-conflict'; e.remote = null; e.fields = []; throw e; }
+      const was = without(plain(base));
+      /** @type {{ mine: Doc, merged: Doc, fields: string[] }} */
+      let run;
+      try { run = mergeFnClashes(current ? without(plain(current)) : null, plain(record), was, merging, ops, { skip }); }
+      catch (err) { const e = /** @type {CodedError} */ (err); if (e.code === 'write-conflict' && e.remote === undefined) e.remote = current; throw e; }
+      if (run.fields.length) {
+        const e = /** @type {CodedError} */ (new Error('This record changed elsewhere (' + run.fields.join(', ') + '); both versions are kept'));
+        e.code = 'write-conflict'; e.remote = current; e.fields = run.fields; throw e;
+      }
+      const doc = forward(unstampServer(plain(stampDoc(plain({ ...without(run.merged), id }), coll))), current, after);
+      if (mark) { if (key) doc[mark] = [...(Array.isArray(current?.[mark]) ? current[mark] : []), key].slice(-MARKS); else if (current?.[mark]) doc[mark] = current[mark]; }
+      if (current && recordSignature(bare(current)) === recordSignature(bare(doc))) return current;   // nothing changed
+      if (edits) doc[edits] = editsLog(current, without(run.mine) || {}, was);
       tx.set(ref, withServer(F, stored(doc)));
       extra(F, db, tx, { scope, coll, before: current, after: doc, key, ops });
       return doc;

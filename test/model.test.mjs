@@ -28,7 +28,7 @@ function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>>
 
 // one device: its own clock, network switch, device copy and outbox; the listener and the adapter go quiet offline
 function device(name, shared, srv, clock, { held = false } = {}) {
-  const dev = { name, online: true, views: { notes: [], tasks: [] }, saves: [], app: null, offs: [], subs: new Set() };
+  const dev = { name, online: true, views: { notes: [], tasks: [] }, saves: [], app: null, offs: [], subs: new Set(), answeredTheirs: new Set() };
   const outbox = memOutbox();
   const nav = { get onLine() { return dev.online; }, storage: { persisted: async () => true, persist: async () => true } };
   const user = { uid: 'u-' + name, email: 'fake@example.test', displayName: 'Fake', getIdTokenResult: async () => ({ claims: {} }), getIdToken: async () => 't' };
@@ -36,7 +36,8 @@ function device(name, shared, srv, clock, { held = false } = {}) {
   const A = { onAuthStateChanged: (_a, cb) => { cb(auth.currentUser); return () => {}; }, signOut: async () => {}, GoogleAuthProvider: class {} };
   const sdkDev = shared.device({ clock, name });
   // held (0.6.3): tasks saved with held conflicts by field, who changed what recorded in _edits
-  const heldOptions = held ? { held: { tasks: true }, edits: '_edits' } : {};
+  // held 'merge' (0.7.1): the merge collection (notes) is named in held too (each device owns its field)
+  const heldOptions = held ? { held: { tasks: true, ...(held === 'merge' ? { notes: true } : {}) }, edits: '_edits' } : {};
   const backend = createFirestoreBackend({ sdk: sdkDev.sdk, path: (s, c) => ['spaces', s, c], merge: { notes: true }, mark: '_saves', ...heldOptions, editor: () => ({ by: 'Fake', device: name }),
     // a deleted task leaves a bin entry in the same transaction (the delete reaches devices that were offline)
     onCommit: ({ coll, before, after, at }) => coll === 'tasks' && before && !after ? [{ path: ['spaces', S, 'bin', 'task:' + before.id], data: { id: 'task:' + before.id, kind: 'task', data: before, deletedAt: at } }] : [] });
@@ -55,7 +56,7 @@ function device(name, shared, srv, clock, { held = false } = {}) {
   dev.start = async () => {
     dev.app = createApp({ name: 'model-' + name, colls: ['notes', 'tasks'], kinds: { note: 'notes', task: 'tasks' }, path: (s, c) => ['spaces', s, c],
       sdk: async () => ({ A, F: {}, auth, db: {}, emulator: true }), adapter, outbox, nav, storage: null, win: null, device: name,
-      ...(held ? { backend: { mark: '_saves', ...heldOptions } } : {}), now: () => Date.now() + clock, watchEvery: 0, queue: { delay: quick }, hub: { grace: 0, binKinds: { task: 'tasks' } } });
+      ...(held ? { backend: { mark: '_saves', merge: { notes: true }, ...heldOptions } } : {}), now: () => Date.now() + clock, watchEvery: 0, queue: { delay: quick }, hub: { grace: 0, binKinds: { task: 'tasks' } } });
     await dev.app.open(S);
     dev.offs = ['notes', 'tasks'].map(c => dev.app.watch(S, c, list => { dev.views[c] = list; }));
   };
@@ -120,6 +121,12 @@ async function run(seed, { steps = 30, held = false } = {}) {
           any = true;
           const desc = d.app.describe(c.key), choice = r() < 0.5 ? 'mine' : 'theirs';
           log.push(`${d.name} answers ${c.kind} ${c.id} ${choice} (${desc.fields.map(f => f.path).join(',') || 'whole record'})`);
+          // a note (merge collection, held 'merge') clashes only on this device's own field: a later save of it made on
+          // a copy from before its earlier save landed (the same as a task's); theirs then keeps that earlier value
+          if (c.kind === 'note') {
+            if (desc.fields.some(f => f.path !== d.name)) problems.push(`${d.name} note ${c.id} clashed on ${desc.fields.map(f => f.path).join(',')}, not its own field`);
+            if (choice === 'theirs') d.answeredTheirs.add(c.id);
+          }
           try { await d.app.resolve(c.key, choice); } catch (e) { if (!/elsewhere|kept in/.test(e.message)) problems.push(`${d.name} answer ${c.id}: ${e.message}`); }
           await d.app.flush(3000);
           if (choice !== 'mine' || d.app.queue.status(c.kind, c.id) !== 'synced') continue;
@@ -155,7 +162,7 @@ async function run(seed, { steps = 30, held = false } = {}) {
     const last = new Map();
     for (const s of d.saves) last.set(s.id, s.value);
     for (const [id, value] of last) {
-      if (held.has('notes:' + id)) continue;
+      if (held.has('notes:' + id) || d.answeredTheirs.has(id)) continue;
       const doc = shared.docs.get(`spaces/${S}/notes/${id}`);
       if (doc?.[d.name] !== value) problems.push(`${d.name}'s last note ${id} value ${value} lost (server ${doc?.[d.name]})`);
     }
@@ -168,7 +175,7 @@ const one = process.env.MODEL_SEED ? [Number(process.env.MODEL_SEED)] : null;
 const count = Number(process.env.MODEL_SEEDS) || 40;
 const seeds = one || Array.from({ length: count }, (_, i) => 1000 + i);
 
-for (const held of [false, true]) test(`model${held ? ' (held conflicts, 0.6.3)' : ''}: ${seeds.length} seeded runs of two or three devices agree with the model`, { timeout: 600e3 }, async () => {
+for (const held of [false, true, 'merge']) test(`model${held === 'merge' ? ' (held conflicts with a merge collection, 0.7.1)' : held ? ' (held conflicts, 0.6.3)' : ''}: ${seeds.length} seeded runs of two or three devices agree with the model`, { timeout: 600e3 }, async () => {
   const failed = [];
   for (const seed of seeds) {
     const { problems, log, n } = await run(seed, { held });

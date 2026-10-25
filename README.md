@@ -30,7 +30,7 @@ What it does:
 |---|---|
 | `src/sync.js` | `createSyncHub`, `createCollectionSync`, `createTombFeed`, `replanOnWake`, `leaveEntry`, pure helpers (`plan`, `planServer`, `applyChanges`, `applyTombs`, `binTombs`, …) |
 | `src/writes.js` | `createWriteQueue` |
-| `src/conflict.js` | `checkWrite`, `recordSignature`, `mergeFields`; held conflicts (0.6.3): `mergeHeld`, `clashingFields`, `describeConflict`, `resolvedRecord`, `whenText` |
+| `src/conflict.js` | `checkWrite`, `recordSignature`, `mergeFields`; held conflicts (0.6.3): `mergeHeld`, `clashingFields`, `describeConflict`, `resolvedRecord`, `whenText`; for merge collections (0.7.1): `mergeClashes`, `mergeFnClashes` |
 | `src/store.js` | `createStores` (the device copy: `openStore`, `wipeStores`) |
 | `src/outbox.js` | `createOutbox` (the write queue's durable store) |
 | `src/watchdog.js` | `decide`, `createWatchdog` |
@@ -90,6 +90,11 @@ records who changed each field and when (`{ by, device, at }` per top-level fiel
 rules that whitelist fields must allow that field (and `mark`'s). `createReport({ byKind: true })` counts held saves
 per kind in the report, so a kind that clashes often shows in the digest. Off by default: without `held`, every
 collection keeps the whole-record check.
+
+A merge collection (`merge: { items: fn }`, the merge function applying the save's ops) is held too when `held`
+names it (0.7.1; `held: true` leaves merge collections last-write-wins): the merge function still applies ops such as
+increments, which never clash; only a path changed on both sides to different values, where the merge would take this
+phone's value over the other's, holds the save. Pass the copy the edit started from as base.
 
 ### The offline cache and what the watchdog covers (0.6.4)
 

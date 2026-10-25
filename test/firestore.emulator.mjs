@@ -292,6 +292,39 @@ assert.deepEqual([...have].sort(), Array.from({ length: 40 }, (_, i) => 'm' + (i
   await Promise.all([M1, M2].map(d => F.terminate(d.db)));
 }
 
+// ---- 0.7.1: held conflicts for a merge collection (ISO stamps, server stamps, save keys, who changed what) ----
+{
+  const hold = name => {
+    const app = initializeApp({ projectId: 'demo-app-sync', apiKey: 'fake-key' }, 'held-merge-' + name);
+    const db = F.getFirestore(app);
+    F.connectFirestoreEmulator(db, HOST[0], Number(HOST[1]));
+    // made-up ops: [{ set: { path: v } } | { inc: { path: n } }] applied to the copy given
+    const ops = (cur, rec, _base, list) => {
+      const doc = structuredClone(cur || { id: rec.id });
+      for (const o of list || []) for (const [path, v] of Object.entries(o.set || o.inc || {})) {
+        const keys = path.split('.'), last = keys.pop(); let at = doc;
+        for (const k of keys) at = at[k] = at[k] && typeof at[k] === 'object' ? at[k] : {};
+        at[last] = o.inc ? (typeof at[last] === 'number' ? at[last] : 0) + v : v;
+      }
+      return doc;
+    };
+    return { db, backend: createFirestoreBackend({ sdk: async () => ({ db, F }), path: (scope, coll) => ['spaces', scope, coll], time: 'iso', stampMode: 'server',
+      merge: { stock: ops }, held: { stock: true }, mark: '_saves', edits: '_edits', editor: () => ({ by: 'Fake Person', device: name }) }) };
+  };
+  const H1 = hold('h1'), H2 = hold('h2'), SH = S + '-held';
+  const v0 = await H1.backend.commit(SH, 'stock', { id: 's1' }, null, { key: 'h0', ops: [{ set: { place: 'Shelf', 'lots.a.qty': 3 } }] });
+  await H1.backend.commit(SH, 'stock', { id: 's1' }, v0, { key: 'h1', ops: [{ set: { place: 'Fridge' } }, { inc: { 'lots.a.qty': 2 } }] });
+  await H2.backend.commit(SH, 'stock', { id: 's1' }, v0, { key: 'h2', ops: [{ inc: { 'lots.a.qty': -1 } }] });
+  await H2.backend.commit(SH, 'stock', { id: 's1' }, v0, { key: 'h2', ops: [{ inc: { 'lots.a.qty': -1 } }] });   // resent: once
+  const now = await H2.backend.fetchOne(SH, 'stock', 's1');
+  assert.deepEqual([now.place, now.lots.a.qty, now._edits.place.device, now._edits.lots.device], ['Fridge', 4, 'h1', 'h2']);
+  assert.equal(typeof now.serverAt, 'number');
+  const e = await H2.backend.commit(SH, 'stock', { id: 's1' }, v0, { key: 'h3', ops: [{ set: { place: 'Box' } }] }).catch(x => x);
+  assert.equal(e.code, 'write-conflict'); assert.deepEqual(e.fields, ['place']); assert.equal(e.remote.place, 'Fridge');
+  assert.equal((await H1.backend.fetchOne(SH, 'stock', 's1')).place, 'Fridge', 'held: nothing overwritten');
+  await Promise.all([H1, H2].map(d => F.terminate(d.db)));
+}
+
 await Promise.all([A, B, OLD].map(d => F.terminate(d.db)));
 console.log('firestore emulator tests passed');
 process.exit(0);

@@ -148,7 +148,7 @@
 
 /**
  * A held save, as describeConflict / resolvedRecord read it.
- * @typedef {{ record: Doc, base?: Doc | null, remote?: Doc | null, at?: number }} HeldSave
+ * @typedef {{ record: Doc, base?: Doc | null, remote?: Doc | null, at?: number, ops?: any }} HeldSave
  */
 
 /**
