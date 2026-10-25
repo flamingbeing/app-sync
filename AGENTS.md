@@ -35,8 +35,13 @@ npm run test:emulator         # Firestore adapter on the local emulator (Java)
 node tools/proofread.mjs      # page and doc mistakes
 ```
 
-CI also runs app-starter's browser tests on the candidate engine (the `consumer` job; locally: in an app-starter
-checkout, `SYNC_DIR=<this checkout> npm run e2e`). A red consumer job is a break for every app: fix it here first.
+CI also runs the apps' own browser tests on the candidate engine (the `consumer` matrix, app-devkit
+`serve-candidate`: each app's pinned engine and update URLs serve this checkout, and every row checks the VERSION each
+page really ran). The app-starter row blocks (with `test/consumer/mixed.spec.mjs`: a phone on the starter's pinned
+version and one on this commit); a red app-starter row is a break for every app: fix it here first. The other rows only
+report (job summary): red there is that app's migration to-do, not a reason to bend the engine. Locally: in an app
+checkout, `SERVE_CANDIDATE_ORIGIN=https://core.anawj.com SERVE_CANDIDATE_SYNC=<this checkout>
+NODE_OPTIONS="--import <app-devkit>/serve-candidate/patch.mjs" npx playwright test`.
 
 ## Releasing
 
