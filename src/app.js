@@ -27,14 +27,22 @@
 //   report: the nothing-lost report (createReport), opt-in. storage: where the origin's outbox list is kept
 //   (default localStorage; null: no registry). nav, fetch, now, win: the browser's, for tests.
 //   watchEvery: ms between watchdog checks (0: only on nudge()).
+//   quiet() -> false while the app knows of writes not yet acknowledged outside the queue (0.7.3; e.g. writes left in
+//   the SDK's own offline queue by an older version): the watchdog then never restarts the connection under them.
+//   The hub reads by backend.stampMode unless hub.stampMode says otherwise (an app whose server stamps are not on
+//   every record yet passes hub: { stampMode: 'client' }).
 //   popupOnly: sign in with the popup only, never a redirect (0.6.2): for a page served from another domain than the
 //   auth domain, where a redirect sign-in can't finish; a blocked popup throws to the caller (ask for a tap).
 //   device: this device's name as people know it ('Ward phone'), shown in conflict popups with held conflicts (0.6.3).
 //   Held conflicts (0.6.3, opt-in): backend: { held, edits, mark } (firestore.js). A same-field clash holds the save
 //   on the phone that made it, and only there: the server never has it, so other phones have nothing to answer (and
 //   two phones can't choose different versions); the held phone's status$ says attention until it is answered.
-// -> { signIn, signOut, onUser, user, open, watch, save, flush, status$, refreshClaims, nudge, relistens, conflicts,
-//      describe, resolve, hub, queue, parts }
+// -> { signIn, signOut, onUser, user, open, watch, save, flush, status$, refreshClaims, nudge, relistens, facts,
+//      conflicts, describe, resolve, hub, queue, parts }
+//   facts() -> { persisted, confirmed, heardAt } (0.7.3): the storage guard's answer (false: the browser may clear
+//   this device's copy), whether the server has answered since sign-in, and when it last did (ms; 0: not yet), for an
+//   app's own status words. flush(ms) waits ms in all (before 0.7.3, up to twice that), and is false while a save
+//   is still being stored (it said true then).
 //   conflicts(kind?) -> this device's held saves, one per record: [{ key, kind, id, at }] (key: for describe/resolve).
 //   describe(key, { timeZone }) -> what the popup shows, side by side (conflict.js describeConflict): the clashing
 //   fields, each with this device's value and the server's, when each changed (SGT by default) and who (signed-in
@@ -99,6 +107,7 @@ import { createFirestoreBackend } from './firestore.js';
  * @property {number} [watchEvery] ms between watchdog checks (0: only on nudge())
  * @property {any} [win] the browser's window, for tests
  * @property {string} [device] this device's name as people know it, shown in conflict popups
+ * @property {() => boolean} [quiet] false while writes outside the queue are not acknowledged (the watchdog waits)
  */
 
 const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported', 'auth/cancelled-popup-request'];
@@ -190,7 +199,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   win?.addEventListener?.('offline', () => tell());
 
   // the status: confirmed only once the server has answered since the page opened
-  let heard = false, persisted = true, relistens = 0;
+  let heard = false, heardAt = 0, persisted = true, relistens = 0;
   /** @type {Set<(st: SyncStatus) => void>} */
   const subs = new Set();
   let lastTold = '';
@@ -209,7 +218,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   /** @param {(st: SyncStatus) => void} fn @returns {() => boolean} */
   const status$ = fn => { subs.add(fn); const st = statusNow(); lastTold = st.state + ':' + st.count; fn(st); return () => subs.delete(fn); };
   /** @param {import('./types.js').SnapMeta} m */
-  const onSnap = m => { watchdog.heard(m); if (!m?.fromCache && !heard) { heard = true; } tell(); };
+  const onSnap = m => { watchdog.heard(m); if (!m?.fromCache) { heard = true; heardAt = now(); } tell(); };
   if (!options.adapter) meta.add((_coll, m) => watchdog.heard(m));
 
   // watches: each one's list (device copy, then the server) with this device's unsent saves laid over it, again when
@@ -236,7 +245,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   let timer = 0;
   let cycling = false;
   const watchdog = createWatchdog({
-    now, online, quiet: () => queue.pending() === 0,
+    now, online, quiet: () => queue.pending() === 0 && (!options.quiet || !!options.quiet()),
     relisten: /** @param {string} why */ why => { console.warn('listeners replaced:', why); relistens++; stopWatches(); hub.stopAll().then(() => { startWatches(); tell(); }); },
     cycle: /** @param {string} why */ why => { console.warn('connection restarted:', why); void cycleNet().finally(() => tell()); },
   });
@@ -289,8 +298,10 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   }
   /** @param {number} [ms] @returns {Promise<boolean>} */
   async function flush(ms = 4000) {
+    const end = Date.now() + ms;   // (one wait in all, 0.7.3: the saves being stored, then their sends)
     if (saving.size) await Promise.race([Promise.allSettled([...saving]), new Promise(r => setTimeout(r, ms))]);
-    return queue.flush(ms);
+    const sent = await queue.flush(Math.max(0, end - Date.now()));
+    return sent && !saving.size;   // (a save still being stored is not sent)
   }
   /** @param {string} s */
   async function open(s) { scope = s; await queue.activate(s); tell(); }
@@ -351,7 +362,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
       },
     });
     if (!r.wiped) { stopWatches(); startWatches(); return { ok: false, reason, reload: false, failed: r.failed }; }
-    stopWatches(); watches.clear(); scope = ''; heard = false; told.clear(); deleting.clear(); codes.clear(); claimsAsked = '';
+    stopWatches(); watches.clear(); scope = ''; heard = false; heardAt = 0; told.clear(); deleting.clear(); codes.clear(); claimsAsked = '';
     if (clear) loaded = null;   // (the SDK instance was terminated: the page starts again)
     await s.A.signOut(s.auth);
     current = null;
@@ -412,6 +423,6 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   const parts = { hub, queue, stores, adapter, watchdog, registry, outbox };
   return {
     signIn, signOut, onUser, user: () => current, open, watch, save, flush, status$, refreshClaims, nudge,
-    relistens: () => relistens, conflicts, describe, resolve, hub, queue, parts,
+    relistens: () => relistens, facts: () => ({ persisted, confirmed: heard, heardAt }), conflicts, describe, resolve, hub, queue, parts,
   };
 }

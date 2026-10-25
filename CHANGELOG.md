@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.3 (2026-10-25)
+
+createApp gaps found moving apps onto it. Additive, except `flush()`, which now keeps to its time and answers truly.
+Tests: `test/app.test.mjs` (+3).
+
+- `createApp({ quiet })`: `quiet() -> false` while the app knows of its own writes not acknowledged outside the
+  queue (writes an older version left in the SDK's offline queue): the watchdog then never restarts the connection
+  under them (it already waited for the queue's own saves).
+- `app.facts() -> { persisted, confirmed, heardAt }`: the storage guard's answer, whether the server has answered
+  since sign-in, and when it last did (ms), for an app's own status words (no second `persistGuard` call needed).
+- `app.flush(ms)`: one wait of ms in all (it waited ms for saves being stored, then ms again for their sends), and
+  false while a save is still being stored (it said true then: nothing was in the queue yet).
+- Documented, unchanged: the hub reads by `backend.stampMode` unless `hub.stampMode` is given (an app whose server
+  stamps are not on every record yet passes `hub: { stampMode: 'client' }`).
+
 ## 0.7.2 (2026-10-25)
 
 Fix (#19): a save shows in the lists (`watchSaved`, `queue.overlay`) from the moment `save()` is called. Before, it
