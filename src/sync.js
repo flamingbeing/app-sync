@@ -594,6 +594,8 @@ export const GRACE = 1500;
  */
 /** @param {SyncHubOptions} options */
 export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.now, onError = () => {}, grace = GRACE, bin = 'bin', binKinds = {}, feeds: extraFeeds = {}, unstamped = 'skip', expire = {}, stampMode = 'client', serverField = 'serverAt', unsent = () => false, onLeave = () => {} }) {
+  /** @type {WeakMap<object, Listen>} the app's own listener of an engine (watch's own) */
+  const ownListen = new WeakMap();
   const feedKinds = [...(bin ? /** @type {[string, Record<string, string>][]} */ ([[bin, binKinds]]) : []), ...Object.entries(extraFeeds || {}).filter(([c]) => c && c !== bin)];
   const engines = new Map(), feeds = new Map(), stores = new Map(), timers = new Map(), stopping = new Map(), tombing = new Map();
   const waiting = new Set();   // scope\ncoll\nid with a deferred tombstone in a collection's stored copy (not running)
@@ -670,12 +672,14 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     for (const [k, f] of feeds) if (k.startsWith(scope + '\n')) { f.stop(); feeds.delete(k); }
   }
   return {
-    /** @param {string} scope @param {string} coll @param {(list: Doc[], meta: SnapMeta) => void} cb @returns {() => void} */
-    watch(scope, coll, cb) {
+    // own (1.2.0): the app's listener for this collection instead of listen; one way at a time per collection
+    /** @param {string} scope @param {string} coll @param {(list: Doc[], meta: SnapMeta) => void} cb @param {Listen | null} [own] @returns {() => void} */
+    watch(scope, coll, cb, own = null) {
       const k = key(scope, coll);
       let e = engines.get(k);
-      if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen, fetchOne, now, onError, unstamped, expire: (expire && Object.hasOwn(expire, coll) && expire[coll]) || null, stampMode, serverField,
-        unsent: id => unsent(scope, coll, id), onLeave: (id, doc) => onLeave(scope, coll, id, doc) }); engines.set(k, e); }
+      if (e && own && ownListen.get(e) !== own) throw new Error('watch: ' + coll + ' is already listened to another way');
+      if (!e) { e = createCollectionSync({ scope, coll, store: lazyStore(scope), listen: own || listen, fetchOne, now, onError, unstamped, expire: (expire && Object.hasOwn(expire, coll) && expire[coll]) || null, stampMode, serverField,
+        unsent: id => unsent(scope, coll, id), onLeave: (id, doc) => onLeave(scope, coll, id, doc) }); engines.set(k, e); if (own) ownListen.set(e, own); }
       for (const [fc, kinds] of feedKinds) {
         const fk = key(scope, fc);
         if (!feeds.has(fk)) feeds.set(fk, createTombFeed({ scope, coll: fc, kinds, store: lazyStore(scope), listen, apply: tombsFor(scope), now, onError, stampMode, serverField }));

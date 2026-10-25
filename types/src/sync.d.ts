@@ -160,8 +160,8 @@ export function createTombFeed({ scope, store, listen, apply, kinds, coll, now, 
  */
 /** @param {SyncHubOptions} options */
 export function createSyncHub({ openStore, listen, fetchOne, now, onError, grace, bin, binKinds, feeds: extraFeeds, unstamped, expire, stampMode, serverField, unsent, onLeave }: SyncHubOptions): {
-    /** @param {string} scope @param {string} coll @param {(list: Doc[], meta: SnapMeta) => void} cb @returns {() => void} */
-    watch(scope: string, coll: string, cb: (list: Doc[], meta: SnapMeta) => void): () => void;
+    /** @param {string} scope @param {string} coll @param {(list: Doc[], meta: SnapMeta) => void} cb @param {Listen | null} [own] @returns {() => void} */
+    watch(scope: string, coll: string, cb: (list: Doc[], meta: SnapMeta) => void, own?: Listen | null): () => void;
     /** @param {string} scope @param {string} coll @param {string[]} ids @returns {Promise<void>} */
     drop(scope: string, coll: string, ids: string[]): Promise<void>;
     /** @param {string} scope */

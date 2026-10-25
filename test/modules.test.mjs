@@ -232,7 +232,7 @@ test('sync module: reopen falls back to a memory-only cache when the old cache c
 
 test('sync module: watch(scope, coll, cb, { listen }) (1.2.0) runs on the app\'s own listener, keeping the device copy, the status and the watchdog', async () => {
   const srv = fakeServer(), base = fakeAdapter(srv), heard = [];
-  const adapter = { ...base, listen: (s, c, plan, onSnap, onError) => { heard.push('engine:' + c); return srv.listen(s, c, plan, onSnap, onError); } };
+  const adapter = { ...base, listen: (s, c, plan, onSnap, onError) => { if (c === 'items') heard.push('engine:' + c); return srv.listen(s, c, plan, onSnap, onError); } };
   const t = await modulesApp({ srv, adapter });
   const { app } = t;
   await app.auth.signIn();

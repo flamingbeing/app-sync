@@ -1,5 +1,5 @@
 /** @param {FirestoreBackendOptions} options */
-export function createFirestoreBackend({ sdk, path, field: stampField, time, stamp, canonical: canonOf, where, merge, mark, stampMode, serverField, writeId, held, edits, editor, onCommit, onSnapshotMeta, onRead, commitRetry }: FirestoreBackendOptions): {
+export function createFirestoreBackend({ sdk, path, field: stampField, time, stamp, canonical: canonOf, where, merge, mark, stampMode, serverField, writeId, held, edits, editor, onCommit, onSnapshotMeta, onRead, commitRetry, unstampedColls }: FirestoreBackendOptions): {
     listen: (scope: string, coll: string, { since, field }: ListenPlan | undefined, onSnap: (s: Snapshot) => void, onError: (e: any) => void) => () => void;
     listenDoc: (segments: (string | number)[], onSnap: (s: {
         doc: Doc | null;
@@ -7,7 +7,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField, time, sta
         hasPendingWrites: boolean;
     }) => void, onError: (e: any) => void) => () => void;
     fetchOne: (scope: string, coll: string, id: string) => Promise<Doc | null>;
-    commit: (scope: string, coll: string, record: Doc, base: Doc | null, { key, ops, after }?: CommitExtra) => Promise<Doc>;
+    commit: (scope: string, coll: string, record: Doc, base: Doc | null, { key, ops, after, path: to }?: CommitExtra) => Promise<Doc>;
     create: (scope: string, coll: string, record: Doc) => Promise<Doc>;
     existing: (scope: string, coll: string, ids: any[]) => Promise<Set<string>>;
     stamp: (prev?: any) => string | number;
@@ -69,4 +69,5 @@ export type FirestoreBackendOptions = {
         codes?: string[];
         delay?: number;
     } | null | undefined;
+    unstampedColls?: string[] | undefined;
 };

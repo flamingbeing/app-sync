@@ -13,6 +13,7 @@
     "src/core.js",
     "src/firestore.js",
     "src/forget.js",
+    "src/kinds.js",
     "src/module-sync.js",
     "src/outbox.js",
     "src/persist.js",
