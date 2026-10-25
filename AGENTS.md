@@ -45,7 +45,7 @@ NODE_OPTIONS="--import <app-devkit>/serve-candidate/patch.mjs" npx playwright te
 
 ## Releasing
 
-1. Bump `version` in `package.json` and `VERSION` in `index.js`; add the CHANGELOG entry.
+1. Bump `version` in `package.json` and `VERSION` in `index.js` and `app.js`; add the CHANGELOG entry.
    A new or removed `src/` import: update `FILES` in `index.js` and `files.json` (`test/freeze.test.mjs` checks both).
 2. Run `node tools/build-sync.mjs --lock` and commit `versions.lock.json` (checks fail without it).
 3. Merge with Checks green: `release.yml` then tags that commit `vX.Y.Z` (only if the tag doesn't exist yet).

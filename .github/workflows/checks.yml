@@ -156,7 +156,12 @@ jobs:
       - name: The starter's pinned engine, for the mixed-version spec
         if: matrix.repo == 'app-starter'
         run: |
-          v="$(grep -o 'core\.anawj\.com/sync/[0-9][^/]*/' app/app/sw.js | head -1 | cut -d/ -f3)"
+          # the pin: the import map in index.html (root, Vite-lite layout), else public/sw.js, else app/sw.js (0.x layout)
+          for f in app/index.html app/public/sw.js app/app/sw.js; do
+            v="$(grep -o 'core\.anawj\.com/sync/[0-9][^/]*/' "$f" 2>/dev/null | head -1 | cut -d/ -f3)"
+            if [ -n "$v" ]; then echo "pinned $v (from ${f#app/})"; break; fi
+          done
+          if [ -z "$v" ]; then echo "::error::no core.anawj.com/sync/<version>/ pin in index.html, public/sw.js or app/sw.js"; exit 1; fi
           git clone --quiet --depth 1 --branch "v$v" https://github.com/flamingbeing/app-sync pinned
       - name: ${{ matrix.row }} browser tests on this engine
         id: tests
