@@ -385,3 +385,41 @@ test('the sign-out check stays shut while an earlier save of a record is still b
   try { assert.equal(await q.flush(), false, 'the first save is still out'); }
   finally { gates.forEach(r => r()); await first; }
 });
+
+test('a forget while a first save is still being stored leaves no row behind', async () => {
+  const rows = new Map(); let release; const gate = new Promise(r => { release = r; });
+  let entered; const started = new Promise(r => { entered = r; });
+  const store = { async put(x) { entered(); await gate; rows.set(x.key, structuredClone(x)); }, async list(o) { return [...rows.values()].filter(x => x.owner === o); }, async get(k) { return rows.get(k) || null; }, async remove(k) { rows.delete(k); }, async forget(o) { for (const [k, x] of rows) if (x.owner === o) rows.delete(k); } };
+  const q = createWriteQueue({ store, getOwner: () => 'a', online: () => false, backend: async (_o, _k, r) => r, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const saving = q.save('item', 'a', { id: 'x' }).catch(() => {});
+  await started;
+  const forgetting = q.forget();
+  release(); await saving; await forgetting;
+  assert.equal(rows.size, 0, 'the wipe comes after the put that was out');
+});
+
+test('a save step that comes after a forget stores nothing', async () => {
+  const rows = new Map(); const gates = []; let hold = false;
+  const store = { async put(x) { if (hold) await new Promise(r => gates.push(r)); rows.set(x.key, structuredClone(x)); }, async list(o) { return [...rows.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return rows.get(k) || null; }, async remove(k) { rows.delete(k); }, async forget(o) { for (const [k, x] of rows) if (x.owner === o) rows.delete(k); } };
+  const q = createWriteQueue({ store, getOwner: () => 'a', online: () => false, backend: async (_o, _k, r) => r, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  await q.save('item', 'a', { id: 'x', v: 1 });
+  await q.save('item', 'a', { id: 'x', v: 2 }).catch(() => {});
+  const key = q.entries()[0].key;
+  hold = true;
+  const archiving = q.archive(key);
+  await settle();
+  const forgetting = q.forget();
+  gates.forEach(r => r()); await archiving; await forgetting;
+  assert.equal(rows.size, 0, 'nothing is stored once the account is forgotten');
+});
+
+test('a forget does not wait for ever on a store write that never ends', async () => {
+  const store = { async put() { await new Promise(() => {}); }, async list() { return []; }, async get() { return null; }, async remove() {}, async forget() {} };
+  const q = createWriteQueue({ store, getOwner: () => 'a', online: () => false, backend: async (_o, _k, r) => r, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  q.save('item', 'a', { id: 'x' }).catch(() => {});
+  await settle();
+  await q.forget();
+});

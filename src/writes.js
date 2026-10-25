@@ -106,6 +106,12 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   const notify = () => { for (const fn of listeners) fn(); };
   /** @type {Map<string, { kind: string, owner: string, record: Doc }>} */
   const inflight = new Map();   // saves called but not stored yet (overlay shows them)
+  // puts to the store not yet finished: forget waits for them (a while at most), so none lands after the wipe
+  /** @type {Set<Promise<any>>} */
+  const puts = new Set();
+  // accounts forgotten and not opened again: a save still running for one of them stores nothing more
+  /** @type {Set<string>} */
+  const forgotten = new Set();
   let storing = 0;   // saves called and not finished (flush waits for all of them, however many are for one record)
   /** @param {string | null} email @param {number} gen */
   const current = (email, gen) => owner === email && generation === gen && getOwner() === email;
@@ -124,7 +130,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   /** @param {string} id */
   const chainOf = id => ordered().filter(x => keyOf(x) === id && !terminal.has(x.state));
   /** @param {Job} job */
-  async function persist(job) { await store.put(copy(job)); }
+  async function persist(job) { if (forgotten.has(job.owner)) return; const put = Promise.resolve(store.put(copy(job))); puts.add(put); try { await put; } finally { puts.delete(put); } }
   // Another window on this device (a second tab, or the home-screen app beside the browser) shares the store and may
   // have sent or set aside a job since this one read it: what it stored wins, or this window sends its stale copy
   // later (a case deleted there comes back, one restored there is deleted again). Two windows sending one job at the
@@ -200,7 +206,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   /** @param {string} email */
   async function activate(email) {
     if (owner === email && loading) return loading;
-    owner = email; const gen = ++generation; jobs = []; running.clear(); waits.clear(); storageError = '';
+    forgotten.delete(email); owner = email; const gen = ++generation; jobs = []; running.clear(); waits.clear(); storageError = '';
     loading = (async () => {
       try { const found = await store.list(email); if (current(email, gen)) jobs = found; }
       catch (error) { if (current(email, gen)) storageError = error.message; }
@@ -379,7 +385,9 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   async function forget() {
     const old = owner; owner = null; ++generation; loading = null; jobs = []; running.clear(); waits.clear(); storageError = ''; notify();
     if (!old) return;
+    forgotten.add(old);
     let error = null;
+    await Promise.race([Promise.allSettled([...puts]), delay(4000)]);
     try { await store.forget(old); } catch (e) { error = e; }
     if (registry) { try { await registry.forget(old, { except: store }); } catch (e) { error ||= e; } }
     if (error) throw error;

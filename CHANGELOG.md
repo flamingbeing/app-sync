@@ -14,6 +14,16 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.5 (2026-10-26)
+
+Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is a few
+lines in `src/writes.js` (the outbox).
+
+- **A forget waits for saves still being stored**: a sign-out wipe could run while a save's first write to the device
+  was still out; the row then landed after the wipe. `forget()` now waits (4 s at most, a write that never ends does not
+  hold the sign-out) for every write already started before it clears the store, and a save step that comes after the
+  forget stores nothing. An account switch is unchanged: its unsent saves stay.
+
 ## 1.3.4 (2026-10-26)
 
 Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is a counter
