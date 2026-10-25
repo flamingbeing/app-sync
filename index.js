@@ -24,4 +24,4 @@ export const createReport = options => createReportOf({ sync: VERSION, ...option
 export const FILES = ['index.js', 'src/cache.js', 'src/conflict.js', 'src/firestore.js', 'src/forget.js',
   'src/outbox.js', 'src/persist.js', 'src/registry.js', 'src/replace.js', 'src/report.js', 'src/status.js', 'src/store.js',
   'src/sync.js', 'src/user.js', 'src/watchdog.js', 'src/writes.js'];
-export const VERSION = '1.2.0';
+export const VERSION = '1.3.0';

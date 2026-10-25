@@ -289,11 +289,13 @@ export type WatchOptions = {
  */
 export type SaveMany = (kind: string, scope: string, records: Doc[]) => Promise<PromiseSettledResult<Doc>[]>;
 /**
- * Reserved for 1.x (SHAPES.md): types only, nothing built. 1.0 uses these names for nothing else.
+ * Reserved for 1.x (SHAPES.md). Built in 1.3.0: SignInMethod, SignInRequest and SyncReserved's public; the rest are
+ * types only, nothing built. 1.0 uses these names for nothing else.
  */
 export type SignInMethod = "google" | "emailLink" | "password" | "passcode" | "anonymous";
 /**
- * Reserved for 1.x (SHAPES.md): types only, nothing built. 1.0 uses these names for nothing else.
+ * Reserved for 1.x (SHAPES.md). Built in 1.3.0: SignInMethod, SignInRequest and SyncReserved's public; the rest are
+ * types only, nothing built. 1.0 uses these names for nothing else.
  */
 export type SignInRequest = {
     method?: SignInMethod;
@@ -326,6 +328,7 @@ export type SyncReserved = {
     keep?: Record<string, KeepRule>;
 };
 /**
- * Reserved for 1.x (SHAPES.md): types only, nothing built. 1.0 uses these names for nothing else.
+ * Reserved for 1.x (SHAPES.md). Built in 1.3.0: SignInMethod, SignInRequest and SyncReserved's public; the rest are
+ * types only, nothing built. 1.0 uses these names for nothing else.
  */
 export type ReservedModule = "files" | "ui" | "theme" | "settings" | "sw" | "devkit";

@@ -334,3 +334,23 @@ test('public read: read only and kept apart: no saves to public:*, no account sc
   assert.equal(app.sync.queue.entries().length, 0);
   await app.stop();
 });
+
+test('public read: a relisten while signed out (the public watch still listening) starts only what was running', async () => {
+  const srv = fakeServer(), base = fakeAdapter(srv), heard = [];
+  let t = Date.now();
+  const adapter = { ...base, listen: (s, c, ...rest) => { heard.push(c); return base.listen(s, c, ...rest); } };
+  const { app } = await modulesApp({ srv, adapter, more: { ...PUBLIC, now: () => t } });
+  app.sync.watch('public:all', 'news', () => {});
+  await app.auth.signIn();
+  app.sync.watch('sp-u1', 'items', () => {});
+  assert.ok(await until(() => heard.includes('items')));
+  await app.auth.signOut();
+  await settle(10);
+  heard.length = 0;
+  t += 60000;
+  assert.equal(app.sync.nudge('wake'), true, 'nothing heard for a minute: listened again');
+  assert.ok(await until(() => heard.includes('news')), 'the public watch listened again');
+  await settle(20);
+  assert.deepEqual(heard.filter(c => c !== 'bin'), ['news'], 'the account\'s watch stays paused, signed out (the bin feed: the hub\'s)');
+  await app.stop();
+});

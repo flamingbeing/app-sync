@@ -305,7 +305,14 @@ export function createSyncCore(options, { load, user }) {
     for (const w of docWatches) { const off = w.off; w.off = null; off?.(); }
   };
   // (the ones on the app's own listener first: a plain watch of that collection then joins it, never the other way)
-  const startWatches = () => { for (const w of [...watches].sort((a, b) => Number(!a.listen) - Number(!b.listen))) if (!w.off) start(w); for (const w of docWatches) if (!w.off && !w.failed) startDoc(w); };
+  // only (1.3.0): just those (a relisten: the ones running, not those a sign-out paused)
+  /** @param {Set<Watch | DocWatch> | null} [only] */
+  const startWatches = (only = null) => {
+    /** @param {Watch | DocWatch} w */
+    const due = w => !w.off && (!only || only.has(w));
+    for (const w of [...watches].sort((a, b) => Number(!a.listen) - Number(!b.listen))) if (due(w)) start(w);
+    for (const w of docWatches) if (due(w) && !w.failed) startDoc(w);
+  };
   /** @param {string} s @param {string} coll @param {(list: Doc[], meta: any) => void} cb @param {import('./types.js').WatchOptions} [options] @returns {() => void} */
   function watch(s, coll, cb, options) {
     const listen = options?.listen ?? null;
@@ -342,7 +349,11 @@ export function createSyncCore(options, { load, user }) {
   let cycling = null;
   const watchdog = createWatchdog({
     now, online, quiet: () => queue.pending() === 0 && unsentOutside() === 0,
-    relisten: /** @param {string} why */ why => { console.warn('listeners replaced:', why); relistens++; stopWatches(); hub.stopAll().then(() => { startWatches(); tell(); }); },
+    relisten: /** @param {string} why */ why => {
+      console.warn('listeners replaced:', why); relistens++;
+      const running = new Set([...watches, ...docWatches].filter(w => w.off));
+      stopWatches(); hub.stopAll().then(() => { startWatches(running); tell(); });
+    },
     cycle: /** @param {string} why */ why => { console.warn('connection restarted:', why); void cycleNet(safe).finally(() => tell()); },
   });
   // -> true once the network was switched off and on again (false: no switch in this SDK, ok() said no once the SDK

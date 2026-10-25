@@ -182,7 +182,8 @@
  */
 
 /**
- * Reserved for 1.x (SHAPES.md): types only, nothing built. 1.0 uses these names for nothing else.
+ * Reserved for 1.x (SHAPES.md). Built in 1.3.0: SignInMethod, SignInRequest and SyncReserved's public; the rest are
+ * types only, nothing built. 1.0 uses these names for nothing else.
  * @typedef {'google' | 'emailLink' | 'password' | 'passcode' | 'anonymous'} SignInMethod
  * @typedef {{ method?: SignInMethod, hint?: string, email?: string, password?: string, code?: string }} SignInRequest
  * @typedef {{ recent: number } | { part: (record: Doc) => string }} KeepRule  sync({ keep: { [coll]: KeepRule } })

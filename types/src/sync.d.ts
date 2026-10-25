@@ -169,6 +169,8 @@ export function createSyncHub({ openStore, listen, fetchOne, now, onError, grace
     /** @param {string} scope @param {string} coll @param {any} id */
     tomb(scope: string, coll: string, id: any): any;
     stopAll(): Promise<void>;
+    /** @param {string} scope @returns {Promise<void>} */
+    stopScope(scope: string): Promise<void>;
     replan(): number;
     flush: () => Promise<any[]>;
 };
