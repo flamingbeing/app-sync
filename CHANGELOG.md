@@ -14,6 +14,39 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.0 (2026-10-26)
+
+Additive: no 1.0 name, module contract or stored format changes (FORMATS.md as 1.0: `public:` scopes were reserved
+for this and hold a device copy like any scope, never an outbox job; no new stored key: the owner keeps its
+`{ uid, email }`). Built on the SHAPES.md reservations 7 and 8, each piece with a failing test first.
+
+- **Sign-in methods** (SHAPES.md 8; `src/signin/`): `auth({ methods })` (default `['google']`) takes `emailLink()`,
+  `password()`, `passcode({ url })` and `anonymous()`, each its own named export of `auth.js`, or their SHAPES.md
+  string names (loaded by a literal `import()` the first time `signIn` asks; `'passcode'` has no `url`, so it throws
+  there). `signIn({ method, email, password, code })`; new reasons `'sent'` (the email link is on its way) and
+  `'refused'` (the passcode was not taken). A method not named throws. Signed in anonymously, another method links
+  its account to the anonymous one (`linkWithCredential`, Google's `linkWithPopup` / `linkWithRedirect`): the uid
+  stays, so do the device's data and unsent saves, no switch; the owner and `onUser` get the email. A credential
+  whose account exists signs in instead (a switch, guarded as any). A passcode POSTs `{ code, email? }` to `url` and
+  signs in with the `{ token }` it gets (a custom token: it always signs in).
+- **Public read** (SHAPES.md 7): `sync({ public: [coll] })` (each in `colls`, else `sync()` throws): those collections
+  are watched in scopes named `public:<name>` with no sign-in, and only those there. The watches run signed out, are
+  listened again at sign-in (under the account's rules; the hub's new `stopScope(scope)`), and stay through a switch
+  or `forget()`: their copy is wiped with the rest, then they start again (after a switch at the new sign-in; not
+  when the page must reload). `open`, `save` and `saveMany` on a `public:` scope throw "read only".
+  The watchdog's relisten now starts only the watches that were running, so one while signed out (a public watch
+  still listening) leaves the account's paused ones paused.
+- Tests: `test/signin.emulator.mjs` (in `npm run test:emulator`): each method on the Auth emulator (the email link
+  from its oobCodes, the passcode's custom token unsigned), anonymous then password keeping the uid and an unsent
+  save, and a public watch with no account.
+- **Size budget:** `src/` 276000 -> 290000 bytes, for the four sign-in methods and public read.
+- `entries.json` (auth) gains `src/signin/*.js`; `files.json` / `FILES` unchanged (no new `index.js` import).
+
+Modular: yes (no new entry, global or ctx field; the modularity check, types and both Vite builds pass). Shaken: the
+Vite fixture names `password()` only, and `test/vite/build.mjs` checks that its entry chunk has password's code and
+none of email link's, passcode's or anonymous's, which sit only in the lazy chunks their string names load. Public
+read is an option inside the sync module (no code of its own to shake).
+
 ## 1.2.1 (2026-10-26)
 
 Fix, no API, module contract or stored-format change; modular: yes, shaken: no source change in `src/` or the entries.

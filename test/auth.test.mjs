@@ -4,30 +4,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../app.js';
-import { auth } from '../auth.js';
+import { auth, emailLink, password, passcode, anonymous } from '../auth.js';
 
 const settle = (ms = 5) => new Promise(r => setTimeout(r, ms));
 const memStorage = () => { const m = new Map(); return { m, getItem: k => m.has(k) ? m.get(k) : null, setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; };
 
-function fakeUser({ uid = 'u1', email = 'Fake.Person@Example.test', claims = {} } = {}) {
-  const u = { uid, email, displayName: 'Fake Person', photoURL: '', emailVerified: true, claims, refreshed: 0 };
+function fakeUser({ uid = 'u1', email = 'Fake.Person@Example.test', claims = {}, anonymous = false } = {}) {
+  const u = { uid, email, displayName: 'Fake Person', photoURL: '', emailVerified: true, isAnonymous: anonymous, claims, refreshed: 0 };
   u.getIdTokenResult = async () => ({ claims: u.claims });
   u.getIdToken = async force => { if (force) u.refreshed++; return 'fake-token-' + u.uid; };
   return u;
 }
 // Auth (popup, redirect, state listeners, sign-out) and the bits of Firestore the claims watch uses
-function fakeSdk({ popupError = null, signedIn = null } = {}) {
+function fakeSdk({ popupError = null, signedIn = null, redirectError = null } = {}) {
   const calls = [], docs = new Map(), docCbs = new Map();
   let next = fakeUser();
   const auth = { currentUser: signedIn, cbs: new Set(), set(u) { this.currentUser = u; for (const cb of [...this.cbs]) cb(u); } };
   const A = {
-    GoogleAuthProvider: class { setCustomParameters(p) { this.params = p; calls.push('params ' + JSON.stringify(p)); } },
+    GoogleAuthProvider: class {
+      setCustomParameters(p) { this.params = p; calls.push('params ' + JSON.stringify(p)); }
+      static credentialFromError(e) { return e.credential || null; }
+    },
     async signInWithPopup(a) { calls.push('popup'); if (popupError) throw Object.assign(new Error('fake'), { code: popupError }); a.set(next); },
     async signInWithRedirect() { calls.push('redirect'); },
-    async getRedirectResult() { return null; },
+    async getRedirectResult() { if (redirectError) throw redirectError; return null; },
     onAuthStateChanged(a, cb) { a.cbs.add(cb); cb(a.currentUser); return () => a.cbs.delete(cb); },
     async signOut(a) { calls.push('signOut'); a.set(null); },
+    // the 1.3.0 methods (a credential is what it would sign in as; linking keeps the anonymous account's uid)
+    EmailAuthProvider: {
+      credential: (email, password) => ({ email, password }),
+      credentialWithLink: (email, link) => ({ email, link }),
+    },
+    async signInAnonymously(a) { calls.push('anonymous'); a.set(fakeUser({ uid: 'anon1', email: '', anonymous: true })); },
+    async signInWithCredential(a, c) { calls.push('credential ' + c.email); a.set(fakeUser({ uid: taken.get(c.email) || 'u-' + c.email, email: c.email })); },
+    async linkWithCredential(u, c) {
+      calls.push('link ' + c.email);
+      if (taken.has(c.email)) throw Object.assign(new Error('fake'), { code: 'auth/email-already-in-use' });
+      Object.assign(u, { email: c.email, isAnonymous: false });
+    },
+    async linkWithPopup(u) { calls.push('linkPopup'); Object.assign(u, { email: next.email, isAnonymous: false }); },
+    async signInWithCustomToken(a, token) { calls.push('token ' + token); a.set(fakeUser({ uid: 'guest-' + token, email: '' })); },
+    isSignInWithEmailLink: (_a, href) => href.includes('oobCode='),
+    async sendSignInLinkToEmail(_a, email, settings) { calls.push('send ' + email + ' ' + JSON.stringify(settings)); },
   };
+  const taken = new Map();
   const db = {};
   const snap = (path, fromCache = false) => ({ exists: () => docs.has(path), data: () => structuredClone(docs.get(path)), metadata: { fromCache } });
   const F = {
@@ -35,7 +55,7 @@ function fakeSdk({ popupError = null, signedIn = null } = {}) {
     onSnapshot(ref, cb) { docCbs.set(ref.path, cb); return () => docCbs.delete(ref.path); },
   };
   const setDoc = (path, d) => { if (d) docs.set(path, d); else docs.delete(path); docCbs.get(path)?.(snap(path)); };
-  return { A, F, auth, db, calls, docCbs, setDoc, as(u) { next = u; }, sdk: async () => ({ A, F, auth, db }) };
+  return { A, F, auth, db, calls, docCbs, setDoc, taken, as(u) { next = u; }, sdk: async () => ({ A, F, auth, db }) };
 }
 // stands in for the sync module: per-account data on the device, unsent saves, reports unsent to the status
 function fakeData(device, log) {
@@ -72,7 +92,7 @@ test('signIn: the popup with the hint, a redirect where the popup cannot open; o
   await blocked.app.ready;
   assert.deepEqual(await blocked.app.auth.signIn(), { ok: false, reason: 'redirect' });
   assert.deepEqual(blocked.sdk.calls.slice(1), ['popup', 'redirect']);
-  await assert.rejects(blocked.app.auth.signIn({ method: 'password' }), /1\.x/);
+  await assert.rejects(blocked.app.auth.signIn({ method: 'password' }), /not in auth\(\{ methods \}\)/);
 });
 
 test('sign-out keeps the device copy and unsent saves; the same account carries on after a reload', async () => {
@@ -267,4 +287,114 @@ test('stop() ends the Auth listener; nothing is emitted after', async () => {
   t.sdk.auth.set(fakeUser());
   await settle();
   assert.deepEqual(t.log, []);
+});
+
+// ---- 1.3.0: sign-in methods (SHAPES.md 8): each its own named export; the SHAPES string names load the same code ----
+
+test('methods: only the ones listed sign in (google alone by default); a name not known fails at auth()', async () => {
+  const t = setup({ options: { methods: [password()] } });
+  await t.app.ready;
+  await assert.rejects(t.app.auth.signIn({ method: 'anonymous' }), /not in auth\(\{ methods \}\)/);
+  await assert.rejects(t.app.auth.signIn(), /not in auth\(\{ methods \}\)/, 'google is not listed here');
+  assert.throws(() => auth({ methods: ['fax'] }), /unknown sign-in method fax/);
+  const byName = setup({ options: { methods: ['passcode'] } });
+  await byName.app.ready;
+  await assert.rejects(byName.app.auth.signIn({ method: 'passcode', code: 'fake' }), /passcode needs its url/, 'by name it has no url');
+});
+
+test('password, by named export and by name: signs in as that account, then the usual signin', async () => {
+  for (const methods of [[password()], ['password']]) {
+    const t = setup({ options: { methods } });
+    await t.app.ready;
+    assert.deepEqual(await t.app.auth.signIn({ method: 'password', email: 'pw.fake@example.test', password: 'fake-pass' }), { ok: true, reason: '' });
+    assert.deepEqual(t.sdk.calls, ['credential pw.fake@example.test']);
+    assert.equal(t.app.auth.user().uid, 'u-pw.fake@example.test');
+    assert.deepEqual(t.log, ['signin u-pw.fake@example.test']);
+  }
+});
+
+test('anonymous, then a real account links to it: same uid, no switch, the unsent save stays and the owner gets the email', async () => {
+  const t = setup({ options: { methods: [anonymous(), password(), 'google'] } });
+  await t.app.ready;
+  assert.deepEqual(await t.app.auth.signIn({ method: 'anonymous' }), { ok: true, reason: '' });
+  assert.equal(t.app.auth.user().uid, 'anon1');
+  t.app.data.save({ id: 'guest row' });
+  const seen = [];
+  t.app.auth.onUser(u => seen.push(u?.email ?? null));
+  assert.deepEqual(await t.app.auth.signIn({ method: 'password', email: 'Linked.Fake@example.test', password: 'fake-pass' }), { ok: true, reason: '' });
+  assert.equal(t.app.auth.user().uid, 'anon1', 'the uid is kept');
+  assert.equal(t.app.auth.user().email, 'linked.fake@example.test');
+  assert.deepEqual(seen, ['', 'linked.fake@example.test'], 'onUser hears the linked account');
+  assert.deepEqual(t.log, ['signin anon1'], 'no switch, no second signin');
+  assert.deepEqual(t.device, { rows: [{ id: 'guest row' }], unsent: 1 }, 'the device data stays');
+  assert.deepEqual(JSON.parse(t.storage.m.get('fake-app:auth/owner')), { uid: 'anon1', email: 'linked.fake@example.test' });
+  // anonymous again while signed in: nothing to do
+  assert.deepEqual(await t.app.auth.signIn({ method: 'anonymous' }), { ok: true, reason: '' });
+  assert.equal(t.sdk.calls.filter(c => c === 'anonymous').length, 1);
+});
+
+test('linking google keeps the uid; a credential already taken by an account signs in to it (a switch, guarded as ever)', async () => {
+  const t = setup({ options: { methods: ['anonymous', 'google', password()] } });
+  await t.app.ready;
+  await t.app.auth.signIn({ method: 'anonymous' });
+  assert.deepEqual(await t.app.auth.signIn(), { ok: true, reason: '' });
+  assert.deepEqual(t.sdk.calls.slice(-1), ['linkPopup']);
+  assert.equal(t.app.auth.user().uid, 'anon1');
+  assert.equal(t.app.auth.user().email, 'fake.person@example.test');
+  // a fresh guest whose unsent save would go with a switch: the taken account's sign-in is refused
+  const u = setup({ options: { methods: ['anonymous', password()] } });
+  await u.app.ready;
+  await u.app.auth.signIn({ method: 'anonymous' });
+  u.app.data.save({ id: 'guest row' });
+  u.sdk.taken.set('used.fake@example.test', 'u9');
+  const r = await u.app.auth.signIn({ method: 'password', email: 'used.fake@example.test', password: 'fake-pass' });
+  assert.deepEqual(r, { ok: false, reason: 'unsent', from: { uid: 'anon1', email: '' } });
+  assert.deepEqual(u.sdk.calls.slice(-3), ['link used.fake@example.test', 'credential used.fake@example.test', 'signOut']);
+  assert.deepEqual(u.device.rows, [{ id: 'guest row' }]);
+});
+
+test('a guest back from linking google by redirect, the account already taken: signs in to it (a switch, guarded as ever)', async () => {
+  const code = 'auth/credential-already-in-use', credential = { email: 'used.fake@example.test' };
+  const sdk = fakeSdk({ signedIn: fakeUser({ uid: 'anon1', email: '', anonymous: true }), redirectError: Object.assign(new Error('fake'), { code, credential }) });
+  sdk.taken.set('used.fake@example.test', 'u9');
+  const t = setup({ sdk, options: { methods: ['anonymous', 'google'] } });
+  await t.app.ready;
+  await settle(20);
+  assert.ok(t.sdk.calls.includes('credential used.fake@example.test'), 'signs in with the taken credential');
+  assert.equal(t.app.auth.user().uid, 'u9');
+  assert.ok(t.log.includes('switch anon1>u9'), 'the usual switch');
+});
+
+test('emailLink: sends the link (reason sent); on the page the link opens, signs in with it', async () => {
+  const win = { location: { href: 'https://app.example.test/list?x=1', origin: 'https://app.example.test', pathname: '/list' } };
+  const t = setup({ options: { methods: [emailLink({ win })] } });
+  await t.app.ready;
+  assert.deepEqual(await t.app.auth.signIn({ method: 'emailLink', email: 'link.fake@example.test' }), { ok: false, reason: 'sent' });
+  assert.deepEqual(t.sdk.calls, ['send link.fake@example.test {"url":"https://app.example.test/list","handleCodeInApp":true}']);
+  win.location.href = 'https://app.example.test/list?oobCode=fake&mode=signIn';
+  assert.deepEqual(await t.app.auth.signIn({ method: 'emailLink', email: 'link.fake@example.test' }), { ok: true, reason: '' });
+  assert.equal(t.app.auth.user().email, 'link.fake@example.test');
+  const own = setup({ options: { methods: [emailLink({ win, url: 'https://app.example.test/done' })] } });
+  await own.app.ready;
+  win.location.href = 'https://app.example.test/';
+  await own.app.auth.signIn({ method: 'emailLink', email: 'link.fake@example.test' });
+  assert.match(own.sdk.calls[0], /"url":"https:\/\/app\.example\.test\/done"/);
+  await assert.rejects(own.app.auth.signIn({ method: 'emailLink' }), /emailLink needs the email/);
+});
+
+test('passcode: the code goes to the app\'s url, its token signs in; a refused code is reason refused', async () => {
+  const posts = [];
+  const fetch = async (url, init) => {
+    posts.push(url + ' ' + init.body);
+    const { code } = JSON.parse(init.body);
+    return code === 'right' ? { ok: true, status: 200, json: async () => ({ token: 'tok1' }) } : { ok: false, status: 403, json: async () => ({}) };
+  };
+  const t = setup({ options: { methods: [passcode({ url: 'https://guest.example.test/token', fetch })] } });
+  await t.app.ready;
+  assert.deepEqual(await t.app.auth.signIn({ method: 'passcode', code: 'wrong' }), { ok: false, reason: 'refused' });
+  assert.equal(t.app.auth.user(), null);
+  assert.deepEqual(await t.app.auth.signIn({ method: 'passcode', code: 'right', email: 'g.fake@example.test' }), { ok: true, reason: '' });
+  assert.deepEqual(posts, ['https://guest.example.test/token {"code":"wrong"}', 'https://guest.example.test/token {"code":"right","email":"g.fake@example.test"}']);
+  assert.deepEqual(t.sdk.calls, ['token tok1']);
+  assert.equal(t.app.auth.user().uid, 'guest-tok1');
 });
