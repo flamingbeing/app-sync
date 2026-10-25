@@ -17,11 +17,19 @@
 // on, when below multi-tab). Not covered: a cache in memory keeps nothing offline between loads (saves still wait
 // in the outbox, which is separate).
 
+/**
+ * @typedef {'multi' | 'single' | 'memory'} CacheMode
+ * @typedef {{ app?: any, settings?: object, report?: { error?: (code: string) => void } | null, storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null, key?: string }} CacheOptions
+ * @typedef {{ changed: boolean, mode: CacheMode, code: string | null }} CacheFailed
+ */
+
 export const CACHE_KEY = 'app-sync-cache';
+/** @type {CacheMode[]} */
 export const CACHE_MODES = ['multi', 'single', 'memory'];
 
 // 'quota' (storage full), 'state' (the SDK's "Unexpected state" assertion, usually a second tab on another
 // instance of the cache), or null for anything else
+/** @param {any} err @returns {'quota' | 'state' | null} */
 export function cacheFailure(err) {
   if (!err) return null;
   const text = `${err.name || ''} ${err.code || ''} ${err.message || ''}`;
@@ -30,24 +38,36 @@ export function cacheFailure(err) {
   return null;
 }
 
+/** @param {CacheOptions['storage']} storage */
 const wrap = storage => {
   let s = storage;
   if (s === undefined) { try { s = typeof localStorage !== 'undefined' ? localStorage : null; } catch { s = null; } }
   return {
+    /** @param {string} key */
     get: key => { try { return s ? s.getItem(key) : null; } catch { return null; } },
+    /** @param {string} key @param {string} v */
     set: (key, v) => { try { if (s) s.setItem(key, v); } catch { /* nothing remembered */ } },
+    /** @param {string} key */
     del: key => { try { if (s) s.removeItem(key); } catch { /* nothing to forget */ } },
   };
 };
 
+/** @param {any} F @param {CacheMode} mode */
 const build = (F, mode) => mode === 'memory' ? F.memoryLocalCache()
   : F.persistentLocalCache({ tabManager: mode === 'multi' ? F.persistentMultipleTabManager() : F.persistentSingleTabManager({}) });
 
+/**
+ * @param {any} F
+ * @param {CacheOptions} [options]
+ * @returns {{ db: any, cache: any, mode: CacheMode, failed: (err: any) => CacheFailed, reset: () => void }}
+ */
 export function firestoreCache(F, { app = null, settings = {}, report = null, storage, key = CACHE_KEY } = {}) {
   const store = wrap(storage);
+  /** @param {string} code */
   const say = code => { try { report?.error?.(code); } catch { /* the report never breaks the app */ } };
   const saved = store.get(key);
-  let from = Math.max(0, CACHE_MODES.indexOf(saved));
+  let from = Math.max(0, CACHE_MODES.indexOf(/** @type {CacheMode} */ (saved)));
+  /** @type {{ db: any, cache: any, mode: CacheMode } | null} */
   let out = null;
   for (let i = from; i < CACHE_MODES.length; i++) {
     const mode = CACHE_MODES[i];
@@ -64,6 +84,7 @@ export function firestoreCache(F, { app = null, settings = {}, report = null, st
     }
   }
   if (out.mode !== 'multi' && out.mode === saved) say(`cache-${out.mode}`);
+  /** @param {any} err @returns {CacheFailed} */
   const failed = err => {
     const kind = cacheFailure(err);
     if (!kind) return { changed: false, mode: out.mode, code: null };

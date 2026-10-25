@@ -10,28 +10,46 @@
 //   realm: keeps two modes apart on one origin (e.g. 'demo:'); a wipe in one never touches the other. realms: the
 //   other realms in use, so the default realm ('') can tell their stores from its own.
 
+/**
+ * @typedef {import('./types.js').Doc} Doc
+ * @typedef {import('./types.js').CollMeta} CollMeta
+ * @typedef {import('./types.js').Store} Store
+ * @typedef {{ prefix: string, colls: string[], metaOnly?: string[], realm?: string, realms?: string[] }} StoresOptions
+ * @typedef {{ put?: Doc[], del?: string[], meta?: CollMeta, replace?: boolean }} StoreOp
+ */
+
+/** @template T @param {T} v @returns {T} */
 const copy = v => JSON.parse(JSON.stringify(v));
+/** @template T @param {IDBRequest<T>} r @returns {Promise<T>} */
 const req = r => new Promise((resolve, reject) => { r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
 
 // an open that never settles (some WebKit builds; an open queued behind a delete another tab blocks) gives up after this
 export const OPEN_WAIT = 4000;
 
+/** @param {StoresOptions} options */
 export function createStores({ prefix, colls, metaOnly = ['bin'], realm = '', realms = ['demo:'] }) {
   if (!prefix || !Array.isArray(colls)) throw new Error('createStores needs a prefix and a list of collections');
   const COLLS = [...colls], META_ONLY = new Set(metaOnly);
   const REGISTRY = prefix + 'registry';   // localStorage: names opened here (indexedDB.databases() is not everywhere)
+  /** @param {any} scope */
   const storeName = scope => prefix + realm + String(scope || '').trim().toLowerCase();
+  /** @param {string} name */
   const ours = name => name.startsWith(prefix + realm) && (realm !== '' || !realms.some(r => r && name.startsWith(prefix + r)));
-  const memory = new Map();   // name -> { docs: { [coll]: Map }, meta: { [coll]: meta } }
+  /** @type {Map<string, { docs: Record<string, Map<string, Doc>>, meta: Record<string, CollMeta> }>} name -> { docs: { [coll]: Map }, meta: { [coll]: meta } } */
+  const memory = new Map();
+  /** @type {Set<Store>} */
   const handles = new Set();  // open handles in this tab (closed when another tab wipes)
 
+  /** @param {string} name @returns {Store} */
   function memoryStore(name) {
     if (!memory.has(name)) memory.set(name, { docs: Object.fromEntries([...COLLS, ...META_ONLY].map(c => [c, new Map()])), meta: {} });
-    const m = memory.get(name);
+    const m = /** @type {NonNullable<ReturnType<typeof memory.get>>} */ (memory.get(name));
     return {
       name, kind: 'memory',
       get closed() { return memory.get(name) !== m; },
+      /** @param {string} coll */
       async load(coll) { if (memory.get(name) !== m) return { docs: [], meta: {} }; return { docs: [...(m.docs[coll] || new Map()).values()].map(copy), meta: copy(m.meta[coll] || {}) }; },
+      /** @param {string} coll @param {StoreOp} [op] */
       async write(coll, { put = [], del = [], meta, replace = false } = {}) {
         if (memory.get(name) !== m) return;   // wiped (sign-out): never bring it back
         const docs = m.docs[coll] ||= new Map();
@@ -47,6 +65,7 @@ export function createStores({ prefix, colls, metaOnly = ['bin'], realm = '', re
   }
 
   // version 1 has every object store; a database left without them (opened elsewhere without a version) is upgraded
+  /** @param {string} name @param {number} [version] @returns {Promise<IDBDatabase>} */
   function openDb(name, version = 1) {
     return new Promise((resolve, reject) => {
       const r = indexedDB.open(name, version);
@@ -63,15 +82,20 @@ export function createStores({ prefix, colls, metaOnly = ['bin'], realm = '', re
       r.onblocked = () => reject(new Error('Local store blocked by another tab'));
     });
   }
+  /** @param {string} name */
   function remember(name) {
     try { const l = JSON.parse(localStorage.getItem(REGISTRY) || '[]'); if (!l.includes(name)) localStorage.setItem(REGISTRY, JSON.stringify([...l, name])); } catch { /* storage blocked */ }
   }
 
   // The store for one scope. Never throws: a store that can't open (or doesn't open in time) is a memory store.
+  /** @param {string} scope @param {number} [wait] @returns {Promise<Store>} */
   async function openStore(scope, wait = OPEN_WAIT) {
     const name = storeName(scope);
     if (typeof indexedDB === 'undefined') return memoryStore(name);
-    let db, timer;
+    /** @type {IDBDatabase} */
+    let db;
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
     const opening = openDb(name);
     try {
       db = await Promise.race([opening, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Local store took too long to open')), wait); })]);
@@ -82,9 +106,11 @@ export function createStores({ prefix, colls, metaOnly = ['bin'], realm = '', re
     } finally { clearTimeout(timer); }
     remember(name);
     let dead = false;   // deleted (sign-out in another tab): forget everything, never recreate the database
+    /** @type {Store} */
     const handle = {
       name, kind: 'idb',
       get closed() { return dead; },
+      /** @param {string} coll */
       async load(coll) {
         if (dead) return { docs: [], meta: {} };
         const only = META_ONLY.has(coll);
@@ -93,6 +119,7 @@ export function createStores({ prefix, colls, metaOnly = ['bin'], realm = '', re
         return { docs, meta: meta || {} };
       },
       // one transaction: replace (clear first), deletes, puts and the meta record
+      /** @param {string} coll @param {StoreOp} [op] @returns {Promise<void>} */
       write(coll, { put = [], del = [], meta, replace = false } = {}) {
         if (dead) return Promise.resolve();
         return new Promise((resolve, reject) => {
@@ -117,11 +144,13 @@ export function createStores({ prefix, colls, metaOnly = ['bin'], realm = '', re
     return handle;
   }
 
+  /** @param {string[] | unknown} keep */
   function closeAll(keep) {
     const k = new Set(Array.isArray(keep) ? keep : []);
     for (const h of [...handles]) if (ours(h.name) && !k.has(h.name)) h.close();
   }
 
+  /** @type {(BroadcastChannel & { unref?: () => void }) | null} */
   let channel = null;
   try {
     if (typeof BroadcastChannel === 'function') {
@@ -135,6 +164,7 @@ export function createStores({ prefix, colls, metaOnly = ['bin'], realm = '', re
   // Delete every scope's store on this device (this realm only), in this tab and the others: sign-out, account
   // switch, account deletion. keep: scopes whose stores stay (the one signed in now, which another tab may be using).
   // Resolves when the deletes are done (or can't be).
+  /** @param {string | string[]} [keep] */
   async function wipeStores(keep = []) {
     const kept = (Array.isArray(keep) ? keep : [keep]).filter(Boolean).map(storeName);
     closeAll(kept);

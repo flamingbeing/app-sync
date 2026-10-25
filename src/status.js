@@ -18,6 +18,10 @@
 //   atRiskOnlyOffline: say at-risk only while offline (online, the saves are on their way; some browsers refuse
 //   persistent storage in ordinary tabs, which would otherwise show at-risk on every save).
 // -> { state, count }
+/**
+ * @param {{ online?: boolean, pending?: number, attention?: number, unsent?: number, persisted?: boolean, stale?: boolean, confirmed?: boolean, atRiskOnlyOffline?: boolean }} [input]
+ * @returns {import('./types.js').SyncStatus}
+ */
 export function syncStatus({ online = true, pending = 0, attention = 0, unsent = 0, persisted = true, stale = false, confirmed = true, atRiskOnlyOffline = false } = {}) {
   const waiting = (Number(pending) || 0) + (Number(unsent) || 0);
   if (attention > 0) return { state: 'attention', count: Number(attention) };
@@ -30,4 +34,5 @@ export function syncStatus({ online = true, pending = 0, attention = 0, unsent =
 }
 
 // How many of a queue's saves need the user: failed or in conflict (queue.entries() of writes.js).
+/** @param {{ state: string }[] | null | undefined} entries @returns {number} */
 export const attentionCount = entries => (entries || []).filter(x => x.state === 'failed' || x.state === 'conflict').length;

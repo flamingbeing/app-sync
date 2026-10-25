@@ -22,6 +22,22 @@
 //   conflicts: saves that met a change made elsewhere; errors: sync errors by code since the last report; held (byKind
 //   only, and only when there are conflicts): the conflicts by kind (a kind name that is not a short word is 'other').
 
+/**
+ * @typedef {object} ReportOptions
+ * @property {string} app
+ * @property {string | (() => string)} version
+ * @property {string} [sync]
+ * @property {string} [endpoint]
+ * @property {number} [every]
+ * @property {Pick<Storage, 'getItem' | 'setItem'> | null} [storage]
+ * @property {(url: string, body: string) => any} [send]
+ * @property {() => number} [now]
+ * @property {(e: any) => void} [onError]
+ * @property {boolean} [byKind]
+ * @typedef {{ v: 1, app: string, version: string, sync: string, unconfirmed: number, refused: number, conflicts: number,
+ *   errors: Record<string, number>, held?: Record<string, number> }} ReportPayload
+ */
+
 export const REPORT_ENDPOINT = 'https://core.anawj.com/report';
 export const REPORT_EVERY = 60 * 60 * 1000;
 export const UNCONFIRMED_MS = 60 * 60 * 1000;
@@ -34,15 +50,22 @@ const KIND = /^[A-Za-z][A-Za-z0-9_-]{0,39}$/;
 export const MAX_KINDS = 20;
 const MAX_COUNT = 1e6;
 
+/** @param {any} n */
 const count = n => Math.min(MAX_COUNT, Math.max(0, Math.floor(Number(n) || 0)));
 // an error code as a short lower-case word ('permission-denied'); anything else (a message, an id, a path) is 'other'
+/** @param {any} code @returns {string} */
 export const errorCode = code => typeof code === 'string' && CODE.test(code) ? code : code == null || code === '' ? 'unknown' : 'other';
 
 // The payload from a queue's entries and the error counts: pure, nothing from a record is read but its state and time.
+/**
+ * @param {{ app: string, version: string, sync?: string, entries?: any[], errors?: Record<string, number> | null, now?: number, byKind?: boolean }} input
+ * @returns {ReportPayload}
+ */
 export function buildReport({ app, version, sync = '', entries = [], errors = {}, now = Date.now(), byKind = false }) {
   if (!APP.test(String(app))) throw new Error('report: app must be lower-case letters, digits and "-"');
   if (!LABEL.test(String(version))) throw new Error('report: version must be a short label (letters, digits, . _ + -)');
   let unconfirmed = 0, refused = 0, conflicts = 0;
+  /** @type {Record<string, number>} */
   const held = {};
   for (const x of entries) {
     const state = x?.state;
@@ -54,6 +77,7 @@ export function buildReport({ app, version, sync = '', entries = [], errors = {}
     }
     else if (state === 'pending' && Number(x.at) <= now - UNCONFIRMED_MS) unconfirmed++;
   }
+  /** @type {Record<string, number>} */
   const codes = {};
   for (const [code, n] of Object.entries(errors || {})) {
     const c = Object.keys(codes).length >= MAX_CODES && !(errorCode(code) in codes) ? 'other' : errorCode(code);
@@ -62,6 +86,7 @@ export function buildReport({ app, version, sync = '', entries = [], errors = {}
   return { v: 1, app: String(app), version: String(version), sync: LABEL.test(String(sync)) ? String(sync) : 'unknown', unconfirmed: count(unconfirmed), refused: count(refused), conflicts: count(conflicts), errors: codes, ...(byKind && conflicts ? { held } : {}) };
 }
 
+/** @param {string} url @param {string} body */
 function defaultSend(url, body) {
   if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
     // text/plain: a "simple" request, so no preflight, and it still goes when the page is closing
@@ -72,25 +97,34 @@ function defaultSend(url, body) {
   return true;
 }
 
-export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOINT, every = REPORT_EVERY, storage = null, send = defaultSend, now = () => Date.now(), onError = () => {}, byKind = false } = {}) {
+/** @param {ReportOptions} options */
+export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOINT, every = REPORT_EVERY, storage = null, send = defaultSend, now = () => Date.now(), onError = () => {}, byKind = false } = /** @type {ReportOptions} */ ({})) {
   const versionNow = () => { try { const v = typeof version === 'function' ? version() : version; return LABEL.test(String(v)) ? String(v) : 'unknown'; } catch { return 'unknown'; } };
   if (typeof version !== 'function') buildReport({ app, version });   // checks app and version now, not an hour later
   else buildReport({ app, version: 'unknown' });
   const KEY = 'app-sync-report:' + app;
   const queues = new Set();
-  let memory = { last: 0, errors: {} }, timer = null, hide = null;
+  /** @type {{ last: number, errors: Record<string, number> }} */
+  let memory = { last: 0, errors: {} };
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let timer = null;
+  /** @type {((event?: Event) => void) | null} */
+  let hide = null;
   const load = () => {
     if (!storage) return memory;
     try { const x = JSON.parse(storage.getItem(KEY) || 'null'); return x && typeof x === 'object' ? { last: Number(x.last) || 0, errors: x.errors && typeof x.errors === 'object' ? x.errors : {} } : { last: 0, errors: {} }; }
     catch { return memory; }
   };
+  /** @param {{ last: number, errors: Record<string, number> }} state */
   const keep = state => { memory = state; if (storage) { try { storage.setItem(KEY, JSON.stringify(state)); } catch { /* memory only */ } } };
   const entries = () => [...queues].flatMap(q => { try { return q.entries(); } catch { return []; } });
   const payload = () => buildReport({ app, version: versionNow(), sync, entries: entries(), errors: load().errors, now: now(), byKind });
   const due = () => now() - load().last >= every;
   // one report at a time: page hide fires visibilitychange and pagehide together, and a second flush started before the
   // first is handed over would send the same counts again; it gets the first one's answer instead (0.5.2)
+  /** @type {Promise<boolean> | null} */
   let sending = null;
+  /** @param {{ force?: boolean }} [opts] @returns {Promise<boolean>} */
   function flush(opts) {
     if (sending) return sending;
     const p = sendNow(opts);
@@ -98,6 +132,7 @@ export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOI
     p.finally(() => { if (sending === p) sending = null; });
     return p;
   }
+  /** @param {{ force?: boolean }} [opts] */
   async function sendNow({ force = false } = {}) {
     if (!force && !due()) return false;
     let body;
@@ -106,21 +141,25 @@ export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOI
     try { sent = !!(await send(endpoint, body)); } catch (error) { onError(error); }
     // the counts sent are taken off; errors counted meanwhile stay for the next report
     if (sent) {
-      const state = load(), was = JSON.parse(body).errors, left = {};
+      const state = load(), was = JSON.parse(body).errors;
+      /** @type {Record<string, number>} */
+      const left = {};
       for (const [code, n] of Object.entries(state.errors)) { const rest = count(n) - (was[errorCode(code)] || 0); if (rest > 0) left[code] = rest; }
       keep({ last: now(), errors: left });
     }
     return sent;
   }
   return {
+    /** @param {{ entries: () => any[] }} queue */
     watch(queue) { if (queue && typeof queue.entries === 'function') queues.add(queue); return () => queues.delete(queue); },
+    /** @param {any} [code] */
     error(code) { const state = load(), c = errorCode(code); state.errors[c] = count((state.errors[c] || 0) + 1); keep(state); },
     payload, due, flush,
     start() {
       if (timer) return;
       timer = setInterval(() => { void flush(); }, CHECK_EVERY);
       if (typeof document !== 'undefined' && document.addEventListener) {
-        hide = event => { if (event?.type === 'pagehide' || document.visibilityState === 'hidden') void flush(); };
+        hide = /** @param {Event} [event] */ event => { if (event?.type === 'pagehide' || document.visibilityState === 'hidden') void flush(); };
         document.addEventListener('visibilitychange', hide);
         globalThis.addEventListener?.('pagehide', hide);
       }

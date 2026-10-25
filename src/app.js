@@ -56,13 +56,62 @@ import { forgetDevice } from './forget.js';
 import { describeConflict, resolvedRecord } from './conflict.js';
 import { createFirestoreBackend } from './firestore.js';
 
+/**
+ * @typedef {import('./types.js').Doc} Doc
+ * @typedef {import('./types.js').Job} Job
+ * @typedef {import('./types.js').AppSdk} AppSdk
+ * @typedef {import('./types.js').SyncStatus} SyncStatus
+ * @typedef {import('./types.js').ConflictChoice} ConflictChoice
+ * @typedef {import('./types.js').ConflictView} ConflictView
+ * @typedef {import('./types.js').Outbox} Outbox
+ * @typedef {import('./types.js').CommitExtra} CommitExtra
+ * @typedef {{ uid: string, email: string, name: string, photo: string, verified: boolean }} AppUser
+ * @typedef {object} ClaimsOptions
+ * @property {string} url
+ * @property {(user: AppUser) => any} [entry] the role doc { v } | null
+ * @property {(entry: any, tokenClaims: any) => boolean} [behind]
+ * @property {() => boolean} [when]
+ *
+ * @typedef {object} AppOptions
+ * @property {string} name the app's id: device copy `<name>-sync:`, outbox `<name>-outbox`
+ * @property {string[]} colls the collections synced
+ * @property {(scope: string, coll: string) => (string | number)[]} path a collection's path segments
+ * @property {() => Promise<AppSdk> | AppSdk} sdk the app's Firebase SDK, loaded once
+ * @property {Record<string, string>} [kinds] save kinds -> collection (default: each coll is its own kind)
+ * @property {Outbox} [outbox] the queue's durable store instead of createOutbox's
+ * @property {any} [adapter] { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
+ * @property {(owner: string, kind: string, record: Doc, base: Doc | null, extra?: CommitExtra) => Promise<Doc>} [commit] the app's own write instead of adapter.commit
+ * @property {Partial<import('./firestore.js').FirestoreBackendOptions> & Record<string, any>} [backend] the Firestore adapter's options
+ * @property {Record<string, any>} [hub] more options for createSyncHub
+ * @property {Record<string, any>} [stores] more options for createStores
+ * @property {Record<string, any>} [queue] more options for createWriteQueue
+ * @property {(user: AppUser) => string} [scope] the scope opened at sign-in
+ * @property {ClaimsOptions | null} [claims]
+ * @property {(err: { code: string, message: string }, entry: Job) => any} [onRefused] 'archive' sets a refused save aside
+ * @property {{ extra?: (() => Promise<any>) | null, keep?: string[] | (() => string[] | Promise<string[]>) }} [forget]
+ * @property {import('./types.js').Report | null} [report] the nothing-lost report (createReport), opt-in
+ * @property {(() => boolean)} [redirectFirst]
+ * @property {boolean} [popupOnly] sign in with the popup only, never a redirect
+ * @property {any} [nav] the browser's navigator, for tests
+ * @property {Pick<Storage, 'getItem' | 'setItem'> | null} [storage] where the origin's outbox list is kept (null: no registry)
+ * @property {typeof fetch} [fetch]
+ * @property {() => number} [now]
+ * @property {number} [watchEvery] ms between watchdog checks (0: only on nudge())
+ * @property {any} [win] the browser's window, for tests
+ * @property {string} [device] this device's name as people know it, shown in conflict popups
+ */
+
 const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported', 'auth/cancelled-popup-request'];
+/** @param {any} s */
 const lc = s => String(s || '').trim().toLowerCase();
+/** @param {any} u @returns {AppUser | null} */
 export const userOf = u => u ? { uid: u.uid, email: lc(u.email), name: u.displayName || u.email || '', photo: u.photoURL || '', verified: u.emailVerified === true } : null;
 // the token is behind the role doc: its v is older, or the doc is gone and the token still has one
+/** @param {{ v?: any } | null | undefined} entry @param {{ v?: any }} [tokenClaims] @returns {boolean} */
 export const claimsBehind = (entry, tokenClaims = {}) => !entry ? tokenClaims.v != null : !(Number(tokenClaims.v) >= (Number.isInteger(entry.v) ? entry.v : 0));
 
-export function createApp(options = {}) {
+/** @param {AppOptions} options */
+export function createApp(options = /** @type {AppOptions} */ ({})) {
   const { name, colls, path, sdk } = options;
   for (const [k, ok] of [['name', typeof name === 'string' && name], ['colls', Array.isArray(colls) && colls.length], ['path', typeof path === 'function'], ['sdk', typeof sdk === 'function']]) {
     if (!ok) throw new Error('createApp needs ' + k);
@@ -73,21 +122,30 @@ export function createApp(options = {}) {
     now = Date.now, watchEvery = 3000, win = typeof window !== 'undefined' ? window : null,
   } = options;
   const storage = 'storage' in options ? options.storage : (() => { try { return globalThis.localStorage || null; } catch { return null; } })();
+  /** @param {string} kind */
   const collOf = kind => kinds[kind] || kind;
+  /** @param {string} coll */
   const kindOf = coll => Object.keys(kinds).find(k => kinds[k] === coll) || coll;
   const online = () => nav?.onLine !== false;
   const engineFields = [backendOptions.mark || '_saves', backendOptions.serverField || 'serverAt', ...(backendOptions.edits ? [backendOptions.edits] : [])];
   const heldOn = !!backendOptions.held, device = String(options.device || '');
+  /** @param {Doc | null | undefined} d */
   const strip = d => { if (!d || !engineFields.some(f => f in d)) return d; const out = { ...d }; for (const f of engineFields) delete out[f]; return out; };
 
   // the SDK, once a page (every caller shares one promise; a failed load is tried again next time)
-  let loaded = null, current = null, signedInUid = null;
+  /** @type {Promise<AppSdk> | null} */
+  let loaded = null;
+  /** @type {AppUser | null} */
+  let current = null;
+  /** @type {string | null} */
+  let signedInUid = null;
+  /** @returns {Promise<AppSdk>} */
   const load = () => {
     if (loaded) return loaded;
-    loaded = Promise.resolve().then(sdk).then(s => {
-      s.A.getRedirectResult?.(s.auth)?.catch?.(e => console.warn('Redirect sign-in failed', e?.code || e));
+    loaded = Promise.resolve().then(sdk).then(/** @param {AppSdk} s */ s => {
+      s.A.getRedirectResult?.(s.auth)?.catch?.((/** @type {any} */ e) => console.warn('Redirect sign-in failed', e?.code || e));
       current = userOf(s.auth.currentUser);
-      s.A.onAuthStateChanged(s.auth, u => { current = userOf(u); if (u && u.uid !== signedInUid) { signedInUid = u.uid; void signedIn(u); } else if (!u) signedInUid = null; });
+      s.A.onAuthStateChanged(s.auth, (/** @type {any} */ u) => { current = userOf(u); if (u && u.uid !== signedInUid) { signedInUid = u.uid; void signedIn(u); } else if (!u) signedInUid = null; });
       return s;
     });
     loaded.catch(() => { loaded = null; });
@@ -95,6 +153,7 @@ export function createApp(options = {}) {
   };
 
   // the parts
+  /** @type {Set<(coll: string, m: import('./types.js').SnapMeta) => void>} */
   const meta = new Set();
   const adapter = options.adapter || createFirestoreBackend({
     sdk: async () => { const { F, db } = await load(); return { F, db }; }, path,
@@ -102,10 +161,12 @@ export function createApp(options = {}) {
     editor: () => ({ by: current?.name || current?.email || '', device }), ...backendOptions,
   });
   const stores = createStores({ prefix: name + '-sync:', colls, ...options.stores });
+  /** @type {import('./types.js').Registry | null} */
   let registry = null;
   const outbox = options.outbox || createOutbox({ name: name + '-outbox' });
   if (storage) { try { registry = createOutboxRegistry({ storage }); registry.register(outbox); } catch (e) { registry = null; console.warn('outbox registry', e?.message); } }
   let scope = '';
+  /** @type {Map<string, string>} */
   const codes = new Map();   // a failed save's code, by its key (the queue keeps the message only)
   const queue = createWriteQueue({
     store: outbox, getOwner: () => scope || null, online, registry, report, ...(heldOn ? { ignore: engineFields } : {}), ...options.queue,
@@ -130,12 +191,14 @@ export function createApp(options = {}) {
 
   // the status: confirmed only once the server has answered since the page opened
   let heard = false, persisted = true, relistens = 0;
+  /** @type {Set<(st: SyncStatus) => void>} */
   const subs = new Set();
   let lastTold = '';
   const statusNow = () => {
     const entries = queue.entries();
     return syncStatus({ online: online(), pending: queue.pending(), attention: attentionCount(entries), persisted, stale: watchdog.stale(), confirmed: heard, atRiskOnlyOffline: true });
   };
+  /** @param {boolean} [force] */
   function tell(force = false) {
     if (!subs.size) return;
     const st = statusNow(), key = st.state + ':' + st.count;
@@ -143,31 +206,39 @@ export function createApp(options = {}) {
     lastTold = key;
     for (const fn of [...subs]) fn(st);
   }
+  /** @param {(st: SyncStatus) => void} fn @returns {() => boolean} */
   const status$ = fn => { subs.add(fn); const st = statusNow(); lastTold = st.state + ':' + st.count; fn(st); return () => subs.delete(fn); };
+  /** @param {import('./types.js').SnapMeta} m */
   const onSnap = m => { watchdog.heard(m); if (!m?.fromCache && !heard) { heard = true; } tell(); };
   if (!options.adapter) meta.add((_coll, m) => watchdog.heard(m));
 
   // watches: each one's list (device copy, then the server) with this device's unsent saves laid over it, again when
   // either changes (watchSaved); only what the listener hears feeds the status and the watchdog
+  /** @type {Set<{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, off: (() => void) | null }>} */
   const watches = new Set();
-  const heardHub = { watch: (s, coll, fn) => hub.watch(s, coll, (list, m) => { if (m) onSnap(m); fn(list, m); }) };
+  const heardHub = { watch: (/** @type {string} */ s, /** @type {string} */ coll, /** @type {(list: Doc[], meta: any) => void} */ fn) => hub.watch(s, coll, (list, m) => { if (m) onSnap(m); fn(list, m); }) };
+  /** @param {typeof watches extends Set<infer W> ? W : never} w */
   const start = w => { w.off = watchSaved({ hub: heardHub, queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll) }, (list, m) => w.cb(list.map(strip), m || {})); };
   const stopWatches = () => { for (const w of watches) { w.off?.(); w.off = null; } };
   const startWatches = () => { for (const w of watches) if (!w.off) start(w); };
+  /** @param {string} s @param {string} coll @param {(list: Doc[], meta: any) => void} cb @returns {() => void} */
   function watch(s, coll, cb) {
+    /** @type {{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, off: (() => void) | null }} */
     const w = { scope: s, coll, cb, off: null };
     watches.add(w); start(w);
-    if (watchEvery > 0 && !timer) { timer = setInterval(() => watchdog.check(), watchEvery); timer.unref?.(); }
+    if (watchEvery > 0 && !timer) { timer = setInterval(() => watchdog.check(), watchEvery); /** @type {any} */ (timer).unref?.(); }
     return () => { w.off?.(); watches.delete(w); };
   }
 
   // the watchdog: listening again restarts the engines from the device copy; restarting the connection turns the
   // SDK's network off and on (capped: the switch waits behind a save whose answer is held up)
-  let timer = 0, cycling = false;
+  /** @type {ReturnType<typeof setInterval> | 0} */
+  let timer = 0;
+  let cycling = false;
   const watchdog = createWatchdog({
     now, online, quiet: () => queue.pending() === 0,
-    relisten: why => { console.warn('listeners replaced:', why); relistens++; stopWatches(); hub.stopAll().then(() => { startWatches(); tell(); }); },
-    cycle: why => { console.warn('connection restarted:', why); void cycleNet().finally(() => tell()); },
+    relisten: /** @param {string} why */ why => { console.warn('listeners replaced:', why); relistens++; stopWatches(); hub.stopAll().then(() => { startWatches(); tell(); }); },
+    cycle: /** @param {string} why */ why => { console.warn('connection restarted:', why); void cycleNet().finally(() => tell()); },
   });
   async function cycleNet() {
     if (cycling) return; cycling = true;
@@ -183,6 +254,7 @@ export function createApp(options = {}) {
   // refused saves: told once each, and set aside when the app says so. A delete made on this page, once done, leaves
   // the device copy too: its bin entry may have come while the delete was still being sent, when the engine keeps a
   // record with unsent saves, and a delta listener never hears the record go (0.6.1)
+  /** @type {Set<string>} */
   const told = new Set(), deleting = new Set();
   queue.onChange(() => {
     for (const x of queue.entries()) {
@@ -203,7 +275,11 @@ export function createApp(options = {}) {
   });
 
   // saves: one at a time per record from this page, in the order made (two stored in the same moment could swap)
-  const chains = new Map(), saving = new Set();
+  /** @type {Map<string, Promise<any>>} */
+  const chains = new Map();
+  /** @type {Set<Promise<any>>} */
+  const saving = new Set();
+  /** @param {string} kind @param {string} s @param {Doc} record @param {Doc | null} [base] @param {{ ops?: any }} [opts] @returns {Promise<Doc>} */
   function save(kind, s, record, base = null, opts = undefined) {
     const k = kind + ':' + s + ':' + record.id;
     const run = (chains.get(k) || Promise.resolve()).then(() => queue.save(kind, s, record, base, opts));
@@ -211,10 +287,12 @@ export function createApp(options = {}) {
     chains.set(k, tail); saving.add(tail);
     return run;
   }
+  /** @param {number} [ms] @returns {Promise<boolean>} */
   async function flush(ms = 4000) {
     if (saving.size) await Promise.race([Promise.allSettled([...saving]), new Promise(r => setTimeout(r, ms))]);
     return queue.flush(ms);
   }
+  /** @param {string} s */
   async function open(s) { scope = s; await queue.activate(s); tell(); }
 
   // sign-in: the storage guard, the claims, the scope
@@ -234,6 +312,7 @@ export function createApp(options = {}) {
       if (r?.ok) await u.getIdToken(true);
     } catch (e) { console.warn('claims not updated', e?.message || e); }
   }
+  /** @param {any} u */
   async function signedIn(u) {
     persistGuard(nav).then(r => { persisted = !!(r.persisted || !r.supported); tell(); }, () => {});
     void refreshClaims();
@@ -250,12 +329,14 @@ export function createApp(options = {}) {
     try { await A.signInWithPopup(auth, provider); }
     catch (e) { if (!REDIRECT_CODES.includes(e?.code)) throw e; await A.signInWithRedirect(auth, provider); }
   }
+  /** @param {(user: AppUser | null) => void} cb */
   async function onUser(cb) {
     const { A, auth } = await load();
-    return A.onAuthStateChanged(auth, u => cb(userOf(u)));
+    return A.onAuthStateChanged(auth, (/** @type {any} */ u) => cb(userOf(u)));
   }
 
   // sign-out on a shared device: the gate, then forgetDevice's order, then the SDK's sign-out
+  /** @param {{ wait?: number }} [options] @returns {Promise<{ ok: boolean, reason: string, reload: boolean, failed: string[] }>} */
   async function signOut({ wait = 4000 } = {}) {
     const s = await load(), uid = s.auth.currentUser?.uid || null;
     if (!(await flush(wait))) return { ok: false, reason: 'unsent', reload: false, failed: [] };
@@ -279,16 +360,22 @@ export function createApp(options = {}) {
 
   // held conflicts (0.6.3): this device's own, one per record (the first held save; later ones on this device's own
   // version wait behind it, and the newest of them is "mine")
+  /** @param {string} key */
   const heldOf = key => {
     const all = queue.entries().reverse(), first = all.find(x => x.key === key && x.state === 'conflict');
     if (!first) return null;
     const chain = all.filter(x => x.kind === first.kind && x.record.id === first.record.id && x.state === 'conflict');
     return { first, held: { record: chain.at(-1).record, base: first.base ?? null, remote: first.remote ?? null, at: chain.at(-1).at } };
   };
+  /** @param {string} kind @returns {string[]} */
   const countersOf = kind => { const h = backendOptions.held, c = h && h !== true ? h[collOf(kind)] : null; return c && c !== true ? c.counters || [] : []; };
   const skip = [...engineFields, backendOptions.field || 'updatedAt'];
+  /** @param {string} [kind] @returns {{ key: string, kind: string, id: string, at: number }[]} */
   function conflicts(kind = '') {
-    const seen = new Set(), out = [];
+    /** @type {Set<string>} */
+    const seen = new Set();
+    /** @type {{ key: string, kind: string, id: string, at: number }[]} */
+    const out = [];
     for (const x of queue.entries().reverse()) {
       const k = x.kind + ':' + x.record.id;
       if (x.state !== 'conflict' || (kind && x.kind !== kind) || seen.has(k)) continue;
@@ -296,11 +383,13 @@ export function createApp(options = {}) {
     }
     return out;
   }
+  /** @param {string} key @param {{ timeZone?: string }} [options] @returns {(ConflictView & { key: string, kind: string, id: string }) | null} */
   function describe(key, { timeZone } = {}) {
     const h = heldOf(key);
     if (!h) return null;
     return { key, kind: h.first.kind, id: h.first.record.id, ...describeConflict(h.held, { counters: countersOf(h.first.kind), skip, edits: backendOptions.edits || null, me: { by: current?.name || current?.email || '', device }, timeZone }) };
   }
+  /** @param {string} key @param {ConflictChoice} choice */
   async function resolve(key, choice) {
     const h = heldOf(key);
     if (!h) throw new Error('This save is no longer waiting for a choice');
@@ -309,6 +398,7 @@ export function createApp(options = {}) {
     return queue.restore(h.first.kind, h.first.owner, record);
   }
 
+  /** @param {string} [event] */
   const nudge = (event = '') => { if (!watches.size) return false; const a = event ? watchdog.event() : watchdog.check(); return !!(a.relisten || a.cycle); };
   const parts = { hub, queue, stores, adapter, watchdog, registry, outbox };
   return {

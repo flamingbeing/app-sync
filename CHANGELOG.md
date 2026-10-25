@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0 (2026-10-25)
+
+Types only: JSDoc across `src/` and `index.js`, checked by `tsc --checkJs` in Checks. No runtime behaviour change
+(the same 219 unit tests, the model test with its seeds and the emulator tests pass unchanged).
+
+- `src/types.js`: the shared shapes (`Doc`, `Snapshot`, `Job`, `Outbox`, `QueueOptions`, `Store`, `ConflictView`, ...).
+  Types only; nothing imports it at run time, so the file adds no load. Editors read the types from the published
+  files with no build step (`// @ts-check` in an app, or `import('.../types.js').Doc` in its JSDoc).
+- Every export of the public API and the internal helpers has `@param` / `@returns` types, and the option objects of
+  `createApp`, `createSyncHub`, `createCollectionSync`, `createTombFeed`, `createWriteQueue`, `createStores`,
+  `createFirestoreBackend`, `createReport`, `forgetDevice` and `firestoreCache` are typedefs.
+- `tsconfig.json` (`allowJs`, `checkJs`, `noEmit`, `noImplicitAny`) and `npm run typecheck`; Checks runs it as a step
+  of the `unit` job (TypeScript 5.8.3, not saved in package.json's run-time path).
+
 ## 0.6.4 (2026-10-25)
 
 Additive: nothing changes for an app that doesn't call the new helper. Tests: `test/cache.test.mjs` (47, with seeds).

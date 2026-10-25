@@ -5,10 +5,18 @@
 // createOutbox({ name, realm = 'default' }) -> { name, realm, put, list, get, remove, forget }
 //   name: the database name (also the localStorage key prefix). realm: keeps two modes apart on one origin.
 
+/**
+ * @typedef {import('./types.js').Job} Job
+ * @typedef {import('./types.js').Outbox} Outbox
+ */
+
+/** @param {{ name: string, realm?: string }} options @returns {Outbox} */
 export function createOutbox({ name, realm = 'default' }) {
   if (!name) throw new Error('createOutbox needs a name');
   const PREFIX = name + ':';
+  /** @type {Promise<IDBDatabase> | null} */
   let opened = null;
+  /** @returns {Promise<IDBDatabase>} */
   async function database() {
     if (!opened) opened = new Promise((resolve, reject) => {
       const request = indexedDB.open(name, 1);
@@ -26,10 +34,17 @@ export function createOutbox({ name, realm = 'default' }) {
     }).catch(error => { opened = null; throw error; });
     return opened;
   }
+  /**
+   * @template T
+   * @param {IDBTransactionMode} mode
+   * @param {(store: IDBObjectStore) => IDBRequest<T> | void} operation
+   * @returns {Promise<T>}
+   */
   async function transaction(mode, operation) {
     const db = await database();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('changes', mode), store = tx.objectStore('changes');
+      /** @type {T} */
       let result;
       tx.oncomplete = () => resolve(result);
       tx.onerror = tx.onabort = () => reject(tx.error || new Error('Outbox write failed'));
@@ -37,11 +52,13 @@ export function createOutbox({ name, realm = 'default' }) {
       if (request) request.onsuccess = () => { result = request.result; };
     });
   }
+  /** @param {string} owner @returns {Job[]} */
   const fallbackRecords = owner => Object.keys(localStorage).filter(k => k.startsWith(PREFIX))
     .map(k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } })
     .filter(x => x && x.owner === owner);
   return {
     name, realm,
+    /** @param {Job} record */
     async put(record) {
       const copy = { ...JSON.parse(JSON.stringify(record)), realm };
       try {
@@ -51,8 +68,11 @@ export function createOutbox({ name, realm = 'default' }) {
       catch { localStorage.setItem(PREFIX + copy.key, JSON.stringify(copy)); }
       return copy;
     },
+    /** @param {string} owner */
     async list(owner) {
-      let records = [], succeeded = false;
+      /** @type {Job[]} */
+      let records = [];
+      let succeeded = false;
       try { records = await transaction('readonly', store => store.index('owner').getAll(owner)); succeeded = true; } catch { /* try fallback */ }
       try { records.push(...fallbackRecords(owner)); succeeded = true; } catch { /* storage blocked */ }
       if (!succeeded) throw new Error('The local outbox is unavailable; keep your text in the editor');
@@ -60,17 +80,22 @@ export function createOutbox({ name, realm = 'default' }) {
     },
     // one change by key: the write queue reads it again before sending (another tab may have sent it). A fallback copy
     // is the newer one (a successful IndexedDB write removes it); an unreadable database throws, never reads as gone.
+    /** @param {string} key */
     async get(key) {
+      /** @type {Job | null} */
       let record = null;
       try { record = JSON.parse(localStorage.getItem(PREFIX + key)); } catch { /* storage blocked */ }
       record ||= await transaction('readonly', store => store.get(key));
       return record && record.realm === realm ? record : null;
     },
+    /** @param {string} key */
     async remove(key) {
       try { await transaction('readwrite', store => store.delete(key)); } catch { /* fallback may be in use */ }
       try { localStorage.removeItem(PREFIX + key); } catch { /* blocked */ }
     },
+    /** @param {string} owner */
     async forget(owner) {
+      /** @type {unknown[]} */
       const failed = [];
       // cleanup must never mistake an unreadable IndexedDB for an empty database
       if (typeof indexedDB !== 'undefined') {

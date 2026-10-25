@@ -14,40 +14,65 @@ import { createOutbox } from './outbox.js';
 
 export const REGISTRY_KEY = 'app-sync:outboxes';
 export const REGISTRY_TIMEOUT = 3000;
+/**
+ * @typedef {import('./types.js').OutboxId} OutboxId
+ * @typedef {import('./types.js').Registry} Registry
+ */
+
 const done = new Set(['synced', 'archived']);   // the write queue's finished states (writes.js)
+/** @param {OutboxId} x */
 const idOf = x => ({ name: x.name, realm: x.realm || 'default' });
+/** @param {OutboxId} a @param {OutboxId} b */
 const same = (a, b) => a.name === b.name && (a.realm || 'default') === (b.realm || 'default');
 
+/**
+ * @param {{ storage?: Pick<Storage, 'getItem' | 'setItem'>, open?: (name: string, realm?: string) => import('./types.js').Outbox, key?: string, timeout?: number }} [options]
+ * @returns {Registry}
+ */
 export function createOutboxRegistry({ storage = globalThis.localStorage, open = (name, realm) => createOutbox({ name, realm }), key = REGISTRY_KEY, timeout = REGISTRY_TIMEOUT } = {}) {
+  /** @returns {OutboxId[]} */
   const read = () => {
     const raw = storage.getItem(key);
     if (!raw) return [];
     const all = JSON.parse(raw);
     return Array.isArray(all) ? all.filter(x => x && typeof x.name === 'string').map(idOf) : [];
   };
+  /** @type {Map<string, import('./types.js').Outbox>} */
   const opened = new Map();
+  /** @param {OutboxId} x */
   const outbox = x => { const id = x.name + '\n' + x.realm; if (!opened.has(id)) opened.set(id, open(x.name, x.realm)); return opened.get(id); };
+  /** @param {OutboxId | null | undefined} except */
   const others = except => read().filter(x => !(except && except.name && same(x, except)));
+  /** @param {Promise<any>} p */
   const within = p => {
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
     let timer;
     const late = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('An outbox did not answer in time')), timeout); });
     return Promise.race([p, late]).finally(() => clearTimeout(timer));
   };
   return {
     list: read,
+    /** @param {OutboxId} x */
     register(x) {
       if (!x || !x.name) throw new Error('register needs an outbox name');
       const all = read();
       if (!all.some(y => same(y, x))) storage.setItem(key, JSON.stringify([...all, idOf(x)]));
     },
+    /** @param {OutboxId} x */
     unregister(x) { storage.setItem(key, JSON.stringify(read().filter(y => !same(y, x)))); },
+    /** @param {string} owner @param {{ except?: OutboxId | null }} [options] */
     async unsent(owner, { except = null } = {}) {
+      /** @type {OutboxId[]} */
       let list;
       try { list = others(except); } catch { return true; }   // the list can't be read: not known to be empty
-      const one = async x => { try { return (await within(Promise.resolve().then(() => outbox(x).list(owner)))).some(e => !done.has(e.state)); } catch { return true; } };
+      /** @param {OutboxId} x */
+      /** @param {OutboxId} x */
+      const one = async x => { try { return (await within(Promise.resolve().then(() => outbox(x).list(owner)))).some(/** @param {{ state: string }} e */ e => !done.has(e.state)); } catch { return true; } };
       return (await Promise.all(list.map(one))).some(Boolean);
     },
+    /** @param {string} owner @param {{ except?: OutboxId | null }} [options] */
     async forget(owner, { except = null } = {}) {
+      /** @type {string[]} */
       const failed = [];
       for (const x of others(except)) { try { await within(Promise.resolve().then(() => outbox(x).forget(owner))); } catch (e) { failed.push(x.name + ': ' + (e && e.message)); } }
       if (failed.length) throw new Error('Some local copies could not be removed (' + failed.join('; ') + '). Close other tabs of these apps and clear the site storage before sharing the device.');

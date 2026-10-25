@@ -27,47 +27,85 @@
 //   hear the server's copy (with another device's change in it) during that time; once the save is done, only a queue
 //   change says so, and the server's copy must show then though the listener hears nothing new.
 import { recordSignature } from './conflict.js';
+
+/**
+ * @typedef {import('./types.js').Doc} Doc
+ * @typedef {import('./types.js').Job} Job
+ * @typedef {import('./types.js').JobState} JobState
+ * @typedef {import('./types.js').CodedError} CodedError
+ * @typedef {import('./types.js').QueueOptions} QueueOptions
+ */
+
+/** @template T @param {T} value @returns {T} */
 const copy = value => JSON.parse(JSON.stringify(value));
+/** @param {{ kind: string, record: Doc }} job */
 const keyOf = job => job.kind + ':' + job.record.id;
 const terminal = new Set(['synced', 'archived']);
 const KEEP = 100;   // finished saves kept in the device history (the app's history view)
 // the network dropped mid-save (Firestore: 'unavailable', 'deadline-exceeded'), or another device's transaction on the
 // same record won the race ('aborted'): the job stays pending and tries again
+/** @param {any} error */
 const transient = error => error?.code === 'unavailable' || error?.code === 'deadline-exceeded' || error?.code === 'aborted';
 export const SEND_TIMEOUT = 30000;
+/** @param {QueueOptions} options */
 export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null, ignore = [] }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
+  /** @param {any} v */
   const bare = v => { if (!ignore.length || !v || typeof v !== 'object') return v; const out = { ...v }; for (const f of ignore) delete out[f]; return out; };
+  /** @param {any} v */
   const signature = v => recordSignature(bare(v));
+  /** @param {any} a @param {any} b */
   const same = (a, b) => signature(a) === signature(b);
   const recover = labels.recover || 'Recover';
+  /** @param {Job} job */
   const failure = job => new Error(new RegExp('in ' + recover + '\\b').test(job.error) ? job.error : job.error + ' — a copy is kept in ' + recover);
   // a backend call that never settles counts as a dropped connection after sendTimeout (it may still land: sending
   // the same content again is harmless, checkWrite sees it is already there)
+  /** @param {Parameters<import('./types.js').QueueBackend>} args */
   const send = (...args) => {
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
     let timer;
-    const late = new Promise((_, reject) => { timer = setTimeout(() => { const e = new Error('The server did not answer in time'); e.code = 'deadline-exceeded'; reject(e); }, sendTimeout); });
+    const late = new Promise((_, reject) => { timer = setTimeout(() => { const e = /** @type {CodedError} */ (new Error('The server did not answer in time')); e.code = 'deadline-exceeded'; reject(e); }, sendTimeout); });
     return Promise.race([Promise.resolve().then(() => backend(...args)), late]).finally(() => clearTimeout(timer));
   };
-  let owner = null, generation = 0, jobs = [], loading = null, storageError = '';
-  const running = new Map(), listeners = new Set(), waits = new Map();
+  /** @type {string | null} */
+  let owner = null;
+  /** @type {Job[]} */
+  let jobs = [];
+  /** @type {Promise<void> | null} */
+  let loading = null;
+  let generation = 0, storageError = '';
+  /** @type {Map<string, Promise<any>>} */
+  const running = new Map();
+  /** @type {Set<() => void>} */
+  const listeners = new Set();
+  /** @type {Map<string, { tries: number, timer?: object | null }>} */
+  const waits = new Map();
   const notify = () => { for (const fn of listeners) fn(); };
+  /** @param {string | null} email @param {number} gen */
   const current = (email, gen) => owner === email && generation === gen && getOwner() === email;
   // sorted again only when the list changes (a job's at and key never do; callers never change it in place): overlay
   // asks once per record, and sorting on every call made a change to a few hundred records take seconds
-  let sorted = [], sortedFrom = null, sortedLength = 0;
+  /** @type {Job[]} */
+  let sorted = [];
+  /** @type {Job[] | null} */
+  let sortedFrom = null;
+  let sortedLength = 0;
   const ordered = () => {
     if (sortedFrom !== jobs || sortedLength !== jobs.length) { sorted = [...jobs].sort((a, b) => a.at - b.at || a.key.localeCompare(b.key)); sortedFrom = jobs; sortedLength = jobs.length; }
     return sorted;
   };
   // a record's saves not yet done with, oldest first: only the first is ever sent
+  /** @param {string} id */
   const chainOf = id => ordered().filter(x => keyOf(x) === id && !terminal.has(x.state));
+  /** @param {Job} job */
   async function persist(job) { await store.put(copy(job)); }
   // Another window on this device (a second tab, or the home-screen app beside the browser) shares the store and may
   // have sent or set aside a job since this one read it: what it stored wins, or this window sends its stale copy
   // later (a case deleted there comes back, one restored there is deleted again). Two windows sending one job at the
   // same moment is harmless (checkWrite: same content); no Web Lock, which a frozen background window would hold.
   // -> true when the job moved on
+  /** @param {Job} job */
   async function refresh(job) {
     let stored;
     try { stored = await store.get(job.key); } catch { return false; }   // unreadable: carry on as before
@@ -83,6 +121,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     Object.assign(job, { state: stored.state, error: stored.error || '', result: stored.result, remote: stored.remote, accepted: stored.accepted, kept: stored.kept });
     return true;
   }
+  /** @param {string} id @returns {Promise<void>} */
   async function drain(id) {
     if (running.has(id)) return running.get(id);
     const email = owner, gen = generation;
@@ -100,7 +139,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
         } catch (error) {
           if (!current(email, gen)) return;
           // set aside while it was being sent (a save made on the other copy took its place): it stays so, the next goes
-          if (job.state === 'archived') continue;
+          if (/** @type {JobState} */ (job.state) === 'archived') continue;   // (state changes while the send is awaited)
           if (report) { try { report.error(error?.code); } catch { /* a report never stops a save */ } }
           if (transient(error)) { job.error = 'Waiting for the connection'; retryLater(id, email, gen); notify(); break; }
           job.state = error.code === 'write-conflict' ? 'conflict' : 'failed';
@@ -124,6 +163,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     running.set(id, task); return task;
   }
   // back off 2 s, 4 s … up to a minute; going online (kick) tries at once
+  /** @param {string} id @param {string | null} email @param {number} gen */
   function retryLater(id, email, gen) {
     const wait = waits.get(id) || { tries: 0 }; wait.tries++; waits.set(id, wait);
     const timer = wait.timer = {};
@@ -132,6 +172,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       if (current(email, gen)) void drain(id).catch(error => { storageError = error.message; notify(); });
     });
   }
+  /** @param {string} email */
   async function activate(email) {
     if (owner === email && loading) return loading;
     owner = email; const gen = ++generation; jobs = []; running.clear(); waits.clear(); storageError = '';
@@ -143,6 +184,14 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     return loading;
   }
   function kick() { for (const wait of waits.values()) wait.timer = null; if (owner && getOwner() === owner) for (const id of new Set(jobs.map(keyOf))) void drain(id).catch(error => { storageError = error.message; notify(); }); }
+  /**
+   * @param {string} kind
+   * @param {string} email
+   * @param {Doc} record
+   * @param {Doc | null} [base]
+   * @param {{ ops?: any }} [options]
+   * @returns {Promise<Doc>}
+   */
   async function save(kind, email, record, base = null, { ops } = {}) {
     record = copy(normalize(kind, copy(record))); base = copy(base);
     if (getOwner() !== email) throw new Error('Account changed; the editor has not been saved');
@@ -160,6 +209,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (over && base && same(record, normalize(kind, copy(base)))) return copy(record);   // (both as the editor saves them)
     // a failed save, or a held copy (never sent), is replaced by the next one
     const stale = !over && previous && (previous.state === 'failed' || held && previous.state === 'conflict' && previous !== chain[0]) ? previous : null;
+    /** @type {Job} */
     let job;
     if (stale && same(stale.record, record)) {
       job = stale; if (!held) { job.state = 'pending'; job.error = ''; }
@@ -191,6 +241,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   // behind the failed one for good). Either way the stopped chain is set aside only once the
   // new save is stored (after a conflict save() does it, unless this is the other copy unchanged). A failed save on its
   // own, save() replaces itself.
+  /** @param {string} kind @param {string} email @param {Doc} record @param {Doc | null} [base] */
   async function restore(kind, email, record, base = null) {
     if (getOwner() !== email) throw new Error('Account changed; the editor has not been saved');
     await activate(email); const id = kind + ':' + record.id;
@@ -201,6 +252,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (conflict || stuck) await archive(chain.at(-1).key);
     return saved;
   }
+  /** @param {string} kind @param {string} email @param {Doc[]} list @returns {Doc[]} */
   function overlay(kind, email, list) {
     if (email !== owner) return list;
     const result = new Map(list.map(r => [r.id, r]));
@@ -212,6 +264,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
         // the list still has this device's own unsynced version, or the very one it started from (a stale cached list;
         // the same content saved again elsewhere, as by a restore, has a newer stamp), or its delete took it off.
         const cur = result.get(id), sig = signature(cur || null);
+        /** @param {Job} x */
         const started = x => signature(x.base) === sig && (x.base?.updatedAt ?? null) === (cur.updatedAt ?? null);
         if (cur ? group.some(x => signature(x.record) === sig || started(x)) : group.some(x => x.record._deleted)) {
           const { remote } = conflicts[0]; if (remote) result.set(id, remote); else result.delete(id);
@@ -220,6 +273,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     }
     return [...result.values()];
   }
+  /** @param {string} key */
   async function retry(key) {
     let job = jobs.find(x => x.key === key); const email = owner, gen = generation;
     if (!job || getOwner() !== owner || job.state === 'conflict') return;
@@ -233,6 +287,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   }
   // sets aside that save and older ones, never a newer save (it is sent next, or meets the conflict again); from a
   // conflict also the held copies behind it (never sent, the same conflict), or the record needs a second tap
+  /** @param {string} key */
   async function archive(key) {
     const job = jobs.find(x => x.key === key); if (!job || getOwner() !== owner) return;
     const chain = chainOf(keyOf(job)), upto = chain.indexOf(job);
@@ -249,19 +304,25 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (error) throw error;
   }
   const api = { activate, save, restore, overlay, retry, archive, forget, kick,
+    /** @param {Partial<QueueOptions>} config */
     configure(config) { if (config.backend) backend = config.backend; if (config.getOwner) getOwner = config.getOwner; if (config.normalize) normalize = config.normalize; if (config.notice) notice = config.notice; },
+    /** @param {() => void} fn */
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     entries: () => copy(ordered()).reverse(),
     pending: () => jobs.filter(x => !terminal.has(x.state)).length,
     // a save needs the user (failed, or met a change made elsewhere), without copying every entry as entries() does
+    /** @param {string} [kind] */
     attention: kind => jobs.some(x => (!kind || x.kind === kind) && (x.state === 'failed' || x.state === 'conflict')),
     // a change made elsewhere stopped this record's saves: nothing more of it is sent until the user chooses
     // this record has saves not sent yet (pending, failed or in conflict): for the engine's unsent option
+    /** @param {string} kind @param {string} id */
     unsent: (kind, id) => jobs.some(x => x.kind === kind && x.record.id === id && !terminal.has(x.state)),
+    /** @param {string} kind @param {string} id */
     conflicted: (kind, id) => jobs.some(x => x.kind === kind && x.record.id === id && x.state === 'conflict'),
     // -> true once none of these records is being sent (false after ms): what became of each save is known then
     // (synced, conflict, failed, or pending: offline or waiting to retry), not only that it was stored, which is all
     // save() waits for after 180 ms; a slow connection finds a change made elsewhere later than that
+    /** @param {string} kind @param {string[]} ids @param {number} [ms] */
     async settle(kind, ids, ms = 10000) {
       const keys = ids.map(id => kind + ':' + id), busy = () => keys.map(k => running.get(k)).filter(Boolean);
       const idle = async () => { for (let now; (now = busy()).length;) await Promise.allSettled(now); return true; };
@@ -282,17 +343,33 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       catch { return false; }
     },
     error: () => storageError,
+    /** @param {string} kind @param {string} id */
     status(kind, id) { return [...ordered()].reverse().find(x => x.kind === kind && x.record.id === id)?.state || ''; },
     // one job followed through (a later save of the same record is another job): the latest job's key, and a job's state
+    /** @param {string} kind @param {string} id */
     jobKey(kind, id) { return [...ordered()].reverse().find(x => x.kind === kind && x.record.id === id)?.key || ''; },
+    /** @param {string} key */
     stateOf(key) { return jobs.find(x => x.key === key)?.state || ''; },
   };
   if (report) { try { report.watch(api); } catch { /* a report never stops the queue */ } }
   return api;
 }
 
+/**
+ * @param {{ hub: { watch: (scope: string, coll: string, cb: (list: Doc[], meta: import('./types.js').SnapMeta) => void) => () => void },
+ *   queue: ReturnType<typeof createWriteQueue>, scope: string, coll: string, kind: string, owner?: string }} options
+ * @param {(list: Doc[], meta: import('./types.js').SnapMeta) => void} cb
+ * @returns {() => void}
+ */
 export function watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb) {
-  let list = null, meta = null, sent = null, live = true;
+  /** @type {Doc[] | null} */
+  let list = null;
+  /** @type {import('./types.js').SnapMeta | null} */
+  let meta = null;
+  /** @type {string | null} */
+  let sent = null;
+  let live = true;
+  /** @param {boolean} force */
   const hand = force => {
     if (!live || !list) return;
     const shown = queue.overlay(kind, owner, list), sig = JSON.stringify(shown);
