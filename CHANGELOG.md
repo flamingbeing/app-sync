@@ -14,6 +14,13 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.2.1 (2026-10-26)
+
+Fix, no API, module contract or stored-format change; modular: yes, shaken: no source change in `src/` or the entries.
+
+- **Pre-release paths served**: the Worker's version pattern took only `x.y.z`, so `/sync/1.0.0-rc.1/` and
+  `/update/1.0.0-rc.1/` returned 404 although `versions.json` lists them; it now takes the same shape as `VERSION_RE`.
+
 ## 1.2.0 (2026-10-26)
 
 Additive: no 1.0 name, module contract or stored format changes (FORMATS.md as 1.0; no new job state; the outbox job
