@@ -26,6 +26,7 @@
 //   changes. Use it, not hub.watch with overlay inside: a save's own copy shows while it is sent, and the listener may
 //   hear the server's copy (with another device's change in it) during that time; once the save is done, only a queue
 //   change says so, and the server's copy must show then though the listener hears nothing new.
+//   A save shows from the moment save() is called (0.7.2), before it is stored or accepted.
 import { recordSignature } from './conflict.js';
 
 /**
@@ -82,6 +83,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   /** @type {Map<string, { tries: number, timer?: object | null }>} */
   const waits = new Map();
   const notify = () => { for (const fn of listeners) fn(); };
+  /** @type {Map<string, { kind: string, owner: string, record: Doc }>} */
+  const inflight = new Map();   // saves called but not stored yet (overlay shows them)
   /** @param {string | null} email @param {number} gen */
   const current = (email, gen) => owner === email && generation === gen && getOwner() === email;
   // sorted again only when the list changes (a job's at and key never do; callers never change it in place): overlay
@@ -195,6 +198,15 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   async function save(kind, email, record, base = null, { ops } = {}) {
     record = copy(normalize(kind, copy(record))); base = copy(base);
     if (getOwner() !== email) throw new Error('Account changed; the editor has not been saved');
+    // shown at once (0.7.2): the lists have this save from now, before it is stored, until its job takes over
+    const early = { kind, owner: email, record: copy(record) }, earlyKey = kind + ':' + record.id;
+    inflight.set(earlyKey, early); notify();
+    const unshow = () => { if (inflight.get(earlyKey) !== early) return false; inflight.delete(earlyKey); return true; };
+    try { return await saveNow(kind, email, record, base, ops, unshow); }
+    finally { if (unshow()) notify(); }
+  }
+  /** @param {string} kind @param {string} email @param {Doc} record @param {Doc | null} base @param {any} ops @param {() => boolean} unshow @returns {Promise<Doc>} */
+  async function saveNow(kind, email, record, base, ops, unshow) {
     await activate(email); const gen = generation, id = kind + ':' + record.id;
     let moved = false;
     for (const x of chainOf(id)) moved = await refresh(x) || moved;
@@ -227,7 +239,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     // kept in the history for good, and the user told
     for (const x of over ? chain : stale && stale !== job ? [stale] : []) { x.state = 'archived'; if (over) x.kept = true; await persist(x); }
     if (!jobs.includes(job)) jobs.push(job);
-    notify();
+    unshow(); notify();
     if (over && !same(previous.record, record)) notice('Your version from this device is kept in ' + recover);
     if (held) throw failure(job);
     await Promise.race([drain(keyOf(job)), delay(180)]);
@@ -256,7 +268,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   function overlay(kind, email, list) {
     if (email !== owner) return list;
     const result = new Map(list.map(r => [r.id, r]));
-    for (const id of new Set(jobs.filter(x => x.kind === kind).map(x => x.record.id))) {
+    const early = [...inflight.values()].filter(x => x.kind === kind && x.owner === email);
+    for (const id of new Set([...jobs.filter(x => x.kind === kind).map(x => x.record.id), ...early.map(x => x.record.id)])) {
       const group = chainOf(kind + ':' + id), conflicts = group.filter(x => x.state === 'conflict');
       if (conflicts.length) {
         // The list is the server's copy (the sync engine), so an edit or delete made elsewhere since the conflict shows
@@ -269,7 +282,12 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
         if (cur ? group.some(x => signature(x.record) === sig || started(x)) : group.some(x => x.record._deleted)) {
           const { remote } = conflicts[0]; if (remote) result.set(id, remote); else result.delete(id);
         } else if (cur) for (const x of conflicts) if (signature(x.remote) !== sig) x.remote = copy(cur);   // the conflict's other copy
-      } else { const latest = group.filter(x => x.accepted).at(-1); if (latest) { if (latest.record._deleted) result.delete(id); else result.set(id, latest.record); } }
+      } else {
+        // this device's newest save of it: one being stored now, else the newest job not done (0.7.2: also while its
+        // save() has not returned yet, so a list handed in that time has it; a save failed at once leaves again)
+        const now = inflight.get(kind + ':' + id), latest = now && now.owner === email ? now : group.filter(x => x.accepted || x.state === 'pending').at(-1);
+        if (latest) { if (latest.record._deleted) result.delete(id); else result.set(id, latest.record); }
+      }
     }
     return [...result.values()];
   }

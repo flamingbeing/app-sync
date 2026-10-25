@@ -17,4 +17,4 @@ export { buildReport, errorCode, REPORT_ENDPOINT, REPORT_EVERY, UNCONFIRMED_MS, 
 // the nothing-lost report, with this engine's version filled in
 /** @param {Omit<import('./src/report.js').ReportOptions, 'sync'>} options */
 export const createReport = options => createReportOf({ sync: VERSION, ...options });
-export const VERSION = '0.7.1';
+export const VERSION = '0.7.2';

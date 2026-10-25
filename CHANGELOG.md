@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.2 (2026-10-25)
+
+Fix (#19): a save shows in the lists (`watchSaved`, `queue.overlay`) from the moment `save()` is called. Before, it
+showed only once it was stored and accepted (sent, or 180 ms), so a list handed in that window had the old value, and
+a change worked out from it (the next place's order) used the old value. Now the queue keeps the save in memory
+until its job is stored, and lays over pending jobs that are not accepted yet; a save refused at once (storage
+unavailable, account changed) leaves the lists again. Apps that kept their own map of unfinished saves for this can
+drop it. Tests: `test/fixes.test.mjs` (+1, failing before the fix); model seeds unchanged.
+
 ## 0.7.1 (2026-10-25)
 
 Held conflicts for merge collections, opt-in, and a fix to held answers. Nothing changes for an app without `held`,
