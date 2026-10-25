@@ -27,8 +27,9 @@
 //   report: the nothing-lost report (createReport), opt-in. storage: where the origin's outbox list is kept
 //   (default localStorage; null: no registry). nav, fetch, now, win: the browser's, for tests.
 //   watchEvery: ms between watchdog checks (0: only on nudge()).
-//   quiet() -> false while the app knows of writes not yet acknowledged outside the queue (0.7.3; e.g. writes left in
-//   the SDK's own offline queue by an older version): the watchdog then never restarts the connection under them.
+//   outside() -> how many writes the app knows of outside the queue and not yet acknowledged, a number at once (0.8.1;
+//   e.g. writes an older version left in the SDK's own offline queue). They count as track()'s do (below).
+//   quiet() (0.7.3, deprecated: use outside or track): false counts as one such write.
 //   The hub reads by backend.stampMode unless hub.stampMode says otherwise (an app whose server stamps are not on
 //   every record yet passes hub: { stampMode: 'client' }).
 //   popupOnly: sign in with the popup only, never a redirect (0.6.2): for a page served from another domain than the
@@ -38,7 +39,23 @@
 //   on the phone that made it, and only there: the server never has it, so other phones have nothing to answer (and
 //   two phones can't choose different versions); the held phone's status$ says attention until it is answered.
 // -> { signIn, signOut, onUser, user, open, watch, save, flush, status$, refreshClaims, nudge, relistens, facts,
-//      conflicts, describe, resolve, hub, queue, parts }
+//      conflicts, describe, resolve, track, unsentOutside, outsideSettled, heard, idle, hub, queue, parts }
+//   Outside writes (0.8.1): track(promise, { kind, id }) -> the same promise; a write the app sends another way (straight
+//   to the SDK) counts as unsent until it settles (either way: a failure is the app's answer to handle). Unsent outside
+//   writes keep the status saving, flush and the sign-out gate shut, idle() false, and the watchdog from restarting
+//   the connection under them; with kind and id, that record is held like one with unsent saves (a delete heard from
+//   elsewhere waits). unsentOutside(kind?, id?) -> their count now (with outside()'s, unless kind is given).
+//   outsideSettled(ms = 4000) -> true once none is left (false after ms). queue: { otherPending } still works
+//   (deprecated: an async check, only for the sign-out gate).
+//   heard(meta?) (0.8.1): a read or listener the app runs itself answered ({ fromCache, hasPendingWrites } as its
+//   snapshot said; none: the server did): it feeds facts().confirmed/heardAt, the status and the watchdog.
+//   idle() (0.8.1) -> true when nothing is being stored, sent, held in the queue (failed and conflicts included) or
+//   written outside it: for an update's canReload.
+//   signIn({ hint, popupOnly, redirectFirst }) (0.8.1, per call): hint, the account's email, is Google's login_hint;
+//   popupOnly and redirectFirst (true/false) override the createApp options for this call.
+//   hub, queue, parts (0.8.1): promised are queue.{ onChange, pending, status, error, unsent, conflicted } and
+//   hub.drop; the rest of hub, queue and parts is an escape hatch with no promise (an app's own sign-out steps go in
+//   signOut's before, not around hub.stopAll).
 //   facts() -> { persisted, confirmed, heardAt } (0.7.3): the storage guard's answer (false: the browser may clear
 //   this device's copy), whether the server has answered since sign-in, and when it last did (ms; 0: not yet), for an
 //   app's own status words. flush(ms) waits ms in all (before 0.7.3, up to twice that), and is false while a save
@@ -51,8 +68,14 @@
 //   describe gives it, a '.' inside a key escaped (0.7.4, conflict.js pathOf); a field not named stays theirs); this
 //   device's changes that don't clash are kept either way (conflict.js resolvedRecord), then saved over the server's
 //   copy (queue.restore). Nothing is overwritten without this answer.
-//   signOut({ wait }) -> { ok, reason: 'unsent' | 'changed', reload, failed }: refuses while anything is unsent (this
-//   app's, another tab's, another registered app's on this origin), then forgets the device and signs out.
+//   signOut({ wait, force, before }) -> { ok, reason: 'unsent' | 'refused' | 'changed', reload, failed }: refuses while
+//   anything is unsent (this app's, another tab's, another registered app's on this origin, writes outside the queue)
+//   with nothing deleted ('refused' (0.8.1): a save the server refused waits for the user's Retry or Discard; before,
+//   'unsent'), then forgets the device and signs out. 'changed': someone else signed in meanwhile (another tab).
+//   force (0.8.1): sign out anyway once the user chose to: after the wait, unsent saves (in every registered outbox)
+//   and outside writes are forgotten with the device ('changed' still stops it). before (0.8.1): async (), the app's
+//   own step, run after every listener stopped and before anything is wiped (e.g. its own listeners, the Auth
+//   sign-out); a throw is named in failed ('before') and the sign-out goes on.
 import { createSyncHub, replanOnWake } from './sync.js';
 import { createWriteQueue, watchSaved } from './writes.js';
 import { createStores } from './store.js';
@@ -108,7 +131,8 @@ import { createFirestoreBackend } from './firestore.js';
  * @property {number} [watchEvery] ms between watchdog checks (0: only on nudge())
  * @property {any} [win] the browser's window, for tests
  * @property {string} [device] this device's name as people know it, shown in conflict popups
- * @property {() => boolean} [quiet] false while writes outside the queue are not acknowledged (the watchdog waits)
+ * @property {() => number} [outside] writes the app knows of outside the queue, not yet acknowledged (0.8.1)
+ * @property {() => boolean} [quiet] deprecated (0.8.1: outside or track): false counts as one write outside the queue
  */
 
 const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported', 'auth/cancelled-popup-request'];
@@ -191,13 +215,49 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   });
   const hub = createSyncHub({
     openStore: stores.openStore, listen: adapter.listen, fetchOne: adapter.fetchOne, now,
-    binKinds: kinds, unsent: (_scope, coll, id) => queue.unsent(kindOf(coll), id),
+    binKinds: kinds, unsent: (_scope, coll, id) => queue.unsent(kindOf(coll), id) || unsentOutside(kindOf(coll), id) > 0,
     onError: e => { try { report?.error?.(e?.code); } catch { /* never stops sync */ } console.warn('sync', e?.code || e?.message); },
     ...(backendOptions.stampMode ? { stampMode: backendOptions.stampMode } : {}), ...options.hub,
   });
   replanOnWake(hub, win);
   win?.addEventListener?.('online', () => { queue.kick(); tell(); });
   win?.addEventListener?.('offline', () => tell());
+
+  // writes the app makes outside the queue (0.8.1): tracked ones until they settle, plus the app's own count (outside;
+  // the deprecated quiet() false counts one). They count as unsent everywhere the queue's saves do
+  /** @type {Set<{ kind: string, id: string }>} */
+  const tracked = new Set();
+  /** @type {Set<() => void>} */
+  const settledWaits = new Set();
+  /** @param {string} [kind] @param {string} [id] @returns {number} */
+  function unsentOutside(kind, id) {
+    let n = 0;
+    for (const t of tracked) if ((!kind || t.kind === kind) && (id == null || t.id === id)) n++;
+    if (kind) return n;
+    try { n += Math.max(0, Number(options.outside?.() || 0)); } catch { n++; }   // (can't tell: counts as unsent)
+    try { if (options.quiet && !options.quiet()) n++; } catch { n++; }
+    return n;
+  }
+  /** @template T @param {Promise<T>} promise @param {{ kind?: string, id?: string }} [about] @returns {Promise<T>} */
+  function track(promise, { kind = '', id = '' } = {}) {
+    const t = { kind, id: String(id) };
+    tracked.add(t); tell();
+    const done = () => { if (!tracked.delete(t)) return; if (scope) void hub.settle(scope); tell(); for (const fn of [...settledWaits]) fn(); };
+    const p = Promise.resolve(promise);
+    p.then(done, done);
+    return p;
+  }
+  /** @param {number} [ms] @returns {Promise<boolean>} */
+  function outsideSettled(ms = 4000) {
+    if (!unsentOutside()) return Promise.resolve(true);
+    return new Promise(resolve => {
+      const check = () => { if (unsentOutside()) return; finish(true); };
+      const timer = setTimeout(() => finish(!unsentOutside()), ms);
+      /** @param {boolean} ok */
+      const finish = ok => { clearTimeout(timer); settledWaits.delete(check); resolve(ok); };
+      settledWaits.add(check);
+    });
+  }
 
   // the status: confirmed only once the server has answered since the page opened
   let heard = false, heardAt = 0, persisted = true, relistens = 0;
@@ -206,7 +266,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   let lastTold = '';
   const statusNow = () => {
     const entries = queue.entries();
-    return syncStatus({ online: online(), pending: queue.pending(), attention: attentionCount(entries), persisted, stale: watchdog.stale(), confirmed: heard, atRiskOnlyOffline: true });
+    return syncStatus({ online: online(), pending: queue.pending() + unsentOutside(), attention: attentionCount(entries), persisted, stale: watchdog.stale(), confirmed: heard, atRiskOnlyOffline: true });
   };
   /** @param {boolean} [force] */
   function tell(force = false) {
@@ -246,7 +306,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   let timer = 0;
   let cycling = false;
   const watchdog = createWatchdog({
-    now, online, quiet: () => queue.pending() === 0 && (!options.quiet || !!options.quiet()),
+    now, online, quiet: () => queue.pending() === 0 && unsentOutside() === 0,
     relisten: /** @param {string} why */ why => { console.warn('listeners replaced:', why); relistens++; stopWatches(); hub.stopAll().then(() => { startWatches(); tell(); }); },
     cycle: /** @param {string} why */ why => { console.warn('connection restarted:', why); void cycleNet().finally(() => tell()); },
   });
@@ -301,8 +361,9 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   async function flush(ms = 4000) {
     const end = Date.now() + ms;   // (one wait in all, 0.7.3: the saves being stored, then their sends)
     if (saving.size) await Promise.race([Promise.allSettled([...saving]), new Promise(r => setTimeout(r, ms))]);
-    const sent = await queue.flush(Math.max(0, end - Date.now()));
-    return sent && !saving.size;   // (a save still being stored is not sent)
+    await outsideSettled(Math.max(0, end - Date.now()));   // (0.8.1: tracked writes and the app's count first, so the
+    const sent = await queue.flush(Math.max(0, end - Date.now()));   // queue's answer is the last one asked)
+    return sent && !unsentOutside() && !saving.size;   // (a save still being stored is not sent)
   }
   /** @param {string} s */
   async function open(s) { scope = s; await queue.activate(s); tell(); }
@@ -332,12 +393,13 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   }
   const standalone = () => { try { return !!(win?.matchMedia?.('(display-mode: standalone)').matches || nav?.standalone); } catch { return false; } };
   const redirectFirst = options.redirectFirst || (() => standalone() || (/Android/i.test(nav?.userAgent || '') && /Firefox\//i.test(nav?.userAgent || '')));
-  async function signIn() {
+  /** @param {{ hint?: string, popupOnly?: boolean, redirectFirst?: boolean }} [opts] */
+  async function signIn({ hint = '', popupOnly = !!options.popupOnly, redirectFirst: redirect = undefined } = {}) {
     const { A, auth } = await load();
     const provider = new A.GoogleAuthProvider();
-    provider.setCustomParameters?.({ prompt: 'select_account' });
-    if (options.popupOnly) return void await A.signInWithPopup(auth, provider);
-    if (redirectFirst()) return A.signInWithRedirect(auth, provider);
+    provider.setCustomParameters?.({ prompt: 'select_account', ...(hint ? { login_hint: hint } : {}) });
+    if (popupOnly) return void await A.signInWithPopup(auth, provider);
+    if (redirect ?? redirectFirst()) return A.signInWithRedirect(auth, provider);
     try { await A.signInWithPopup(auth, provider); }
     catch (e) { if (!REDIRECT_CODES.includes(e?.code)) throw e; await A.signInWithRedirect(auth, provider); }
   }
@@ -348,22 +410,34 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
   }
 
   // sign-out on a shared device: the gate, then forgetDevice's order, then the SDK's sign-out
-  /** @param {{ wait?: number }} [options] @returns {Promise<{ ok: boolean, reason: string, reload: boolean, failed: string[] }>} */
-  async function signOut({ wait = 4000 } = {}) {
+  // (0.8.1) 'refused' when a save the server refused waits for the user, else 'unsent'
+  const shut = () => queue.entries().some(x => x.state === 'failed') ? 'refused' : 'unsent';
+  /** @param {{ wait?: number, force?: boolean, before?: (() => any) | null }} [options] @returns {Promise<{ ok: boolean, reason: '' | 'unsent' | 'refused' | 'changed', reload: boolean, failed: string[] }>} */
+  async function signOut({ wait = 4000, force = false, before = null } = {}) {
     const s = await load(), uid = s.auth.currentUser?.uid || null;
-    if (!(await flush(wait))) return { ok: false, reason: 'unsent', reload: false, failed: [] };
+    if (!(await flush(wait)) && !force) return { ok: false, reason: shut(), reload: false, failed: [] };
+    /** @type {'' | 'unsent' | 'refused' | 'changed'} */
     let reason = '';
+    let beforeFailed = false;
     const clear = !s.emulator && adapter.clearCache ? () => adapter.clearCache() : null;
     const r = await forgetDevice({
       hub, stores, queue, keep: forget.keep || [], clearBackendCache: clear, extra: forget.extra || null,
       proceed: async () => {
         if ((s.auth.currentUser?.uid || null) !== uid) { reason = 'changed'; return false; }
-        if (!(await queue.flush(1500))) { reason = 'unsent'; return false; }
+        if (!force && !(await flush(1500))) { reason = shut(); return false; }
+        if (before) {
+          try { await before(); } catch (e) { beforeFailed = true; console.warn('signOut: before', e); }
+          // (before may sign out of Auth itself; someone else signed in meanwhile, or a save made then, stops the wipe)
+          const now = s.auth.currentUser?.uid || null;
+          if (now && now !== uid) { reason = 'changed'; return false; }
+          if (!force && (saving.size || queue.pending() || unsentOutside())) { reason = shut(); return false; }
+        }
         return true;
       },
     });
+    if (beforeFailed) r.failed.unshift('before');
     if (!r.wiped) { stopWatches(); startWatches(); return { ok: false, reason, reload: false, failed: r.failed }; }
-    stopWatches(); watches.clear(); scope = ''; heard = false; heardAt = 0; told.clear(); deleting.clear(); codes.clear(); claimsAsked = '';
+    stopWatches(); watches.clear(); scope = ''; heard = false; heardAt = 0; told.clear(); deleting.clear(); codes.clear(); claimsAsked = ''; tracked.clear();
     if (clear) loaded = null;   // (the SDK instance was terminated: the page starts again)
     await s.A.signOut(s.auth);
     current = null;
@@ -421,9 +495,15 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
 
   /** @param {string} [event] */
   const nudge = (event = '') => { if (!watches.size) return false; const a = event ? watchdog.event() : watchdog.check(); return !!(a.relisten || a.cycle); };
+  // (0.8.1) a read or listener the app runs itself: { fromCache, hasPendingWrites } as its snapshot said (none: the server)
+  /** @param {import('./types.js').SnapMeta} [m] */
+  const heardOf = (m = {}) => onSnap({ fromCache: !!m.fromCache, hasPendingWrites: !!m.hasPendingWrites });
+  // (0.8.1) nothing being stored, sent, held in the queue or written outside it: safe to reload
+  const idle = () => !saving.size && queue.pending() === 0 && unsentOutside() === 0;
   const parts = { hub, queue, stores, adapter, watchdog, registry, outbox };
   return {
     signIn, signOut, onUser, user: () => current, open, watch, save, flush, status$, refreshClaims, nudge,
     relistens: () => relistens, facts: () => ({ persisted, confirmed: heard, heardAt }), conflicts, describe, resolve, hub, queue, parts,
+    track, unsentOutside, outsideSettled, heard: heardOf, idle,
   };
 }

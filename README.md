@@ -21,7 +21,7 @@ What it does:
 - **Stamps only move forward.** The adapter stamps `max(now, the server copy + 1)` inside the commit transaction, so
   a writer whose clock is behind still moves a record's stamp on (0.4.0).
 - **Sign-out wipes the device.** The sign-out check refuses while anything is unsent (in any tab, and the app's own
-  writes through `otherPending`), then `forgetDevice` stops everything, checks again, and deletes every store but the
+  writes through `track`), then `forgetDevice` stops everything, checks again, and deletes every store but the
   account kept, the outbox, the SDK's offline cache (`clearCache`) and the app's own lists, in every tab.
 
 ## Modules
@@ -51,7 +51,7 @@ for a service worker's offline list (0.8.0).
 ## Use
 
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.8.0/index.js';
+import { createApp } from 'https://core.anawj.com/sync/0.8.1/index.js';
 
 const app = createApp({
   name: 'myapp', colls: ['items'], path: (space, coll) => ['spaces', space, coll],
@@ -67,9 +67,25 @@ app.status$(st => drawChip(st));                 // { state, count }: synced onl
 const off = app.watch(space, 'items', list => render(list));    // device copy, then the server; unsent saves laid over
 await app.save('items', space, { id: 'i1', text: 'Hello' }, previousCopy);   // base: the copy the edit started from
 
-const out = await app.signOut();                 // { ok, reason: 'unsent' | 'changed', reload }
+const out = await app.signOut();                 // { ok, reason: 'unsent' | 'refused' | 'changed', reload }
 if (out.ok && out.reload) location.reload();     // the SDK's offline cache was cleared
 ```
+
+### Writes outside the queue, and the sign-in/sign-out hooks (0.8.1)
+
+```js
+await app.track(setDoc(ref, data), { kind: 'items', id });   // a write sent straight to the SDK: unsent until it settles
+app.unsentOutside();                             // their count, at once (0 when none)
+app.heard({ fromCache: snap.metadata.fromCache });   // a listener of the app's own heard: status and watchdog
+const ready = app.idle();                        // nothing stored, sent, queued or outside: an update's canReload
+await app.signIn({ hint: lastEmail });           // login_hint; also { popupOnly, redirectFirst } per call
+await app.signOut({ before: async () => stopMyListeners(), force: userSaidLoseThem });
+```
+
+Tracked writes count everywhere the queue's saves do: the status, `flush`, the sign-out gate, `idle()` and the
+watchdog. `before` runs after every listener stopped and before the wipe. `force` forgets unsent saves (only once
+the person chose that). Promised from `queue` and `hub`: `queue.{ onChange, pending, status, error, unsent,
+conflicted }` and `hub.drop`; the rest of `parts` is an escape hatch with no promise.
 
 Anything the facade does not cover: pass the parts' own options (`backend`, `hub`, `stores`, `queue`), replace a part
 (`adapter`, `commit`, `outbox`), or use `app.parts` (hub, queue, stores, adapter, watchdog, registry). Each module
