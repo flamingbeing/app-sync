@@ -20,7 +20,10 @@
 //     saves anywhere on the device (this tab, another tab, another app on the origin; forget({ force }) wipes anyway).
 // The scope last opened is kept in ctx.storage(): `<name>:sync/scope` (FORMATS.md), so a reload, signed out, still
 // counts its unsent saves (the auth module refuses a switch while there are any) and a switch wipes the right outbox.
-// -> api: open, watch, watchDoc, save, flush, track, conflicts, describe, resolve, reconnect, nudge, status$, facts,
+// saveMany(kind, scope, records) (1.1.0) -> one result per record ({ status, value | reason }, Promise.allSettled's):
+//   each record saved as save() saves it, on the copy this device shows (copyOf) as its base, so a record changed
+//   elsewhere since is a conflict (or a held one) of its own, never an overwrite; the rest still land.
+// -> api: open, watch, watchDoc, save, saveMany, flush, track, conflicts, describe, resolve, reconnect, nudge, status$, facts,
 //    heard, idle, copyOf, lastSeen, unsentOutside, outsideSettled, relistens, queue, hub, parts: as core.js documents them.
 import { createSyncCore } from './core.js';
 import { forgetDevice } from './forget.js';
@@ -109,7 +112,9 @@ export function sync(options = {}) {
       // (a save counts as unsent from the moment it is made, before it is stored)
       /** @type {typeof api.save} */
       const save = (...a) => { const p = api.save(...a); tell(); p.then(tell, tell); return p; };
-      return { ...api, open, save };
+      /** @type {import('./types.js').SaveMany} */
+      const saveMany = (kind, s, records) => Promise.allSettled(records.map(r => save(kind, s, r, api.copyOf(kind, r.id))));
+      return { ...api, open, save, saveMany };
     },
     async stop() {
       stopped = true;

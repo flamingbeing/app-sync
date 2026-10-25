@@ -25,6 +25,8 @@ export function keysOf(path: string): string[];
  * @returns {Doc}
  */
 export function mergeFields(current: Doc | null, record: Doc | null, base: Doc | null): Doc;
+/** @param {Record<string, any> | null | undefined} merge @param {string} coll @returns {((current: Doc | null, record: Doc, base: Doc | null, ops?: any) => Doc) | null} */
+export function mergeOf(merge: Record<string, any> | null | undefined, coll: string): ((current: Doc | null, record: Doc, base: Doc | null, ops?: any) => Doc) | null;
 /**
  * @param {Doc | null} current
  * @param {Doc | null} record

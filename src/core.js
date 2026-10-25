@@ -46,8 +46,10 @@
 //   the watchdog restarts it like the lists; sign-out pauses it, as it does the lists. Needs the adapter's listenDoc (firestore.js has it).
 //   reconnect({ why }) (0.8.3) -> true once the connection was restarted (the SDK's network off and on), then sends
 //   what waits; false offline, under an unsent outside write (a restart may send it twice), or without the switch.
-//   watch(scope, coll, cb): cb(list, meta), meta (0.8.2) with { changed, removed }: the ids whose copy changed since the
-//   last call (all of them the first time) and the ids gone from the list.
+//   watch(scope, coll, cb, { query, limit }): cb(list, meta), meta (0.8.2) with { changed, removed }: the ids whose copy
+//   changed since the last call (all of them the first time) and the ids gone from the list. query, limit (1.1.0,
+//   view.js): cb gets only the records whose fields equal query's, the first limit of them; one leaving that view is
+//   in removed. The device copy and what is listened to stay whole.
 //   copyOf(kind, id) (0.8.2) -> the copy of that record a running watch of the open scope last handed (null: none).
 //   lastSeen(kind, id) (0.8.2) -> { stamp, signature } of the server's copy as last heard (the device copy after a
 //   reload; without this device's unsent saves), to compare with queue.lastSent(kind, id) (the copy this device last
@@ -73,7 +75,8 @@ import { createOutboxRegistry } from './registry.js';
 import { createWatchdog } from './watchdog.js';
 import { persistGuard } from './persist.js';
 import { syncStatus, attentionCount } from './status.js';
-import { describeConflict, mergeFields, resolvedRecord, recordSignature } from './conflict.js';
+import { describeConflict, mergeOf, resolvedRecord, recordSignature } from './conflict.js';
+import { viewOf } from './view.js';
 import { createFirestoreBackend } from './firestore.js';
 
 /**
@@ -229,12 +232,12 @@ export function createSyncCore(options, { load, user }) {
 
   // watches: each one's list (device copy, then the server) with this device's unsent saves laid over it, again when
   // either changes (watchSaved); only what the listener hears feeds the status and the watchdog
-  /** @typedef {{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, off: ReturnType<typeof watchSaved> | null }} Watch */
+  /** @typedef {{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, view: ((list: Doc[]) => Doc[]) | null, off: ReturnType<typeof watchSaved> | null }} Watch */
   /** @type {Set<Watch>} */
   const watches = new Set();
   const heardHub = { watch: (/** @type {string} */ s, /** @type {string} */ coll, /** @type {(list: Doc[], meta: any) => void} */ fn) => hub.watch(s, coll, (list, m) => { if (m) onSnap(m); fn(list, m); }) };
   /** @param {Watch} w */
-  const start = w => { w.off = watchSaved({ hub: heardHub, queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll) }, (list, m) => w.cb(/** @type {Doc[]} */ (list.map(strip)), m || {})); };
+  const start = w => { w.off = watchSaved({ hub: heardHub, queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll), view: w.view }, (list, m) => w.cb(/** @type {Doc[]} */ (list.map(strip)), m || {})); };
   // (0.8.3) one document: handed when its copy changes, null ("gone") once when the server says it is not there or the
   // listener fails (a failed one is finished); a device-copy answer that it is not there is never "gone"
   /** @typedef {{ segments: string[], cb: (d: Doc | null, meta: any) => void, onError: ((e: any) => void) | null, last: string, failed: boolean, off: (() => void) | null }} DocWatch */
@@ -279,10 +282,10 @@ export function createSyncCore(options, { load, user }) {
     for (const w of docWatches) { const off = w.off; w.off = null; off?.(); }
   };
   const startWatches = () => { for (const w of watches) if (!w.off) start(w); for (const w of docWatches) if (!w.off && !w.failed) startDoc(w); };
-  /** @param {string} s @param {string} coll @param {(list: Doc[], meta: any) => void} cb @returns {() => void} */
-  function watch(s, coll, cb) {
+  /** @param {string} s @param {string} coll @param {(list: Doc[], meta: any) => void} cb @param {import('./types.js').WatchOptions} [options] @returns {() => void} */
+  function watch(s, coll, cb, options) {
     /** @type {Watch} */
-    const w = { scope: s, coll, cb, off: null };
+    const w = { scope: s, coll, cb, view: viewOf(options), off: null };
     watches.add(w); start(w);
     if (watchEvery > 0 && !timer) { timer = setInterval(() => watchdog.check(), watchEvery); /** @type {any} */ (timer).unref?.(); }
     return () => { w.off?.(); watches.delete(w); };
@@ -292,8 +295,12 @@ export function createSyncCore(options, { load, user }) {
   // (lastSeen: { stamp, signature }, to tell a change made elsewhere from this device's own); null: none
   /** @param {string} kind */
   const watchOf = kind => [...watches].find(w => w.scope === scope && w.coll === collOf(kind) && w.off)?.off || null;
+  // (1.1.0: a watch with a view hands only part of the list, so each running one is asked)
   /** @param {string} kind @param {string} id @returns {Doc | null} */
-  const copyOf = (kind, id) => strip(watchOf(kind)?.copyOf(id) ?? null) ?? null;
+  const copyOf = (kind, id) => {
+    for (const w of watches) if (w.scope === scope && w.coll === collOf(kind) && w.off) { const d = w.off.copyOf(id); if (d) return strip(d) ?? null; }
+    return null;
+  };
   /** @param {string} kind @param {string} id @returns {{ stamp: any, signature: string } | null} */
   function lastSeen(kind, id) {
     const d = watchOf(kind)?.seen(id);
@@ -404,9 +411,8 @@ export function createSyncCore(options, { load, user }) {
   // the merge function of a merge collection named in held (0.7.1: its clashes are found and answered through it)
   /** @param {string} kind */
   const mergeOfHeld = kind => {
-    const h = backendOptions.held, m = backendOptions.merge, coll = collOf(kind);
-    if (!h || h === true || !Object.hasOwn(h, coll) || !h[coll] || !m || !Object.hasOwn(m, coll) || !m[coll]) return null;
-    return m[coll] === true ? mergeFields : m[coll];
+    const h = backendOptions.held, coll = collOf(kind);
+    return h && h !== true && Object.hasOwn(h, coll) && h[coll] ? mergeOf(backendOptions.merge, coll) : null;
   };
   /** @param {string} kind @returns {string[]} */
   const countersOf = kind => { const h = backendOptions.held, c = h && h !== true ? h[collOf(kind)] : null; return c && c !== true ? c.counters || [] : []; };

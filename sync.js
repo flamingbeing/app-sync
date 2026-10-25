@@ -3,3 +3,5 @@
 export { sync } from './src/module-sync.js';
 // app-sync 0.9.3: the entry an app writes for a record it removes or loses (delete to the bin), as index.js has it.
 export { leaveEntry } from './src/sync.js';
+// 1.1.0: the merge function that writes a save over the server's copy whole (backend: { merge: { '*': replaceRecord } }).
+export { replaceRecord } from './src/replace.js';

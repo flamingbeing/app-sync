@@ -17,9 +17,11 @@
     "src/outbox.js",
     "src/persist.js",
     "src/registry.js",
+    "src/replace.js",
     "src/status.js",
     "src/store.js",
     "src/sync.js",
+    "src/view.js",
     "src/watchdog.js",
     "src/writes.js",
     "sync.js"

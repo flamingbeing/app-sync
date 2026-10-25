@@ -1,7 +1,7 @@
 // The Vite check (0.9.2; README "Vite"): Vite is never needed to run app-sync, but a page built with `vite build` works.
 //   node test/vite/build.mjs external   (a) @core/* and https:// imports stay external (loaded by URL, the import map)
 //   node test/vite/build.mjs source     (b) @core/* aliased to this checkout's entries: the bundle has auth and sync,
-//                                           and no update code (the unused import is shaken out)
+//                                           and no update code or replaceRecord (the unused imports are shaken out)
 //   node test/vite/build.mjs package    (c) @core/* aliased to the installed package's exports (app-sync/<entry>,
 //                                           installed from a git ref in node_modules); same rule as (b)
 // Needs vite (dev dependency only). Exits 1 on a failed build or a broken rule.
@@ -44,6 +44,7 @@ if (mode === 'external') {
   if (!js.includes(MARK.auth)) problems.push('the runner is missing from the bundle');
   if (!js.includes(MARK.sync)) problems.push('the sync module is missing from the bundle');
   if (js.includes(MARK.update)) problems.push('update code is in a page that never uses it (not shaken out)');
+  if (js.includes('replaceRecord')) problems.push('replaceRecord is in a page that never uses it (not shaken out)');
   if (/@core\//.test(js)) problems.push('an @core/ name was left unresolved');
 }
 if (problems.length) { console.error(`vite (${mode}): ${problems.join('; ')}`); process.exit(1); }

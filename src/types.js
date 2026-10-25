@@ -176,14 +176,18 @@
  */
 
 /**
+ * Built in 1.1.0 (SHAPES.md 4+ and 5).
+ * @typedef {{ query?: Record<string, any>, limit?: number }} WatchOptions  watch(scope, coll, cb, options) (view.js)
+ * @typedef {(kind: string, scope: string, records: Doc[]) => Promise<PromiseSettledResult<Doc>[]>} SaveMany  sync.saveMany
+ */
+
+/**
  * Reserved for 1.x (SHAPES.md): types only, nothing built. 1.0 uses these names for nothing else.
  * @typedef {'google' | 'emailLink' | 'password' | 'passcode' | 'anonymous'} SignInMethod
  * @typedef {{ method?: SignInMethod, hint?: string, email?: string, password?: string, code?: string }} SignInRequest
  * @typedef {{ recent: number } | { part: (record: Doc) => string }} KeepRule  sync({ keep: { [coll]: KeepRule } })
  * @typedef {{ mode: 'recent' | 'part', since?: number, part?: string }} KeepMeta  meta.keep on the device (FORMATS.md)
- * @typedef {{ query?: Record<string, any>, limit?: number }} WatchOptions  watch(scope, coll, cb, options)
  * @typedef {{ public?: string[], keep?: Record<string, KeepRule> }} SyncReserved  sync() options added in 1.x
- * @typedef {(kind: string, scope: string, records: Doc[]) => Promise<any[]>} SaveMany  sync.saveMany
  * @typedef {'files' | 'ui' | 'theme' | 'settings' | 'sw' | 'devkit'} ReservedModule  @core/<name>, nothing built
  */
 

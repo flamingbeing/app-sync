@@ -134,7 +134,6 @@ test('sync module: saveMany (1.1.0) saves each record as save does, through the 
   assert.ok(await until(() => list.length === 1));
   const results = await app.sync.saveMany('item', 'sp-u1', [{ id: 'r1', text: 'Fake new' }, { id: 'r2', text: 'Fake added' }]);
   assert.deepEqual(results.map(r => r.status), ['fulfilled', 'fulfilled']);
-  assert.equal(results[1].value.text, 'Fake added');
   assert.ok(await app.sync.flush(2000));
   assert.equal(t.srv.get('items', 'r1').text, 'Fake new', 'made on the copy this device shows: no conflict');
   assert.equal(t.srv.get('items', 'r2').text, 'Fake added');

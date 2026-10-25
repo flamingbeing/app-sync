@@ -1,5 +1,5 @@
 /** @param {FirestoreBackendOptions} options */
-export function createFirestoreBackend({ sdk, path, field: stampField, time, stamp, canonical: canonOf, where, merge, mark, stampMode, serverField, writeId, held, edits, editor, onCommit, onSnapshotMeta, onRead }: FirestoreBackendOptions): {
+export function createFirestoreBackend({ sdk, path, field: stampField, time, stamp, canonical: canonOf, where, merge, mark, stampMode, serverField, writeId, held, edits, editor, onCommit, onSnapshotMeta, onRead, commitRetry }: FirestoreBackendOptions): {
     listen: (scope: string, coll: string, { since, field }: ListenPlan | undefined, onSnap: (s: Snapshot) => void, onError: (e: any) => void) => () => void;
     listenDoc: (segments: (string | number)[], onSnap: (s: {
         doc: Doc | null;
@@ -65,4 +65,8 @@ export type FirestoreBackendOptions = {
     onCommit?: ((ctx: CommitContext) => ExtraWrite[] | void) | null | undefined;
     onSnapshotMeta?: ((coll: string, meta: import("./types.js").SnapMeta) => void) | undefined;
     onRead?: ((coll: string, kind: "billed" | "served", n: number) => void) | undefined;
+    commitRetry?: {
+        codes?: string[];
+        delay?: number;
+    } | null | undefined;
 };

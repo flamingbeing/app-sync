@@ -205,6 +205,20 @@ Anything the facade does not cover: pass the parts' own options (`backend`, `hub
 also loads on its own; the full wiring by hand (0.5.x style) still works, and `src/app.sync.js` shows it in one place.
 Each module's header comment describes its options and contract in full.
 
+### Save many, a narrowed watch, a default merge and a commit retry (1.1.0)
+
+```js
+const results = await app.sync.saveMany('item', scope, records);   // one { status, value | reason } per record
+app.sync.watch(scope, 'items', list => draw(list), { query: { done: false }, limit: 50 });
+sync({ ..., backend: { merge: { '*': replaceRecord }, commitRetry: { codes: ['permission-denied'], delay: 500 } } });
+```
+
+`saveMany` saves each record as `save()` does (through the outbox, a conflict per record), each on the copy this
+device shows as its base. A watch's `query` (fields equal to these values) and `limit` narrow what its callback gets,
+never the device copy. `merge['*']` is the merge of every collection not named; `replaceRecord` (from `@core/sync` or
+`index.js`) writes the save over the server's copy whole. `commitRetry` tries a commit refused with one of `codes`
+once more after `delay` ms.
+
 ### Held conflicts by field (0.6.3, opt-in)
 
 ```js
