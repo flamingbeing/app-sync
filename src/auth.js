@@ -3,7 +3,10 @@
 // signed in, through the events below. Sign-out keeps this device's data: the device copy and unsent saves stay,
 // and send when the same account signs in again.
 //
-// auth({ claims, beforeSwitch, popupOnly, redirectFirst, fetch, nav, win })
+// auth({ methods, claims, beforeSwitch, popupOnly, redirectFirst, fetch, nav, win })
+//   methods (1.3.0): the ways to sign in (default ['google']): 'google', and each of src/signin/ by its named export
+//   (emailLink(), password(), passcode({ url }), anonymous(); a page bundles only those it names) or by its SHAPES.md
+//   name ('emailLink', 'password', 'passcode', 'anonymous'; loaded the first time signIn asks for it).
 //   claims: { url, entry(user) -> the role doc { v } | null, behind(entry, tokenClaims), when(), watch, doc,
 //   onClaims }: after sign-in and on refreshClaims(), when the role doc's v is ahead of the token's, POST url (Bearer
 //   token) once per uid:v, then refresh the token. watch: true reads the role doc (doc(user) -> its path) live with the
@@ -23,9 +26,13 @@
 //   beforeSwitch refuses it too. A module whose wipe throws refuses it as well (reason 'wipe': the old account stays
 //   the owner, the new one is signed out, the next sign-in tries the switch again).
 // -> api { signIn, signOut, forget, onUser, user, blocked, refreshClaims }
-//   signIn({ hint, popupOnly, redirectFirst, method }) -> { ok, reason: '' | 'redirect' | 'unsent' | 'wipe', from? }:
-//   hint is Google's login_hint; 'redirect': the page is leaving to sign in; 'unsent' | 'wipe': refused switch (from:
-//   the account whose data stays). method: 'google' only (the other methods are 1.x).
+//   signIn({ method, hint, popupOnly, redirectFirst, email, password, code }) -> { ok, reason: '' | 'redirect' |
+//   'unsent' | 'wipe' | 'sent' | 'refused', from? }: method one of methods (default 'google'); hint is Google's
+//   login_hint; 'redirect': the page is leaving to sign in; 'unsent' | 'wipe': refused switch (from: the account whose
+//   data stays); 'sent': the email link is on its way; 'refused': the passcode was not taken. Signed in anonymously,
+//   another method links its account to the anonymous one (1.3.0): the uid stays, so does the device's data, no switch;
+//   the owner and onUser get the account's email. An account that exists already signs in instead (a switch, guarded
+//   as any). A passcode's token can't link: it signs in (a switch).
 //   signOut() -> { ok, reason }: Auth signs out; signout is emitted; nothing is wiped, nothing refused.
 //   forget({ force, before }) -> { ok, reason: '' | 'unsent', failed }: wipe this device on purpose: refused while
 //   anything is unsent unless force; then before() (the app's step; a throw is named in failed; a save made during it
@@ -36,11 +43,26 @@
 import { userOf, claimsBehind } from './user.js';
 
 const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported', 'auth/cancelled-popup-request'];
+// a link refused because that credential has an account already: sign in to it instead
+const TAKEN_CODES = ['auth/credential-already-in-use', 'auth/email-already-in-use'];
+// the SHAPES.md names (1.3.0), each loaded the first time it is asked for (a bundler gives each a chunk of its own)
+/** @type {Record<string, () => Promise<AuthMethod>>} */
+const BY_NAME = {
+  emailLink: () => import('./signin/email-link.js').then(m => m.emailLink()),
+  password: () => import('./signin/password.js').then(m => m.password()),
+  passcode: () => import('./signin/passcode.js').then(m => m.passcode()),
+  anonymous: () => import('./signin/anonymous.js').then(m => m.anonymous()),
+};
 
 /**
+ * A sign-in method (1.3.0, src/signin/): signIn(sdk, request, anon) -> { credential } to sign in with (linked to anon,
+ * the anonymous account signed in, if any), { reason } when nobody is signed in by it now, or {} once it signed in.
+ * @typedef {{ name: string, signIn: (sdk: any, request: SignInRequest, anon: any) => Promise<{ credential?: any, reason?: string }> }} AuthMethod
+ * @typedef {import('./types.js').SignInRequest & { popupOnly?: boolean, redirectFirst?: boolean }} SignInRequest
  * @typedef {import('./user.js').AppUser} AppUser
  * @typedef {{ uid: string, email: string }} Owner
  * @typedef {object} AuthOptions
+ * @property {(string | AuthMethod)[]} [methods] the ways to sign in (1.3.0; default ['google'])
  * @property {any} [claims] the claims check (url, entry, behind, when, watch, doc, onClaims; above)
  * @property {(r: { from: Owner, to: AppUser }) => any} [beforeSwitch] the app's step before another account's data replaces the last one's
  * @property {boolean} [popupOnly]
@@ -49,6 +71,20 @@ const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-t
  * @property {any} [nav]
  * @property {any} [win]
  */
+
+// auth({ methods }) -> name -> the method, or what loads it (a SHAPES.md name)
+/** @param {(string | AuthMethod)[]} list @param {AuthMethod} google @returns {Map<string, AuthMethod | (() => Promise<AuthMethod>)>} */
+function methodsOf(list, google) {
+  /** @type {Map<string, AuthMethod | (() => Promise<AuthMethod>)>} */
+  const out = new Map();
+  for (const m of list) {
+    if (m === 'google') out.set(m, google);
+    else if (typeof m === 'string' && BY_NAME[m]) out.set(m, BY_NAME[m]);
+    else if (typeof m === 'object' && m?.name && typeof m.signIn === 'function') out.set(m.name, m);
+    else throw new Error(`auth: unknown sign-in method ${typeof m === 'string' ? m : JSON.stringify(m)}`);
+  }
+  return out;
+}
 
 /** @param {AuthOptions} [options] @returns {import('./runner.js').Module} */
 export function auth(options = {}) {
@@ -142,23 +178,68 @@ export function auth(options = {}) {
     tellUser();
   }
 
-  /** @param {{ hint?: string, popupOnly?: boolean, redirectFirst?: boolean, method?: string }} [opts] */
-  async function signIn({ hint = '', popupOnly = !!options.popupOnly, redirectFirst: redirect = undefined, method = 'google' } = {}) {
-    if (method !== 'google') throw new Error(`signIn: method ${method} is not here yet (1.x); google only`);
-    const { A, auth } = await load();
-    const provider = new A.GoogleAuthProvider();
-    provider.setCustomParameters?.({ prompt: 'select_account', ...(hint ? { login_hint: hint } : {}) });
+  /** @param {SignInRequest} [request] */
+  async function signIn(request = {}) {
+    const how = await methodOf(request.method || 'google');
+    const x = await load();
     blocked = /** @type {{ from: Owner, to: AppUser, reason: 'unsent' | 'wipe' } | null} */ (null);
-    if (!popupOnly && (redirect ?? redirectFirst())) { await A.signInWithRedirect(auth, provider); return { ok: false, reason: 'redirect' }; }
-    try { await A.signInWithPopup(auth, provider); }
-    catch (e) {
-      if (popupOnly || !REDIRECT_CODES.includes(e?.code)) throw e;
-      await A.signInWithRedirect(auth, provider);
-      return { ok: false, reason: 'redirect' };
-    }
+    const anon = x.auth.currentUser?.isAnonymous && how.name !== 'anonymous' ? x.auth.currentUser : null;
+    const { credential = null, reason = '' } = await how.signIn(x, request, anon);
+    if (reason) return { ok: false, reason };
+    if (credential) await (anon ? linkOrSignIn(x, anon, credential) : x.A.signInWithCredential(x.auth, credential));
+    if (anon && x.auth.currentUser?.uid === anon.uid) linked(x.auth.currentUser);
     await chain;
     return blocked ? { ok: false, reason: blocked.reason, from: blocked.from } : { ok: true, reason: '' };
   }
+  /** @param {string} name @returns {Promise<AuthMethod>} */
+  async function methodOf(name) {
+    const m = methods.get(name);
+    if (!m) throw new Error(`signIn: method ${name} is not in auth({ methods })`);
+    if (typeof m !== 'function') return m;
+    const loaded = await m();
+    methods.set(name, loaded);
+    return loaded;
+  }
+  /** @param {any} x @param {any} anon @param {any} credential */
+  async function linkOrSignIn(x, anon, credential) {
+    try { await x.A.linkWithCredential(anon, credential); }
+    catch (e) {
+      if (!TAKEN_CODES.includes(/** @type {any} */ (e)?.code)) throw e;
+      await x.A.signInWithCredential(x.auth, credential);
+    }
+  }
+  // the anonymous account now linked to a real one: the same uid (Auth tells no change), so no switch; the owner and
+  // onUser get its email
+  /** @param {any} u */
+  const linked = u => {
+    chain = chain.then(() => {
+      if (current?.uid !== u.uid) return;
+      const user = /** @type {AppUser} */ (userOf(u));
+      current = user;
+      store.set('owner', held = { uid: u.uid, email: user.email });
+      tellUser();
+    });
+  };
+  /** @type {AuthMethod} */
+  const google = {
+    name: 'google',
+    async signIn({ A, auth }, { hint = '', popupOnly = !!options.popupOnly, redirectFirst: redirect = undefined }, anon) {
+      const provider = new A.GoogleAuthProvider();
+      provider.setCustomParameters?.({ prompt: 'select_account', ...(hint ? { login_hint: hint } : {}) });
+      const away = () => anon ? A.linkWithRedirect(anon, provider) : A.signInWithRedirect(auth, provider);
+      if (!popupOnly && (redirect ?? redirectFirst())) { await away(); return { reason: 'redirect' }; }
+      try { await (anon ? A.linkWithPopup(anon, provider) : A.signInWithPopup(auth, provider)); }
+      catch (e) {
+        const taken = anon && TAKEN_CODES.includes(e?.code) ? A.GoogleAuthProvider.credentialFromError?.(e) : null;
+        if (taken) { await A.signInWithCredential(auth, taken); return {}; }
+        if (popupOnly || !REDIRECT_CODES.includes(e?.code)) throw e;
+        await away();
+        return { reason: 'redirect' };
+      }
+      return {};
+    },
+  };
+  const methods = methodsOf(options.methods || ['google'], google);
   const standalone = () => { try { return !!(win?.matchMedia?.('(display-mode: standalone)').matches || nav?.standalone); } catch { return false; } };
   const redirectFirst = options.redirectFirst || (() => standalone() || (/Android/i.test(nav?.userAgent || '') && /Firefox\//i.test(nav?.userAgent || '')));
 
