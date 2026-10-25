@@ -10,5 +10,9 @@
   "1.0.0-rc.1": {
     "sw-core.js": "7c6fe6d602362f5e18255a11cafab0013a453712cd26046fffd75d7da8cac607",
     "register.js": "7a46773241efc59dfe4154d078188c8cfd435a3f6e9f120ac3f226431eee1a42"
+  },
+  "1.0.0": {
+    "sw-core.js": "33f5827fa69d5f6100095199ee14c771064df751f62a35930034450ad5829662",
+    "register.js": "0d08aa00b86c07e691d7bff35380914e93d77d888fb816fe0abe627da34e2e1e"
   }
 }
