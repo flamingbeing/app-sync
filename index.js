@@ -22,7 +22,7 @@ export const createReport = options => createReportOf({ sync: VERSION, ...option
 // Deprecated: the names that moved to src/internal.js still load from here until 1.0.0, which removes them.
 export * from './src/internal.js';
 // the files this version loads (index.js and what it imports), for a service worker's list; also sync/<v>/files.json
-export const FILES = ['index.js', 'src/app.js', 'src/cache.js', 'src/conflict.js', 'src/firestore.js', 'src/forget.js', 'src/internal.js',
+export const FILES = ['index.js', 'src/app.js', 'src/cache.js', 'src/conflict.js', 'src/core.js', 'src/firestore.js', 'src/forget.js', 'src/internal.js',
   'src/outbox.js', 'src/persist.js', 'src/registry.js', 'src/report.js', 'src/status.js', 'src/store.js', 'src/sync.js',
   'src/user.js', 'src/watchdog.js', 'src/writes.js'];
 export const VERSION = '0.9.0';

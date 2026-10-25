@@ -3,6 +3,7 @@
   "src/app.js",
   "src/cache.js",
   "src/conflict.js",
+  "src/core.js",
   "src/firestore.js",
   "src/forget.js",
   "src/internal.js",

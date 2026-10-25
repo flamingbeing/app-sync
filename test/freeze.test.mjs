@@ -58,7 +58,7 @@ test('stored formats: keys, prefixes, job states and the job format number are t
   assert.equal(index.CACHE_KEY, 'app-sync-cache');
   assert.equal(index.JOB_FORMAT, 1);
   assert.deepEqual([...index.JOB_STATES], ['pending', 'synced', 'failed', 'conflict', 'archived']);
-  const app = read('src/app.js');
+  const app = read('src/core.js');   // (0.9.1: the sync core, shared by createApp and the sync module)
   assert.match(app, /prefix: name \+ '-sync:'/, 'device copy prefix <name>-sync:');
   assert.match(app, /name \+ '-outbox'/, 'outbox name <name>-outbox');
   assert.match(read('src/registry.js'), /new Set\(\['synced', 'archived'\]\)/, 'finished states other apps on the origin read');
