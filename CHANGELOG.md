@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.0 (2026-10-25)
+
+`createApp`, the one call that wires the safe path, so an app's cloud module becomes config. Adds only: every 0.5.1
+call and module works as before. Tests: `test/app.test.mjs` (written first, failed before) and
+`test/app.emulator.mjs` (Auth + Firestore emulators: sign in, save offline, sync, sign out and wipe).
+
+- `createApp({ name, colls, path, sdk, … })` (`src/app.js`): Google sign-in (popup, redirect when the popup is blocked
+  or the app is installed; a redirect is finished on load), the account as `{ uid, email, name, photo, verified }`,
+  the storage guard at sign-in, a claims refresh (`claims: { url, entry }`: asked once per uid and role version, then
+  the token is refreshed), the device copy, the outbox (named in the origin-wide list by default) and the queue, the
+  hub with `replanOnWake` and the unsent-records hook, the watchdog, `status$` (never synced before the server has
+  answered once), one save at a time per record, `onRefused` for saves the server refused, and `signOut` (refuses
+  while anything is unsent, stops if someone else signed in meanwhile, then `forgetDevice` and the SDK's sign-out).
+- Escape hatches, not flags: `adapter`, `commit` (an app's own transactions), `outbox`, and the `backend`, `hub`,
+  `stores`, `queue` option objects are passed through; `parts` hands back the hub, queue, stores, adapter, watchdog
+  and registry. `userOf` and `claimsBehind` are exported for apps that keep their own sign-in.
+- Fixed (from the unreleased 0.5.2 branch, folded in): a device could keep showing its own save's copy of a record,
+  without a change another device made to it at the same moment, until the record changed again (in an app's two- and
+  three-device tests, about 1 run in 12). The listener heard the server's copy (both changes) while the save was still
+  being sent, so the save's copy was laid over it; when the save was done only the queue changed, and the pattern the
+  README showed (`queue.overlay` inside `hub.watch`) lays it over again only when the listener sends a list. New
+  `watchSaved({ hub, queue, scope, coll, kind }, cb)` (`src/writes.js`) does both: the list with the device's saves
+  over it, again when either changes. `createApp`'s `watch` uses it. Tests: `test/fixes.test.mjs` and the emulator
+  test (two devices on one record).
+- Fixed: the nothing-lost report sent twice on page hide (browsers fire `visibilitychange` and `pagehide` together),
+  counting each error twice. One `flush` at a time: one asked while another is being sent gets that one's answer.
+  Test: `test/report.test.mjs`.
+- Known, not traced yet: in one app's multi-device tests a removed list line's `done` field still shows stale about
+  once in 60 runs; it is not explained by the case above.
+- Emulator script now starts the Auth emulator too (`firebase.json`, `test:emulator`).
+
 ## 0.5.1 (2026-10-25)
 
 Two adapter calls, so apps stop reaching past the adapter for them. Nothing changes for 0.5.0 callers. Tests:

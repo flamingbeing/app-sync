@@ -18,6 +18,12 @@
 //   field (a last-write-wins collection: increments, keyed updates). They are stored with the save and handed on as
 //   backend(owner, kind, record, base, { key, ops: [ops, …] }), key the save's own id (a backend can use it to apply
 //   a save only once); a failed save replaced by a newer one passes its ops on first, so no change is lost.
+//
+// watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb) -> unsubscribe (0.5.2): the engine's list of coll
+//   (hub.watch) with this device's saves of kind laid over it (queue.overlay), handed to cb(list, meta) whenever either
+//   changes. Use it, not hub.watch with overlay inside: a save's own copy shows while it is sent, and the listener may
+//   hear the server's copy (with another device's change in it) during that time; once the save is done, only a queue
+//   change says so, and the server's copy must show then though the listener hears nothing new.
 import { recordSignature } from './conflict.js';
 const copy = value => JSON.parse(JSON.stringify(value));
 const keyOf = job => job.kind + ':' + job.record.id;
@@ -279,4 +285,18 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   };
   if (report) { try { report.watch(api); } catch { /* a report never stops the queue */ } }
   return api;
+}
+
+export function watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb) {
+  let list = null, meta = null, sent = null, live = true;
+  const hand = force => {
+    if (!live || !list) return;
+    const shown = queue.overlay(kind, owner, list), sig = JSON.stringify(shown);
+    if (!force && sig === sent) return;
+    sent = sig;
+    cb(copy(shown), { ...meta });
+  };
+  const offQueue = queue.onChange(() => hand(false));
+  const offHub = hub.watch(scope, coll, (l, m) => { list = l; meta = m; hand(true); });
+  return () => { live = false; offQueue(); offHub(); };
 }

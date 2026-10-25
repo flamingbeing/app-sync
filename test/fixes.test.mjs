@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTombFeed, createCollectionSync, createSyncHub, SKEW, FULL_EVERY } from '../src/sync.js';
-import { createWriteQueue } from '../src/writes.js';
+import { createWriteQueue, watchSaved } from '../src/writes.js';
 import { createStores } from '../src/store.js';
 import { fakeServer } from './fake-server.mjs';
 
@@ -95,4 +95,45 @@ test('tombstones written while a collection\'s engine starts are kept in its met
   assert.ok(meta.gone && meta.gone.a, 'the deleted id is remembered');
   assert.ok(!last.includes('a'));
   await wipeStores();
+});
+
+test('the server\'s copy that arrives while this device\'s save is being sent shows once the save is done (0.5.2)', async () => {
+  // Two devices name themselves on one shared record at once. This device's save is in flight when the listener hears
+  // the server's copy (the other device's change merged with this one): overlaid by the save, which is fine while it is
+  // sent, but once it is done that copy must show, though the listener hears nothing new. Laying the queue over the
+  // list only when the engine sends one (as the README showed) kept the save's own copy, without the other device's
+  // change, until the record changed again.
+  const records = new Map();
+  const store = { async put(x) { records.set(x.key, structuredClone(x)); }, async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; }, async remove(k) { records.delete(k); }, async forget() {} };
+  let answer = null;
+  const backend = (_o, _k, r) => new Promise(res => { answer = () => res(r); });
+  const q = createWriteQueue({ store, getOwner: () => 'a', backend, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const subs = new Set();
+  const hub = { watch: (scope, coll, cb) => { assert.equal(scope, 'a'); assert.equal(coll, 'settings'); subs.add(cb); return () => subs.delete(cb); } };
+  const hear = list => { for (const cb of subs) cb(structuredClone(list), { fromCache: false, hasPendingWrites: false }); };
+  const shown = [], plain = [];
+  const off = watchSaved({ hub, queue: q, scope: 'a', coll: 'settings', kind: 'settings' }, (list, meta) => shown.push({ list, meta }));
+  hub.watch('a', 'settings', list => plain.push(q.overlay('settings', 'a', list)));   // the old pattern, for contrast
+  const v1 = { id: 'people', names: { a: 'Ann' }, updatedAt: 1 };
+  hear([v1]);
+  assert.deepEqual(shown.at(-1).list, [v1]);
+  // this device names b; the save is sent and the server merges it with another device's rename of a
+  await q.save('settings', 'a', { id: 'people', names: { a: 'Ann', b: 'Bo' }, updatedAt: 2 }, v1);
+  await settle(10);
+  assert.ok(answer, 'the save is being sent');
+  assert.deepEqual(shown.at(-1).list[0].names, { a: 'Ann', b: 'Bo' }, 'the save shows at once');
+  const merged = { id: 'people', names: { a: 'Ann 2', b: 'Bo' }, updatedAt: 3 };
+  hear([merged]);
+  assert.deepEqual(shown.at(-1).list[0].names, { a: 'Ann', b: 'Bo' }, 'while it is being sent the save still shows');
+  answer(); await q.settle('settings', ['people']); await settle(10);
+  assert.equal(q.status('settings', 'people'), 'synced');
+  assert.deepEqual(plain.at(-1)[0].names, { a: 'Ann', b: 'Bo' }, 'the old pattern stays on the save\'s copy (the bug)');
+  assert.deepEqual(shown.at(-1).list[0].names, { a: 'Ann 2', b: 'Bo' }, 'the server\'s copy shows once the save is done');
+  assert.deepEqual(shown.at(-1).meta, { fromCache: false, hasPendingWrites: false }, 'with the listener\'s last meta');
+  // nothing changes: nothing is handed over again
+  const n = shown.length; q.kick(); await settle(10);
+  assert.equal(shown.length, n);
+  off();
+  assert.equal(subs.size, 1, 'off stops listening (only the contrast listener is left)');
 });

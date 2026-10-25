@@ -6,7 +6,7 @@ import { initializeApp } from 'firebase/app';
 import * as F from 'firebase/firestore';
 import { createFirestoreBackend } from '../src/firestore.js';
 import { createSyncHub, leaveEntry } from '../src/sync.js';
-import { createWriteQueue } from '../src/writes.js';
+import { createWriteQueue, watchSaved } from '../src/writes.js';
 import { createStores } from '../src/store.js';
 
 const HOST = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8085').split(':');
@@ -255,6 +255,42 @@ for (let i = 2; i <= 40; i++) await A.backend.create(S, 'made', { id: 'm' + i, t
 const ask = Array.from({ length: 70 }, (_, i) => 'm' + (i + 1));
 const have = await B.backend.existing(S, 'made', ask);
 assert.deepEqual([...have].sort(), Array.from({ length: 40 }, (_, i) => 'm' + (i + 1)).sort(), 'only the 40 there, across three queries');
+
+// ---- 0.5.2: two devices change one shared record at once; the server's copy shows once this device's save is done ----
+// The listener hears the server's merged copy while this device's save is still being sent (a slow answer, held here
+// until it has);
+// laying the queue over the list only on the listener's snapshots kept the save's own copy, without the other
+// device's change, until the record changed again.
+{
+  const M1 = device('m1', undefined, { merge: { shared: true } }), M2 = device('m2', undefined, { merge: { shared: true } });
+  const SP = S + '-shared';
+  const v0 = await M1.backend.commit(SP, 'shared', { id: 'people', names: {} }, null);
+  const mstores = createStores({ prefix: 'emu-m1:', colls: ['shared'] });
+  const mhub = createSyncHub({ openStore: mstores.openStore, listen: M1.backend.listen, fetchOne: M1.backend.fetchOne, bin: null, grace: 0 });
+  const box = new Map();
+  const outboxM = { async put(x) { box.set(x.key, structuredClone(x)); }, async list(o) { return [...box.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return box.has(k) ? structuredClone(box.get(k)) : null; }, async remove(k) { box.delete(k); }, async forget() {} };
+  let heard = [], shown = [], plain = [];
+  const qm = createWriteQueue({ store: outboxM, getOwner: () => SP, backend: async (scope, _kind, record, base, extra) => {
+    const r = await M1.backend.commit(scope, 'shared', record, base, extra);
+    await settle(300);   // a slow answer: the save is accepted (shown) by now, 180 ms after it was made
+    // the other device names itself now, and this device's listener hears the merged copy before this save is done
+    await M2.backend.commit(scope, 'shared', { id: 'people', names: { bo: 'Bo' } }, v0);
+    assert.ok(await until(() => heard[0]?.names?.bo === 'Bo'), 'the listener hears the other device\'s change');
+    return r;
+  } });
+  await qm.activate(SP);
+  const offA = watchSaved({ hub: mhub, queue: qm, scope: SP, coll: 'shared', kind: 'person' }, l => { shown = l; });
+  const offB = mhub.watch(SP, 'shared', l => { heard = l; plain = qm.overlay('person', SP, l); });   // the old pattern, for contrast
+  assert.ok(await until(() => shown.length === 1));
+  await qm.save('person', SP, { id: 'people', names: { ann: 'Ann' } }, v0);
+  assert.ok(await qm.settle('person', ['people']));
+  assert.equal(qm.status('person', 'people'), 'synced');
+  assert.deepEqual((await M1.backend.fetchOne(SP, 'shared', 'people')).names, { ann: 'Ann', bo: 'Bo' }, 'the server has both');
+  assert.ok(await until(() => JSON.stringify(shown[0]?.names) === JSON.stringify({ ann: 'Ann', bo: 'Bo' })), 'this device shows both: ' + JSON.stringify(shown[0]?.names));
+  assert.deepEqual(plain[0].names, { ann: 'Ann' }, 'the old pattern still shows the save\'s own copy (the bug)');
+  offA(); offB(); await settle(50); await mhub.stopAll();
+  await Promise.all([M1, M2].map(d => F.terminate(d.db)));
+}
 
 await Promise.all([A, B, OLD].map(d => F.terminate(d.db)));
 console.log('firestore emulator tests passed');
