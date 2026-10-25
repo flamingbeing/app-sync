@@ -13,6 +13,7 @@
   "src/status.js",
   "src/store.js",
   "src/sync.js",
+  "src/user.js",
   "src/watchdog.js",
   "src/writes.js"
 ]

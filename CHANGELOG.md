@@ -9,8 +9,33 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 0.8.1: outside writes and the sign-in/sign-out hooks.
 - 0.8.2: refused saves and job data that survive a reload, and the watch change info.
 - 0.8.3: `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
+- 0.9.x: the modules (`createApp({ config, modules })`): 0.9.0 the runner and auth, 0.9.1 sync and update, 0.9.2 the
+  entries, types and checks that freeze at 1.0.
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
+
+## 0.9.0 (2026-10-25)
+
+The module runner and the auth module: the 1.0 shape, `createApp({ config, modules })`. Additive; the one-object
+`createApp(options)` of `index.js` is unchanged and **deprecated** (removed in 1.0.0-rc.1; apps pinned to 0.x keep it).
+Stored formats only gain one key (FORMATS.md). Tests: `test/runner.test.mjs`, `test/auth.test.mjs`,
+`test/auth.model.test.mjs` (new).
+
+- **`app.js`** (new entry): `createApp({ config, modules })` -> `app`, one key per module (its api), plus `ready`,
+  `stop()` and `status$`. A module is `{ name, needs, start(ctx, deps), stop() }`: started one at a time in `needs`
+  order, stopped in reverse (`stop()` once, however often it is called); a cycle, a missing or duplicate name throws
+  at once. `ctx` (frozen, one per module): `name, module, config, sdk(), user(), on(event, fn), emit(event, data),
+  storage(ns), status, report(fact)`. Events `signin`, `signout`, `switch`, `forget` (emitted by the auth module,
+  awaited in start order).
+- **`auth.js`** (new entry): `auth({ claims, beforeSwitch, popupOnly, redirectFirst })` with `signIn({ hint })`,
+  `signOut()`, `forget({ force, before })`, `onUser`, `user`, `blocked`, `refreshClaims` (the claims and the claims
+  watch as in 0.8.3). **Sign-out keeps the device's data**: the device copy and unsent saves stay and send when the same
+  account signs in again. Another account signing in is a `switch`: the app's `beforeSwitch`, then the old data wiped,
+  then `signin`; refused (the new account signed out again, nothing wiped, `blocked()` says why) while the old account
+  has unsent saves. `forget()` is the wipe on purpose (refused while unsent unless `force`).
+- `userOf` and `claimsBehind` moved to `src/user.js` (still exported from `index.js`, same values).
+- Size budget for `src/` raised from 240000 to 262000 bytes (the runner and the auth module; the old createApp goes
+  at 1.0).
 
 ## 0.8.3 (2026-10-25)
 

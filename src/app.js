@@ -108,6 +108,8 @@ import { syncStatus, attentionCount } from './status.js';
 import { forgetDevice } from './forget.js';
 import { describeConflict, mergeFields, resolvedRecord, recordSignature } from './conflict.js';
 import { createFirestoreBackend } from './firestore.js';
+import { userOf, claimsBehind } from './user.js';
+export { userOf, claimsBehind } from './user.js';
 
 /**
  * @typedef {import('./types.js').Doc} Doc
@@ -161,15 +163,11 @@ import { createFirestoreBackend } from './firestore.js';
  */
 
 const REDIRECT_CODES = ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment', 'auth/web-storage-unsupported', 'auth/cancelled-popup-request'];
-/** @param {any} s */
-const lc = s => String(s || '').trim().toLowerCase();
-/** @param {any} u @returns {AppUser | null} */
-export const userOf = u => u ? { uid: u.uid, email: lc(u.email), name: u.displayName || u.email || '', photo: u.photoURL || '', verified: u.emailVerified === true } : null;
-// the token is behind the role doc: its v is older, or the doc is gone and the token still has one
-/** @param {{ v?: any } | null | undefined} entry @param {{ v?: any }} [tokenClaims] @returns {boolean} */
-export const claimsBehind = (entry, tokenClaims = {}) => !entry ? tokenClaims.v != null : !(Number(tokenClaims.v) >= (Number.isInteger(entry.v) ? entry.v : 0));
-
-/** @param {AppOptions} options */
+/**
+ * @deprecated 0.9.0: use the modules, `createApp({ config, modules })` from app.js with auth.js (sync and update follow
+ * in 0.9.x); this one-object createApp is removed in 1.0.0-rc.1. Apps pinned to 0.x keep it.
+ * @param {AppOptions} options
+ */
 export function createApp(options = /** @type {AppOptions} */ ({})) {
   const { name, colls, path, sdk } = options;
   for (const [k, ok] of [['name', typeof name === 'string' && name], ['colls', Array.isArray(colls) && colls.length], ['path', typeof path === 'function'], ['sdk', typeof sdk === 'function']]) {

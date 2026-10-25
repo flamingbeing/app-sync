@@ -13,5 +13,5 @@
     "strictBindCallApply": true,
     "skipLibCheck": true
   },
-  "include": ["index.js", "src/**/*.js"]
+  "include": ["index.js", "app.js", "auth.js", "src/**/*.js"]
 }
