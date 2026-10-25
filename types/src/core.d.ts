@@ -42,7 +42,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
 }): {
     api: {
         open: (s: string) => Promise<void>;
-        watch: (s: string, coll: string, cb: (list: Doc[], meta: any) => void) => () => void;
+        watch: (s: string, coll: string, cb: (list: Doc[], meta: any) => void, options?: import("./types.js").WatchOptions) => () => void;
         save: (kind: string, s: string, record: Doc, base?: Doc | null, opts?: {
             ops?: any;
         }) => Promise<Doc>;

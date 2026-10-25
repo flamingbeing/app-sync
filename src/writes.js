@@ -34,12 +34,13 @@
 //   signature: conflict.js recordSignature, without the option engine's fields, e.g. serverAt), null
 //   when none is in the device history (the last 100 finished saves): after a reload too.
 //
-// watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb) -> unsubscribe (0.5.2): the engine's list of coll
+// watchSaved({ hub, queue, scope, coll, kind, owner = scope, view }, cb) -> unsubscribe (0.5.2): the engine's list of coll
 //   (hub.watch) with this device's saves of kind laid over it (queue.overlay), handed to cb(list, meta) whenever either
 //   changes. Use it, not hub.watch with overlay inside: a save's own copy shows while it is sent, and the listener may
 //   hear the server's copy (with another device's change in it) during that time; once the save is done, only a queue
 //   change says so, and the server's copy must show then though the listener hears nothing new.
 //   A save shows from the moment save() is called (0.7.2), before it is stored or accepted.
+//   view (1.1.0, view.js): the part of the list cb gets; changed, removed and copyOf are of that part.
 //   meta (0.8.2) also says { changed, removed }: the ids whose copy differs from the last list handed (all, the first
 //   time) and the ids no longer in it. The returned function also has copyOf(id) (the copy last handed) and seen(id)
 //   (the engine's copy, without this device's saves laid over it).
@@ -427,11 +428,12 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
 
 /**
  * @param {{ hub: { watch: (scope: string, coll: string, cb: (list: Doc[], meta: import('./types.js').SnapMeta) => void) => () => void },
- *   queue: ReturnType<typeof createWriteQueue>, scope: string, coll: string, kind: string, owner?: string }} options
+ *   queue: ReturnType<typeof createWriteQueue>, scope: string, coll: string, kind: string, owner?: string,
+ *   view?: ((list: Doc[]) => Doc[]) | null }} options   view (1.1.0): view.js's, what cb gets of the list
  * @param {(list: Doc[], meta: import('./types.js').WatchMeta) => void} cb
  * @returns {(() => void) & { copyOf: (id: string) => Doc | null, seen: (id: string) => Doc | null }}
  */
-export function watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb) {
+export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view = null }, cb) {
   /** @type {Doc[] | null} */
   let list = null;
   /** @type {import('./types.js').SnapMeta | null} */
@@ -445,7 +447,7 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope }, cb)
   /** @param {boolean} force */
   const hand = force => {
     if (!live || !list) return;
-    const shown = queue.overlay(kind, owner, list), texts = shown.map(d => JSON.stringify(d)), sig = '[' + texts.join(',') + ']';
+    const overlaid = queue.overlay(kind, owner, list), shown = view ? view(overlaid) : overlaid, texts = shown.map(d => JSON.stringify(d)), sig = '[' + texts.join(',') + ']';
     if (!force && sig === sent) return;
     sent = sig;
     /** @type {Map<string, string>} */

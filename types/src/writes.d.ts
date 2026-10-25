@@ -48,11 +48,12 @@ export function createWriteQueue({ store, backend, getOwner, normalize, online, 
 };
 /**
  * @param {{ hub: { watch: (scope: string, coll: string, cb: (list: Doc[], meta: import('./types.js').SnapMeta) => void) => () => void },
- *   queue: ReturnType<typeof createWriteQueue>, scope: string, coll: string, kind: string, owner?: string }} options
+ *   queue: ReturnType<typeof createWriteQueue>, scope: string, coll: string, kind: string, owner?: string,
+ *   view?: ((list: Doc[]) => Doc[]) | null }} options   view (1.1.0): view.js's, what cb gets of the list
  * @param {(list: Doc[], meta: import('./types.js').WatchMeta) => void} cb
  * @returns {(() => void) & { copyOf: (id: string) => Doc | null, seen: (id: string) => Doc | null }}
  */
-export function watchSaved({ hub, queue, scope, coll, kind, owner }: {
+export function watchSaved({ hub, queue, scope, coll, kind, owner, view }: {
     hub: {
         watch: (scope: string, coll: string, cb: (list: Doc[], meta: import("./types.js").SnapMeta) => void) => () => void;
     };
@@ -61,6 +62,7 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner }: {
     coll: string;
     kind: string;
     owner?: string;
+    view?: ((list: Doc[]) => Doc[]) | null;
 }, cb: (list: Doc[], meta: import("./types.js").WatchMeta) => void): (() => void) & {
     copyOf: (id: string) => Doc | null;
     seen: (id: string) => Doc | null;

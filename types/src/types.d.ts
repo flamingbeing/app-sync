@@ -276,6 +276,17 @@ export type AppSdk = {
     emulator?: boolean;
 };
 /**
+ * watch(scope, coll, cb, options) (view.js)
+ */
+export type WatchOptions = {
+    query?: Record<string, any>;
+    limit?: number;
+};
+/**
+ * sync.saveMany
+ */
+export type SaveMany = (kind: string, scope: string, records: Doc[]) => Promise<PromiseSettledResult<Doc>[]>;
+/**
  * Reserved for 1.x (SHAPES.md): types only, nothing built. 1.0 uses these names for nothing else.
  */
 export type SignInMethod = "google" | "emailLink" | "password" | "passcode" | "anonymous";
@@ -306,23 +317,12 @@ export type KeepMeta = {
     part?: string;
 };
 /**
- * watch(scope, coll, cb, options)
- */
-export type WatchOptions = {
-    query?: Record<string, any>;
-    limit?: number;
-};
-/**
  * sync() options added in 1.x
  */
 export type SyncReserved = {
     public?: string[];
     keep?: Record<string, KeepRule>;
 };
-/**
- * sync.saveMany
- */
-export type SaveMany = (kind: string, scope: string, records: Doc[]) => Promise<any[]>;
 /**
  * Reserved for 1.x (SHAPES.md): types only, nothing built. 1.0 uses these names for nothing else.
  */

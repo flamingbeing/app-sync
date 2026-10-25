@@ -14,6 +14,29 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.1.0 (2026-10-26)
+
+Additive: no 1.0 name, module contract or stored format changes (FORMATS.md as 1.0; no new job state). Each piece
+lands with a failing test first.
+
+- **`sync.saveMany(kind, scope, records)`** (SHAPES.md 5): one result per record (`Promise.allSettled`'s), each saved
+  as `save()` saves it (the outbox, the stamp, `onCommit` bin entries, held conflicts per record), on the copy this
+  device shows (`copyOf`) as its base: a record changed elsewhere since is its own conflict; the rest still land.
+- **`watch(scope, coll, cb, { query, limit })`** (SHAPES.md 4+, `src/view.js`): cb gets only the records whose fields
+  equal `query`'s, the first `limit` of them; `changed` / `removed` / `copyOf` are of that view (one leaving it is in
+  `removed`). The device copy and the listener stay whole. `copyOf` now asks every running watch of the kind.
+- **`backend.merge['*']`**: the merge of every collection not named (`false` on a name keeps its conflict check),
+  and **`replaceRecord`** (`index.js`, `sync.js`; `src/replace.js`): a merge function that writes a save over the
+  server's copy whole, `backend: { merge: { '*': replaceRecord } }`, for apps that wrapped the merge option in a Proxy.
+- **`backend.commitRetry: { codes = ['aborted', 'permission-denied'], delay = 500 }`**: a commit refused with one of
+  codes is tried once more after `delay` ms (a rule that reads a document another write is still creating); off by
+  default, as 1.0.
+- `entries.json` (sync) gains `src/view.js` and `src/replace.js`; `files.json` / `FILES` gain `src/replace.js`.
+
+Modular: yes (no new entry, global or ctx field; the modularity check, types and both Vite builds pass). Shaken: the
+Vite source fixture imports `replaceRecord` unused and asserts it is not in the bundle; `saveMany`, the watch view and
+`commitRetry` are parts of the sync api and adapter every sync page loads (no code of their own to shake).
+
 ## 1.0.0-rc.1 (2026-10-25)
 
 The first 1.0 candidate. **Breaking** for apps on the one-object `createApp(options)` (they move to the modules:

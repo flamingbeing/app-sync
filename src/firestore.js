@@ -2,7 +2,7 @@
 // its own SDK module (the modular API: collection, doc, query, where, onSnapshot, getDocFromServer, runTransaction),
 // so this file works with whichever SDK build and version the app loads.
 //
-// createFirestoreBackend({ sdk, path, field = 'updatedAt', time = 'ms', stamp, canonical, where, merge, mark, stampMode, serverField, writeId, onCommit, onSnapshotMeta, onRead })
+// createFirestoreBackend({ sdk, path, field = 'updatedAt', time = 'ms', stamp, canonical, where, merge, mark, stampMode, serverField, writeId, onCommit, onSnapshotMeta, onRead, commitRetry })
 //   sdk: async () => ({ db, F }), F the SDK's functions. path(scope, coll) -> the collection's path segments
 //   (e.g. ['accounts', scope, coll]). stamp(doc, coll) -> the doc as written (default: updatedAt = max(now, the
 //   server copy's updatedAt + 1), taken inside the commit transaction, so a stamp only ever moves forward even when
@@ -14,7 +14,8 @@
 //   where(scope, coll) -> [[field, op, value], …]: filters every query of that collection (e.g. one site's records;
 //   a delta query then needs a composite index on those fields and the stamp field). merge: { [coll]: true | fn }:
 //   collections saved last-write-wins by field instead of with a conflict check (true: mergeFields; fn(current,
-//   record, base, ops) -> the record to write, for changes such as increments that only ops describe). mark: a field
+//   record, base, ops) -> the record to write, for changes such as increments that only ops describe; '*' (1.1.0):
+//   every collection not named, e.g. { '*': replaceRecord } for last-write-wins by whole record). mark: a field
 //   that keeps the keys of the last saves applied to a merged record, so a save sent twice (its acknowledgement lost)
 //   is applied once; null: none (then ops that are not idempotent, such as increments, can count twice on a resend).
 //   stampMode: 'client' (default) or 'server': every commit also sets serverField (default 'serverAt') to
@@ -53,6 +54,9 @@
 //   deletes it) only when the server's copy still matches base; throws { code: 'write-conflict', remote } otherwise
 //   (conflict.js). after (0.6.3): a record not on the server is stamped after this time (its delete's tombstone, so
 //   devices holding that tombstone show it).
+//   commitRetry (1.1.0): { codes = ['aborted', 'permission-denied'], delay = 500 }: a commit refused with one of
+//   codes is tried once more after delay ms (a rule that reads a document another write is still creating can refuse
+//   the first try); a second refusal stands. Default off: refused at once, as 1.0.
 //   In a merge collection it writes the merge of the server's copy with this change instead, and throws
 //   { code: 'not-found' } when the record was deleted elsewhere since base (never brought back). The write queue's
 //   backend(owner, kind, record, base, extra) maps kind to coll and calls commit(owner, coll, record, base, extra).
@@ -74,7 +78,7 @@
 //   SDK instance can't be used afterwards, so the app reloads (or builds a new one) before reading again. Clearing
 //   waits while another tab of the origin still uses the cache: after timeout ms it throws { code:
 //   'deadline-exceeded' } (the cache stays until those tabs close), so sign-out can go on and reload.
-import { checkWrite, mergeFields, mergeFnClashes, mergeHeld, recordSignature } from './conflict.js';
+import { checkWrite, mergeFnClashes, mergeHeld, mergeOf, recordSignature } from './conflict.js';
 
 /**
  * @typedef {import('./types.js').Doc} Doc
@@ -108,7 +112,20 @@ import { checkWrite, mergeFields, mergeFnClashes, mergeHeld, recordSignature } f
  * @property {((ctx: CommitContext) => ExtraWrite[] | void) | null} [onCommit]
  * @property {(coll: string, meta: import('./types.js').SnapMeta) => void} [onSnapshotMeta]
  * @property {(coll: string, kind: 'billed' | 'served', n: number) => void} [onRead]
+ * @property {{ codes?: string[], delay?: number } | null} [commitRetry]
  */
+
+// fn tried once more after delay ms when it throws one of codes (commitRetry)
+/** @template {any[]} A @template R @param {(...a: A) => Promise<R>} fn @param {{ codes?: string[], delay?: number }} retry @returns {(...a: A) => Promise<R>} */
+function retriedOnce(fn, { codes = ['aborted', 'permission-denied'], delay = 500 }) {
+  return async (...a) => {
+    try { return await fn(...a); } catch (e) {
+      if (!codes.includes(/** @type {any} */ (e)?.code)) throw e;
+      await new Promise(r => setTimeout(r, delay));
+      return fn(...a);
+    }
+  };
+}
 
 /** @template T @param {T} v @returns {T} */
 const plain = v => JSON.parse(JSON.stringify(v));
@@ -119,14 +136,14 @@ export const CLEAR_TIMEOUT = 3000;   // ms clearCache waits for the offline cach
 const timeOf = v => typeof v === 'string' ? Date.parse(v) || 0 : Number(v) || 0;   // save keys kept on a merged record (mark)
 
 /** @param {FirestoreBackendOptions} options */
-export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', writeId = true, held = false, edits = null, editor = null, onCommit = null, onSnapshotMeta = () => {}, onRead = () => {} }) {
+export function createFirestoreBackend({ sdk, path, field: stampField = 'updatedAt', time = 'ms', stamp, canonical: canonOf = (_coll, v) => v, where = () => [], merge = {}, mark = null, stampMode = 'client', serverField = 'serverAt', writeId = true, held = false, edits = null, editor = null, onCommit = null, onSnapshotMeta = () => {}, onRead = () => {}, commitRetry = null }) {
   if (typeof sdk !== 'function' || typeof path !== 'function') throw new Error('createFirestoreBackend needs sdk and path');
   if (time !== 'ms' && time !== 'iso') throw new Error("createFirestoreBackend: time is 'ms' or 'iso'");
   if (stampMode !== 'client' && stampMode !== 'server') throw new Error("createFirestoreBackend: stampMode is 'client' or 'server'");
   const server = stampMode === 'server';
   /** @param {string} coll @returns {{ counters?: string[] } | null} */
   // (held: true leaves merge collections last-write-wins; naming one in held holds its clashes too, 0.7.1)
-  const heldOf = coll => { if (!held || held === true && mergeOf(coll)) return null; const h = held === true ? {} : Object.hasOwn(held, coll) && held[coll]; return h ? (h === true ? {} : h) : null; };
+  const heldOf = coll => { if (!held || held === true && mergeOf(merge, coll)) return null; const h = held === true ? {} : Object.hasOwn(held, coll) && held[coll]; return h ? (h === true ? {} : h) : null; };
   if (held && held !== true && Object.values(held).some(h => /** @type {any} */ (h)?.counters?.length) && !mark) throw new Error('createFirestoreBackend: held counters need mark (a resend would count twice)');
   // server mode: the server's stamp as ms (a Timestamp; null while pending), never part of the conflict check
   /** @param {any} data */
@@ -167,8 +184,6 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   const colRef = (db, F, scope, coll) => F.collection(db, ...path(scope, coll));
   /** @param {any} F @param {string} scope @param {string} coll */
   const filters = (F, scope, coll) => (where(scope, coll) || []).map(w => F.where(...w));
-  /** @param {string} coll @returns {MergeFn | null} */
-  const mergeOf = coll => Object.hasOwn(merge || {}, coll) && merge[coll] ? (merge[coll] === true ? mergeFields : merge[coll]) : null;
 
   // the collection (since null) or the documents changed since a time, live, with metadata changes so the engine
   // learns when the server has confirmed an unchanged offline copy
@@ -245,7 +260,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
    * @returns {Promise<Doc>}
    */
   async function commit(scope, coll, record, base, { key = '', ops, after = 0 } = {}) {
-    const merging = mergeOf(coll), holding = heldOf(coll);
+    const merging = mergeOf(merge, coll), holding = heldOf(coll);
     if (merging && holding) return commitHeldMerged(scope, coll, record, base, merging, key, ops, after);
     if (merging) return commitMerged(scope, coll, record, base, merging, key, ops, after);
     if (holding) return commitHeld(scope, coll, record, base, holding, key, ops, after);
@@ -438,5 +453,5 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
     return Promise.race([clear(), late]).finally(() => clearTimeout(timer));
   }
 
-  return { listen, listenDoc, fetchOne, commit, create, existing, stamp: /** @param {any} [prev] */ prev => next(prev), stampFields, clearCache };
+  return { listen, listenDoc, fetchOne, commit: commitRetry ? retriedOnce(commit, commitRetry) : commit, create, existing, stamp: /** @param {any} [prev] */ prev => next(prev), stampFields, clearCache };
 }

@@ -85,6 +85,15 @@ export function mergeFields(current, record, base) {
   return merge(current, record || {}, base || {});
 }
 
+// A collection's merge function from the merge option ({ [coll]: true | fn }), or null (saved with the conflict
+// check). '*' (1.1.0) is the merge of every collection not named (e.g. { '*': replaceRecord }); a collection named
+// false keeps the conflict check.
+/** @param {Record<string, any> | null | undefined} merge @param {string} coll @returns {((current: Doc | null, record: Doc, base: Doc | null, ops?: any) => Doc) | null} */
+export function mergeOf(merge, coll) {
+  const m = !merge ? null : Object.hasOwn(merge, coll) ? merge[coll] : merge['*'];
+  return !m ? null : m === true ? mergeFields : m;
+}
+
 // Held conflicts by field (0.6.3, opt-in: the Firestore adapter's `held` option). A 3-way merge of what this device
 // changed since base into the server's copy now (current), field by field:
 //   - a field only this device changed takes its value; one only changed elsewhere keeps the server's;

@@ -32,7 +32,7 @@ const PUBLIC = ['userOf', 'claimsBehind', 'createReport', 'REPORT_ENDPOINT', 'cr
   'REGISTRY_KEY', 'forgetDevice', 'leaveEntry', 'persistGuard', 'firestoreCache', 'cacheFailure', 'CACHE_KEY', 'CACHE_MODES',
   'syncStatus', 'attentionCount', 'createFirestoreBackend', 'createSyncHub', 'createWatchdog', 'replanOnWake', 'eachSettled',
   'SKEW', 'createWriteQueue', 'createStores', 'recordSignature', 'checkWrite', 'mergeFields', 'mergeHeld', 'describeConflict',
-  'resolvedRecord', 'pathOf', 'JOB_FORMAT', 'JOB_STATES', 'FILES', 'VERSION'];
+  'resolvedRecord', 'pathOf', 'replaceRecord', 'JOB_FORMAT', 'JOB_STATES', 'FILES', 'VERSION'];   // replaceRecord: 1.1.0
 
 test('entries.json lists the files each entry loads (0.9.4), and files.json is unchanged', () => {
   const entries = JSON.parse(read('entries.json'));
@@ -97,8 +97,9 @@ test("the entries carry what a modules-only app needs: app.js VERSION (= index.j
   const app = await import('../app.js'), sync = await import('../sync.js');
   assert.equal(app.VERSION, index.VERSION);
   assert.equal(sync.leaveEntry, index.leaveEntry);
+  assert.equal(sync.replaceRecord, index.replaceRecord);
   assert.deepEqual(Object.keys(app).sort(), ['VERSION', 'createApp']);
-  assert.deepEqual(Object.keys(sync).sort(), ['leaveEntry', 'sync']);
+  assert.deepEqual(Object.keys(sync).sort(), ['leaveEntry', 'replaceRecord', 'sync']);
   assert.match(read('types/app.d.ts'), /export const VERSION: "/);
   assert.match(read('types/sync.d.ts'), /leaveEntry/);
 });

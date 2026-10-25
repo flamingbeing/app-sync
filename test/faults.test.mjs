@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createFirestoreBackend } from '../src/firestore.js';
+import { replaceRecord } from '../sync.js';
 import { createWriteQueue } from '../src/writes.js';
 import { createCollectionSync, createSyncHub, leaveEntry } from '../src/sync.js';
 import { createStores } from '../src/store.js';
@@ -485,4 +486,51 @@ test('reload guard: a canReload that throws while a draft is open counts as no',
   mode = 'ok';
   await p.mod.retryUpdate();
   assert.equal(p.reloads, 1);
+});
+
+// ---- 1.1.0: commitRetry, a default merge and replaceRecord ----
+
+test('commitRetry (1.1.0): a commit refused with a listed code is tried once more after the delay; other codes and a second refusal stand', async () => {
+  const shared = sharedSdk();
+  const retrying = backendOn(shared.device(), { commitRetry: { codes: ['permission-denied'], delay: 5 } });
+  shared.faults.push('permission-denied');
+  await retrying.commit(S, 'items', { id: 'r1', text: 'Fake' }, null);
+  assert.equal(shared.docs.get(pathOf('items', 'r1')).text, 'Fake', 'landed on the second try');
+
+  shared.faults.push('permission-denied', 'permission-denied');
+  await assert.rejects(retrying.commit(S, 'items', { id: 'r2', text: 'Fake' }, null), { code: 'permission-denied' }, 'once only');
+  shared.faults.push('unavailable');
+  await assert.rejects(retrying.commit(S, 'items', { id: 'r3', text: 'Fake' }, null), { code: 'unavailable' }, 'a code not listed');
+
+  const plain = backendOn(shared.device());
+  shared.faults.push('aborted');
+  await assert.rejects(plain.commit(S, 'items', { id: 'r4', text: 'Fake' }, null), { code: 'aborted' }, 'without it, as 1.0');
+
+  const defaults = backendOn(shared.device(), { commitRetry: {} });
+  shared.faults.push('aborted');
+  await defaults.commit(S, 'items', { id: 'r5', text: 'Fake' }, null);
+  assert.ok(shared.docs.get(pathOf('items', 'r5')), 'aborted and permission-denied by default');
+});
+
+test('merge["*"] (1.1.0): the merge of every collection not named; replaceRecord writes the save over the server\'s copy, no conflict', async () => {
+  const shared = sharedSdk();
+  const A = backendOn(shared.device({ name: 'A' })), B = backendOn(shared.device({ name: 'B' }), { merge: { '*': replaceRecord, notes: true } });
+  const v1 = await A.commit(S, 'items', { id: 'r1', text: 'Fake', size: 2 }, null);
+  await A.commit(S, 'items', { ...v1, text: 'Fake from A' }, v1);
+  const out = await B.commit(S, 'items', { id: 'r1', text: 'Fake from B' }, v1);   // (made on the old version: no conflict)
+  const doc = shared.docs.get(pathOf('items', 'r1'));
+  assert.equal(doc.text, 'Fake from B');
+  assert.equal('size' in doc, false, 'the whole record replaced, not merged by field');
+  assert.ok(doc.updatedAt > v1.updatedAt, 'stamped as any save');
+  assert.equal(out.text, 'Fake from B');
+
+  const n1 = await A.commit(S, 'notes', { id: 'n1', a: 0, b: 0 }, null);
+  await A.commit(S, 'notes', { ...n1, a: 1 }, n1);
+  await B.commit(S, 'notes', { ...n1, b: 2 }, n1);
+  const note = shared.docs.get(pathOf('notes', 'n1'));
+  assert.deepEqual([note.a, note.b], [1, 2], 'a collection named keeps its own merge');
+
+  await B.commit(S, 'items', { id: 'r1', _deleted: true }, null);
+  assert.equal(shared.docs.has(pathOf('items', 'r1')), false, 'a delete is a delete');
+  assert.deepEqual(replaceRecord({ id: 'r1', a: 1 }, { id: 'r1', b: 2 }, null), { id: 'r1', b: 2 });
 });

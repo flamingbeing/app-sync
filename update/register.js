@@ -2,7 +2,7 @@
 // return to the tab, on coming back online and every few hours, reload once when the new one takes over (only when
 // the app's canReload allows). See update/README.md.
 //   import { register, version, versionLabel, forceLatest, retryUpdate } from 'https://core.anawj.com/update/0.2.0/register.js';
-export const CORE_VERSION = '1.0.0';
+export const CORE_VERSION = '1.1.0';
 const state = { app: null, swUrl: null, scope: null, reg: null, canReload: null, retry: null };
 // canReload: the app's "nothing open or sending" answer; no hook means yes, a throw means no
 const allows = async can => { if (!can) return true; try { return !!(await can()); } catch (e) { return false; } };

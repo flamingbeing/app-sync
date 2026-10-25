@@ -7,6 +7,7 @@
   "src/outbox.js",
   "src/persist.js",
   "src/registry.js",
+  "src/replace.js",
   "src/report.js",
   "src/status.js",
   "src/store.js",
