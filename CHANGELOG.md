@@ -1,5 +1,34 @@
 # Changelog
 
+## Toward 1.0
+
+1.0 will be the engine and the update module released as one stack, under one CHANGELOG, with the promises in the
+README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it; each is additive unless it says so.
+
+- 0.8.0: the lean public index, `src/internal.js`, the file manifest, the stored-format promise (this release).
+- 0.8.x: outside writes and sign-in/sign-out hooks; refused saves and job data that survive a reload, and the
+  watch change info; `watchDoc`, reconnect and wake, the claims watch. Stored formats only ever gain optional fields.
+- 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
+  `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
+
+## 0.8.0 (2026-10-25)
+
+Freeze prep. Nothing removed: every 0.7.4 import still works. Tests: `test/freeze.test.mjs` (+4).
+
+- **Lean public index.** `index.js` names only the promised API (README "Modules"). Engine internals (`plan`,
+  `applyChanges`, `replaceAll`, `applyTombs`, `dropTombs`, `pruneGone`, `binTombs`, `expireDocs`, `timeOf`,
+  `createCollectionSync`, `createTombFeed`, `planServer`, `decide`, `clashingFields`, `mergeClashes`,
+  `mergeFnClashes`, `keysOf`, `whenText`, `buildReport`, `errorCode`, `watchSaved` and the tuning constants) moved to
+  `src/internal.js`, with no promise. They still load from `index.js` until 1.0.0 (deprecated).
+- **File manifest.** `FILES` (in `index.js`) and `sync/0.8.0/files.json` list every file this version loads (index.js
+  and its imports, `src/internal.js` included), for a service worker's offline list instead of a hand-copied one.
+  A test checks it equals the import graph.
+- **Stored-format promise** ([FORMATS.md](FORMATS.md)): device keys and prefixes, the outbox list, the job shape and
+  states, the Firestore engine fields. New: every new job carries `v: JOB_FORMAT` (1); `JOB_FORMAT` and `JOB_STATES`
+  exported. Jobs without `v` (written before 0.8.0) read as before; older versions ignore the field.
+- **Core admission rule and size budget** (README "Stability", AGENTS.md): `tools/check.mjs` fails past
+  2,600 bytes for `index.js` or 240,000 for `src/`.
+
 ## 0.7.4 (2026-10-25)
 
 Fix: held conflicts on a map keyed by something with a '.' in it (an email: `names['a.b@example.com']`). A clash's

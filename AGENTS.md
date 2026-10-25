@@ -19,6 +19,12 @@ repo; never copy anything from there into this repo, a PR or an issue (neutral p
 - **Every bug fix starts with a failing test** (`test/fixes.test.mjs` or the module's test), then the fix.
 - Never weaken a data-loss gate (outbox, sign-out check, conflict check) to make a test pass.
 - Use Opus for changes to `src/`; run the full unit and emulator tests before merging.
+- **Core admission rule:** a new engine option or method only if 2+ apps (or the reference app) need it, or it is a
+  correctness guarantee; otherwise the app adapts (a thin adapter in the app, never engine code copied). Each
+  addition lands with a reference-app or model test. Size budget in `tools/check.mjs`; raising it is a CHANGELOG line.
+- **Promises (README "Stability"):** `index.js` names are public (additive only until 2.0; deprecations removed only in
+  2.0); `src/internal.js` is not. Stored formats ([FORMATS.md](FORMATS.md)) never change before 2.0: no new job
+  state, no renamed key, prefix or field. Stop and ask before any change that would break them.
 
 ## Checks before merging
 
@@ -35,6 +41,7 @@ checkout, `SYNC_DIR=<this checkout> npm run e2e`). A red consumer job is a break
 ## Releasing
 
 1. Bump `version` in `package.json` and `VERSION` in `index.js`; add the CHANGELOG entry.
+   A new or removed `src/` import: update `FILES` in `index.js` and `files.json` (`test/freeze.test.mjs` checks both).
 2. Run `node tools/build-sync.mjs --lock` and commit `versions.lock.json` (checks fail without it).
 3. Merge with Checks green: `release.yml` then tags that commit `vX.Y.Z` (only if the tag doesn't exist yet).
 

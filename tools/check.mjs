@@ -6,6 +6,8 @@
 // 4. The package.json version is locked in versions.lock.json (a released version never changes).
 // 5. The Worker's tests pass (node --test 'worker/test/*.test.mjs').
 // 6. The update module's version (update/VERSION) is locked in update.lock.json and matches its files.
+// 7. Size budget (core admission rule, README "Stability"): the public index and src/ stay under BUDGET bytes.
+//    Raising a budget is a CHANGELOG line.
 // Exits 1 on any failure.
 
 import fs from 'node:fs';
@@ -38,6 +40,16 @@ for (const app of apps) {
   const shell = [...shellSrc.matchAll(/'([^']+)'/g)].map(m => m[1]).filter(f => f !== './')
     .map(f => path.posix.normalize(`${app}/${f}`));
   for (const f of shell) if (!fs.existsSync(path.join(ROOT, f))) fail(`${swPath}: SHELL lists ${f}, which doesn't exist`);
+}
+
+const BUDGET = { 'index.js': 2600, 'src/': 240000 };
+const bytesOf = rel => {
+  const abs = path.join(ROOT, rel);
+  return fs.statSync(abs).isDirectory() ? fs.readdirSync(abs).reduce((n, f) => n + bytesOf(path.posix.join(rel, f)), 0) : fs.statSync(abs).size;
+};
+for (const [rel, max] of Object.entries(BUDGET)) {
+  const n = bytesOf(rel);
+  if (n > max) fail(`${rel} is ${n} bytes, over its budget of ${max} (core admission rule, README "Stability"): make it smaller, or raise BUDGET in tools/check.mjs with a CHANGELOG line`);
 }
 
 const wrangler = path.join(ROOT, 'wrangler.jsonc');

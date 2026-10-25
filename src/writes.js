@@ -48,6 +48,10 @@ const KEEP = 100;   // finished saves kept in the device history (the app's hist
 /** @param {any} error */
 const transient = error => error?.code === 'unavailable' || error?.code === 'deadline-exceeded' || error?.code === 'aborted';
 export const SEND_TIMEOUT = 30000;
+// Stored format (FORMATS.md): every new job carries v: JOB_FORMAT (jobs without v were written before 0.8.0, same
+// shape). Mixed versions share an origin's outboxes, so states are fixed: no new state before 2.0.
+export const JOB_FORMAT = 1;
+export const JOB_STATES = Object.freeze(['pending', 'synced', 'failed', 'conflict', 'archived']);
 /** @param {QueueOptions} options */
 export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null, ignore = [] }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
@@ -226,7 +230,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (stale && same(stale.record, record)) {
       job = stale; if (!held) { job.state = 'pending'; job.error = ''; }
     } else {
-      job = { key: email + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2), owner: email,
+      job = { v: JOB_FORMAT, key: email + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2), owner: email,
         kind, record: copy(record), base: copy(stale?.state === 'failed' ? stale.base : base), state: held ? 'conflict' : 'pending', accepted: false, at: Math.max(Date.now(), ...jobs.map(x => x.at + 1)) };
       if (held) { job.remote = copy(conflict.remote ?? null); job.error = conflict.error; }
       const carried = stale && (stale.state === 'failed' || held) ? stale.ops || [] : [];   // (a held copy's ops too: 0.7.1)

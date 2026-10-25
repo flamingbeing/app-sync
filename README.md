@@ -26,26 +26,32 @@ What it does:
 
 ## Modules
 
-| Module | Exports |
+`index.js` is the public API (everything below); each module also loads on its own (`src/<name>.js`).
+
+| Module | Public |
 |---|---|
-| `src/sync.js` | `createSyncHub`, `createCollectionSync`, `createTombFeed`, `replanOnWake`, `leaveEntry`, pure helpers (`plan`, `planServer`, `applyChanges`, `applyTombs`, `binTombs`, …) |
-| `src/writes.js` | `createWriteQueue` |
-| `src/conflict.js` | `checkWrite`, `recordSignature`, `mergeFields`; held conflicts (0.6.3): `mergeHeld`, `clashingFields`, `describeConflict`, `resolvedRecord`, `whenText`; for merge collections (0.7.1): `mergeClashes`, `mergeFnClashes` |
+| `src/app.js` | `createApp` (everything below wired in one call), `userOf`, `claimsBehind` |
+| `src/sync.js` | `createSyncHub`, `replanOnWake`, `leaveEntry`, `eachSettled`, `SKEW` |
+| `src/writes.js` | `createWriteQueue`, `JOB_FORMAT`, `JOB_STATES` |
+| `src/conflict.js` | `checkWrite`, `recordSignature`, `mergeFields`; held conflicts: `mergeHeld`, `describeConflict`, `resolvedRecord`, `pathOf` |
 | `src/store.js` | `createStores` (the device copy: `openStore`, `wipeStores`) |
-| `src/outbox.js` | `createOutbox` (the write queue's durable store) |
-| `src/watchdog.js` | `decide`, `createWatchdog` |
-| `src/cache.js` | `firestoreCache` (multi-tab offline cache, steps down on quota or "Unexpected state") |
+| `src/outbox.js`, `src/registry.js` | `createOutbox` (the write queue's durable store), `createOutboxRegistry`, `REGISTRY_KEY` |
+| `src/watchdog.js` | `createWatchdog` |
+| `src/cache.js` | `firestoreCache`, `cacheFailure`, `CACHE_KEY`, `CACHE_MODES` (multi-tab offline cache, steps down on quota or "Unexpected state") |
 | `src/status.js` | `syncStatus`, `attentionCount` |
-| `src/persist.js` | `persistGuard` (asks the browser to keep the site's storage) |
+| `src/persist.js`, `src/forget.js` | `persistGuard`, `forgetDevice` |
 | `src/firestore.js` | `createFirestoreBackend` |
-| `src/report.js` | `createReport`, `buildReport` (the nothing-lost report, opt-in) |
-| `src/app.js` | `createApp` (all of the above wired in one call), `userOf`, `claimsBehind` |
-| `index.js` | all of the above |
+| `src/report.js` | `createReport` (from `index.js`, version filled in), `REPORT_ENDPOINT` |
+| `index.js` | the above, plus `FILES` and `VERSION` |
+| `src/internal.js` | engine internals (`plan`, `applyChanges`, `createCollectionSync`, `decide`, `watchSaved`, tuning constants, …): no promise. Until 1.0 they also load from `index.js` (deprecated). |
+
+**Files of a version:** `FILES` (in `index.js`) and `sync/<x.y.z>/files.json` list every file the version loads,
+for a service worker's offline list (0.8.0).
 
 ## Use
 
 ```js
-import { createApp } from 'https://core.anawj.com/sync/0.6.3/index.js';
+import { createApp } from 'https://core.anawj.com/sync/0.8.0/index.js';
 
 const app = createApp({
   name: 'myapp', colls: ['items'], path: (space, coll) => ['spaces', space, coll],
@@ -145,6 +151,17 @@ node tools/check.mjs           # repo checks
 Semantic versions, tagged `vX.Y.Z`; see [CHANGELOG.md](CHANGELOG.md). A tag is never moved or overwritten. Apps pin an
 exact version and upgrade on purpose after their own tests; a breaking change is a new major version. Every fix
 lands with a test that failed before it.
+
+## Stability (toward 1.0)
+
+- **API:** from 1.0, everything `index.js` names is kept until 2.0; 1.x only adds. A name deprecated in 1.x still
+  works and is removed only in 2.0. `src/internal.js` carries no promise.
+- **Stored formats:** [FORMATS.md](FORMATS.md), promised from 0.8.0 (mixed versions share data).
+- **Core admission rule:** a new engine option or method goes in only if two or more apps (or the reference app)
+  need it, or it is a correctness guarantee. Otherwise the app adapts with a thin adapter of its own (never a copy of
+  engine code). Each addition lands with a reference-app or model test.
+- **Size budget:** `tools/check.mjs` fails past a byte budget for `index.js` and `src/`; raising it is a CHANGELOG
+  line.
 
 ## Licence
 
