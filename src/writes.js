@@ -141,7 +141,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       if (newer < KEEP) return false;
       job.state = 'archived'; jobs = jobs.filter(x => x !== job); return true;
     }
-    if (stored.state === job.state || stored.state === 'pending') return false;
+    if (stored.state === job.state && !stored.refused === !job.refused || stored.state === 'pending') return false;
     Object.assign(job, { state: stored.state, error: stored.error || '', result: stored.result, remote: stored.remote, accepted: stored.accepted, kept: stored.kept, code: stored.code, refused: stored.refused });
     return true;
   }
@@ -203,11 +203,34 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     loading = (async () => {
       try { const found = await store.list(email); if (current(email, gen)) jobs = found; }
       catch (error) { if (current(email, gen)) storageError = error.message; }
-      if (current(email, gen)) { notify(); kick(); }
+      if (current(email, gen)) { notify(); sendAll(); }
     })();
     return loading;
   }
-  function kick() { for (const wait of waits.values()) wait.timer = null; if (owner && getOwner() === owner) for (const id of new Set(jobs.map(keyOf))) void drain(id).catch(error => { storageError = error.message; notify(); }); }
+  function sendAll() { if (owner && getOwner() === owner) for (const id of new Set(jobs.map(keyOf))) void drain(id).catch(error => { storageError = error.message; notify(); }); }
+  // The store is read once, when the account opens. Another window may have stored saves since (and closed), or moved a
+  // held or refused one on: read it again, so those are sent or cleared here too. A save being stored here is not added
+  // twice (its own call adds it). -> true when something changed
+  /** @returns {Promise<boolean>} */
+  async function rescan() {
+    const email = owner, gen = generation;
+    if (!email) return false;
+    let stored;
+    try { stored = await store.list(email); } catch { return false; }
+    if (!current(email, gen)) return false;
+    const known = new Set(jobs.map(x => x.key)), added = stored.filter(x => !known.has(x.key) && !inflight.has(keyOf(x)));
+    jobs.push(...added);
+    let moved = added.length > 0;
+    for (const job of jobs.filter(x => x.state === 'conflict' || x.state === 'failed' || x.refused)) moved = await refresh(job) || moved;
+    if (moved && current(email, gen)) notify();
+    return moved && current(email, gen);
+  }
+  // reads the store first, so an older save another window stored is sent before this window's later one
+  /** @returns {Promise<void>} */
+  function kick() {
+    for (const wait of waits.values()) wait.timer = null;
+    return rescan().then(sendAll).catch(error => { storageError = error.message; notify(); });
+  }
   /**
    * @param {string} kind
    * @param {string} email
@@ -261,7 +284,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     // set aside once the new save is stored: the one it replaces, or (made on the other copy) the whole stopped chain,
     // kept in the history for good, and the user told
     for (const x of over ? chain : stale && stale !== job ? [stale] : []) { x.state = 'archived'; if (over) x.kept = true; await persist(x); }
-    if (!jobs.includes(job)) jobs.push(job);
+    const at = jobs.findIndex(x => x.key === job.key);   // (a rescan may have read it from the store first)
+    if (at < 0) jobs.push(job); else jobs[at] = job;
     unshow(); notify();
     if (over && !same(/** @type {Job} */ (previous).record, record)) notice('Your version from this device is kept in ' + recover);
     if (held) throw failure(job);
@@ -385,7 +409,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       return Promise.race([idle(), delay(ms).then(() => false)]);
     },
     async flush(ms = 4000) {
-      kick(); await Promise.race([Promise.all([...running.values()]), delay(ms)]);
+      await Promise.race([kick().then(() => Promise.all([...running.values()])), delay(ms)]);
       // (0.8.2) a refused save set aside is not given up either: kept until the person retries or discards it
       if (jobs.some(x => !terminal.has(x.state) || x.refused)) return false;
       // writes the app sends another way (straight to the SDK) and not yet on the server

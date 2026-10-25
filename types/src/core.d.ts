@@ -85,7 +85,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
             activate: (email: string) => Promise<void>;
             save: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null, { ops, meta }?: {
                 ops?: any;
-                meta?: any;
+                meta? /** @param {string} [kind] @param {string} [id] @returns {number} */: any;
             }) => Promise<import("./writes.js").Doc>;
             restore: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null) => Promise<import("./types.js").Doc>;
             overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
@@ -95,7 +95,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
             }) => Promise<void>;
             discard: (key: string) => Promise<void>;
             forget: () => Promise<void>;
-            kick: () => void;
+            kick: () => Promise<void>;
             configure(config: Partial<QueueOptions>): void;
             onChange(fn: () => void): () => boolean;
             entries: () => import("./types.js").Job[];
@@ -131,7 +131,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
                 activate: (email: string) => Promise<void>;
                 save: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null, { ops, meta }?: {
                     ops?: any;
-                    meta?: any;
+                    meta? /** @param {string} [kind] @param {string} [id] @returns {number} */: any;
                 }) => Promise<import("./writes.js").Doc>;
                 restore: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null) => Promise<import("./types.js").Doc>;
                 overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
@@ -141,7 +141,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
                 }) => Promise<void>;
                 discard: (key: string) => Promise<void>;
                 forget: () => Promise<void>;
-                kick: () => void;
+                kick: () => Promise<void>;
                 configure(config: Partial<QueueOptions>): void;
                 onChange(fn: () => void): () => boolean;
                 entries: () => import("./types.js").Job[];
@@ -213,7 +213,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         activate: (email: string) => Promise<void>;
         save: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null, { ops, meta }?: {
             ops?: any;
-            meta?: any;
+            meta? /** @param {string} [kind] @param {string} [id] @returns {number} */: any;
         }) => Promise<import("./writes.js").Doc>;
         restore: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null) => Promise<import("./types.js").Doc>;
         overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
@@ -223,7 +223,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         }) => Promise<void>;
         discard: (key: string) => Promise<void>;
         forget: () => Promise<void>;
-        kick: () => void;
+        kick: () => Promise<void>;
         configure(config: Partial<QueueOptions>): void;
         onChange(fn: () => void): () => boolean;
         entries: () => import("./types.js").Job[];
