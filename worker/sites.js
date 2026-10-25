@@ -8,7 +8,9 @@ import { handleReport } from './report.js';
 const NOINDEX = 'noindex, nofollow';
 // a released version's files never change: browsers and the CDN may keep them for a year. The list of versions can.
 // .d.ts: the type declarations (types/, from 0.9.2), served as text/plain
-const VERSIONED = /^\/sync\/\d+\.\d+\.\d+\/.+\.(js|json|d\.ts)$|^\/sync\/\d+\.\d+\.\d+\/(LICENSE|NOTICE)$|^\/update\/\d+\.\d+\.\d+\/(sw-core|register)\.js$/;
+// x.y.z with an optional pre-release (1.0.0-rc.1), the same shape as tools/semver.mjs VERSION_RE
+const SEMVER = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`;
+const VERSIONED = new RegExp(String.raw`^/sync/${SEMVER}/.+\.(js|json|d\.ts)$|^/sync/${SEMVER}/(LICENSE|NOTICE)$|^/update/${SEMVER}/(sw-core|register)\.js$`);
 const LISTING = ['/sync/versions.json', '/update/versions.json'];
 // public code, no cookies or credentials, so any app origin may import it
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Cross-Origin-Resource-Policy': 'cross-origin' };
