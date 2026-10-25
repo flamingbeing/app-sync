@@ -732,7 +732,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     // stop everything and forget open stores (sign-out); resolves when pending local writes are done
     async stopAll() {
       for (const t of timers.values()) clearTimeout(t);
-      const waits = [...engines.values(), ...feeds.values()].map(x => x.stop());
+      const waits = [...[...engines.values(), ...feeds.values()].map(x => x.stop()), ...stopping.values()];
       engines.clear(); feeds.clear(); stores.clear(); timers.clear(); stopping.clear(); waiting.clear();
       await Promise.all(waits).catch(() => {});
     },
