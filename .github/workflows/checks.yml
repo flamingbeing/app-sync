@@ -1,6 +1,6 @@
 # Every PR and push to main: the repo checks and unit tests, the Firestore adapter against the local emulator (demo
-# project, nothing reaches a real Firebase project), the update module in a browser, and app-starter's browser tests on
-# this engine (consumer). Jobs side by side.
+# project, nothing reaches a real Firebase project), the update module in a browser, and the apps' browser tests on
+# this engine (consumer matrix: app-starter blocks, the others report). Jobs side by side.
 name: Checks
 
 on:
@@ -61,33 +61,118 @@ jobs:
       - name: Update module in a real browser
         run: node update/test/e2e.mjs
 
-  # The consumer test: app-starter's browser tests (sign-in, offline save, two-phone sync, conflict, sign-out wipe,
-  # update) with this commit's engine served in place of the released one (its fixture's SYNC_DIR), before a release.
+  # The consumer matrix: each app's own browser tests with this commit's engine (and update module) served in place of
+  # whatever version the app pins (app-devkit serve-candidate; no app change). Every row checks the engine VERSION each
+  # page really ran. app-starter (the reference app) blocks; the other rows only report: red = that app's migration
+  # to-do, written to the job summary. app-starter also runs test/consumer/mixed.spec.mjs: a phone on the version it
+  # pins and a phone on this commit, one account, one emulator.
   consumer:
+    name: consumer (${{ matrix.row }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    continue-on-error: ${{ !matrix.blocking }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { row: app-starter, repo: app-starter, blocking: true, pw: project, emulators: 'firestore,auth', cmd: 'npx playwright test' }
+          - { row: pantry, repo: pantry, blocking: false, pw: project, emulators: firestore, firebase: 13.29.1, cmd: 'npx playwright test' }
+          - { row: kakihome, repo: kakihome, blocking: false, pw: project, emulators: 'firestore,auth', cmd: 'npx playwright test' }
+          - { row: rosters, repo: rosters, blocking: false, pw: global, port: 8080, cmd: 'node nuh-roster/test/e2e.mjs && node ntf-roster/test/e2e.mjs && node nuh-junior-monthly/test/e2e.mjs' }
+          - { row: apmes logbook, repo: apmes, blocking: false, pw: global, port: 8080, cmd: 'node logbook/test/e2e/sync-engine.mjs' }
+          - { row: apmes evals, repo: apmes, blocking: false, pw: global, port: 8110, cmd: 'node evals/test/e2e.spec.mjs && node evals/test/edge.e2e.mjs' }
+          - { row: apmes ccc, repo: apmes, blocking: false, pw: global, port: 8110, cmd: 'node ccc/test/e2e.mjs' }
+          - { row: prewarm, repo: prewarm, blocking: false, pw: global, port: 8080, cmd: 'node prewarm/test/gaps.e2e.mjs' }
+          - { row: residencyapps, repo: residencyapps, blocking: false, pw: global, cmd: 'node test/e2e.mjs' }
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          repository: flamingbeing/app-starter
-          ref: main
+          path: candidate
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          path: candidate
-      - name: The starter serves a local build (fails if its fixture lost SYNC_DIR)
-        run: grep -q SYNC_DIR e2e/fixtures.mjs
-      - uses: flamingbeing/app-devkit/setup-node@v1.8.0
-      - uses: flamingbeing/app-devkit/setup-browser@v1.8.0
-      - uses: flamingbeing/app-devkit/setup-emulators@v1.8.0
+          repository: flamingbeing/${{ matrix.repo }}
+          ref: main
+          path: app
+      - uses: flamingbeing/app-devkit/setup-node@v1.9.0
         with:
-          emulators: firestore,auth
-      - name: app-starter's browser tests on this engine
-        run: npx playwright test
+          working-directory: app
+          install: ${{ matrix.pw == 'project' }}
+      - name: Playwright 1.56.1 and axe (the apps' plain browser scripts)
+        if: matrix.pw == 'global'
+        run: npm install -g playwright@1.56.1 axe-core@4
+      - name: The app's own Playwright version (setup-browser installs that browser build)
+        id: pw
+        run: |
+          if [ "${{ matrix.pw }}" = global ]; then echo "version=1.56.1" >> "$GITHUB_OUTPUT"
+          else echo "version=$(node -p "require('./app/package-lock.json').packages['node_modules/playwright-core'].version")" >> "$GITHUB_OUTPUT"; fi
+      - uses: flamingbeing/app-devkit/setup-browser@v1.9.0
+        with:
+          playwright-version: ${{ steps.pw.outputs.version }}
+          devkit-dir: ${{ matrix.repo == 'app-starter' && 'app/.devkit' || '' }}
+      - uses: flamingbeing/app-devkit/setup-emulators@v1.9.0
+        if: matrix.emulators
+        with:
+          emulators: ${{ matrix.emulators }}
+          firebase-tools-version: ${{ matrix.firebase || '13.35.1' }}
+          devkit-dir: ''
+      - uses: flamingbeing/app-devkit/serve-candidate@v1.9.0
+        id: candidate
+        with:
+          origin: https://core.anawj.com
+          sync-dir: candidate
+          update-dir: candidate/update
+      - name: The starter's pinned engine, for the mixed-version spec
+        if: matrix.repo == 'app-starter'
+        run: |
+          v="$(grep -o 'core\.anawj\.com/sync/[0-9][^/]*/' app/app/sw.js | head -1 | cut -d/ -f3)"
+          git clone --quiet --depth 1 --branch "v$v" https://github.com/flamingbeing/app-sync pinned
+      - name: ${{ matrix.row }} browser tests on this engine
+        id: tests
+        working-directory: app
         env:
-          SYNC_DIR: candidate
+          NODE_OPTIONS: ${{ steps.candidate.outputs.node-options }}
+          PORT: ${{ matrix.port }}
+        run: |
+          if [ "${{ matrix.pw }}" = global ]; then
+            export PLAYWRIGHT_PATH="$(npm root -g)/playwright/index.mjs" PW_PATH="$(npm root -g)/playwright" AXE_PATH="$(npm root -g)/axe-core/axe.min.js"
+          fi
+          if [ -n "$PORT" ]; then (python3 -m http.server "$PORT" >/dev/null 2>&1 &); sleep 1; fi
+          ${{ matrix.cmd }}
+      # its own log: its pinned phone runs the pinned engine on purpose (the spec checks both phones' VERSION itself)
+      - name: Mixed versions (a phone on the starter's pinned tag, a phone on this commit)
+        if: matrix.repo == 'app-starter'
+        working-directory: app
+        env:
+          NODE_OPTIONS: ${{ steps.candidate.outputs.node-options }}
+          PINNED_SYNC_DIR: ${{ github.workspace }}/pinned
+        run: |
+          cp ../candidate/test/consumer/mixed.spec.mjs e2e/
+          SERVE_CANDIDATE_LOG="$RUNNER_TEMP/mixed.jsonl" npx playwright test e2e/mixed.spec.mjs
+      - name: Engine VERSION each page ran, and the service worker file lists
+        if: always() && steps.candidate.outcome == 'success'
+        env:
+          KIT: ${{ steps.candidate.outputs.kit }}
+          ROW: ${{ matrix.row }}
+          TESTS: ${{ steps.tests.outcome }}
+        run: |
+          {
+            echo "### ${ROW}: tests ${TESTS}"
+            echo
+            echo '| row | engine | expected | pinned | note |'
+            echo '|---|---|---|---|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+          ok=0
+          log="${{ steps.candidate.outputs.log }}"
+          node "$KIT/report.mjs" "$log" --row "$ROW" --expect "${{ steps.candidate.outputs.version }}" || ok=1
+          # a matching VERSION alone could be a live copy of the same version: the candidate must have served the engine
+          served="$(node -e 'let n=0;for(const l of require("fs").readFileSync(process.argv[1],"utf8").split("\n"))if(l)n+=JSON.parse(l).served.sync;console.log(n)' "$log")"
+          if [ "$served" = 0 ]; then echo "| $ROW | fail | | | no engine file served from this checkout |" >> "$GITHUB_STEP_SUMMARY"; ok=1; fi
+          { echo; echo '| row | service worker | pins | engine files | |'; echo '|---|---|---|---|---|'; } >> "$GITHUB_STEP_SUMMARY"
+          node "$KIT/shell.mjs" --files candidate/files.json --origin https://core.anawj.com --row "$ROW" app
+          exit "$ok"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: failure()
+        if: failure() && matrix.blocking
         with:
           name: consumer-results
-          path: test-results
+          path: app/test-results
           if-no-files-found: ignore
