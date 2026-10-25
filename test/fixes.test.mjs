@@ -218,3 +218,48 @@ test('a save shows in the lists from the moment save() is called, before it is s
   await assert.rejects(p);
   assert.equal(q2.overlay('place', 'a', list).find(x => x.id === 'p2').order, 2, 'refused: the list shows the server copy again');
 });
+
+test('stopAll waits for an engine that was already stopping (its late writes must not reopen a wiped store)', async () => {
+  const { openStore, wipeStores } = createStores({ prefix: 'fix-b3a:', colls: ['items'] });
+  const srv = fakeServer();
+  srv.set('items', { id: 'a', updatedAt: T0 }); srv.set('items', { id: 'b', updatedAt: T0 });
+  let hold = null, opened = 0;
+  const gated = async scope => {
+    opened++;
+    const st = await openStore(scope);
+    return { ...st, write: async (coll, op) => { if (hold) await hold; return st.write(coll, op); } };
+  };
+  const hub = createSyncHub({ openStore: gated, listen: srv.listen, fetchOne: srv.fetchOne, now: () => T0 + H, grace: 0, bin: null });
+  let release; hold = new Promise(r => { release = r; });
+  const off = hub.watch(S, 'items', () => {});
+  await settle();
+  off(); await settle();   // grace 0: the engine is stopping, its writes are held
+  const all = hub.stopAll();
+  await settle();
+  let ended = false; all.then(() => { ended = true; });
+  await settle(20);
+  assert.equal(ended, false, 'stopAll resolves only when the stopping engine\'s writes are done');
+  release(); await all;
+  await wipeStores();
+});
+
+test('a record read to check it left the query never replaces a newer copy that arrived meanwhile', async () => {
+  const { openStore, wipeStores } = createStores({ prefix: 'fix-b3b:', colls: ['items'] });
+  const doc = v => ({ id: 'a', updatedAt: T0 + v * 1000, v });
+  let snap = null;
+  const listen = (_s, _c, _o, onSnap) => { snap = onSnap; return () => {}; };
+  let gate, fetched = 0; const slow = new Promise(r => { gate = r; });
+  const fetchOne = async () => { fetched++; await slow; return doc(2); };
+  const hub = createSyncHub({ openStore, listen, fetchOne, now: () => T0 + H, grace: 0, bin: null });
+  let last = [];
+  const off = hub.watch(S, 'items', l => { last = l; });
+  await settle();
+  snap({ changes: [{ type: 'added', id: 'a', doc: doc(1) }], fromCache: false, hasPendingWrites: false, full: true, docs: [doc(1)] }); await settle();
+  snap({ changes: [{ type: 'removed', id: 'a', doc: null }], fromCache: true, hasPendingWrites: false }); await settle();
+  assert.equal(fetched, 1, 'the check read started');
+  snap({ changes: [{ type: 'added', id: 'a', doc: doc(3) }], fromCache: false, hasPendingWrites: false }); await settle();
+  assert.equal(last.find(d => d.id === 'a')?.v, 3);
+  gate(); await settle(20); await hub.flush();
+  assert.equal(last.find(d => d.id === 'a')?.v, 3, 'the older read does not win');
+  off(); await hub.stopAll(); await wipeStores();
+});

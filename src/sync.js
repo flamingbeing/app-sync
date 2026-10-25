@@ -425,6 +425,8 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     try { doc = fetchOne ? await fetchOne(scope, coll, id) : undefined; } catch { doc = undefined; }
     if (stopped) return;
     const gone = meta.gone || {};
+    const cur = docs.get(id);
+    if (doc && cur && stamp(cur) > stamp(doc)) return;   // a newer copy arrived while this read was out
     if (!(doc && !(gone[id] != null && stamp(doc) <= gone[id])) && holding(id)) { left(id); return; }
     if (doc && !(gone[id] != null && stamp(doc) <= gone[id])) {
       if (same(docs.get(id), doc)) return;
@@ -724,7 +726,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     // stop everything and forget open stores (sign-out); resolves when pending local writes are done
     async stopAll() {
       for (const t of timers.values()) clearTimeout(t);
-      const waits = [...engines.values(), ...feeds.values()].map(x => x.stop());
+      const waits = [...[...engines.values(), ...feeds.values()].map(x => x.stop()), ...stopping.values()];
       engines.clear(); feeds.clear(); stores.clear(); timers.clear(); stopping.clear(); waiting.clear();
       await Promise.all(waits).catch(() => {});
     },
