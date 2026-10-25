@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.2 (2026-10-25)
+
+Two fixes. Nothing changes for 0.5.1 callers except as below. Each has a test that failed before it.
+
+- Fixed: a device could keep showing its own save's copy of a record, without a change another device made to it at
+  the same moment, until the record changed again (in an app's two- and three-device tests, about 1 run in 12). The
+  listener heard the server's copy (both changes) while the save was still being sent, so the save's copy was laid
+  over it; when the save was done only the queue changed, and the pattern the README showed (`queue.overlay` inside
+  `hub.watch`) lays it over again only when the listener sends a list. New `watchSaved({ hub, queue, scope, coll,
+  kind }, cb)` (`src/writes.js`) does both: the list with the device's saves over it, again when either changes. Apps
+  move to it from `hub.watch` + `queue.overlay`; the engine, the queue and `overlay` are unchanged. Tests:
+  `test/fixes.test.mjs` and the emulator test (two devices on one record).
+- Fixed: the nothing-lost report sent twice on page hide (browsers fire `visibilitychange` and `pagehide` together),
+  counting each error twice. One `flush` at a time: one asked while another is being sent gets that one's answer.
+  Test: `test/report.test.mjs`.
+
 ## 0.5.1 (2026-10-25)
 
 Two adapter calls, so apps stop reaching past the adapter for them. Nothing changes for 0.5.0 callers. Tests:

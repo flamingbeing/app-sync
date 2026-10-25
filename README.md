@@ -44,8 +44,8 @@ What it does:
 
 ```js
 import * as F from 'https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js';
-import { createSyncHub, createWriteQueue, createStores, createOutbox, createFirestoreBackend, replanOnWake,
-  persistGuard, syncStatus, attentionCount, forgetDevice } from 'https://core.anawj.com/sync/0.4.2/index.js';
+import { createSyncHub, createWriteQueue, createStores, createOutbox, createFirestoreBackend, replanOnWake, watchSaved,
+  persistGuard, syncStatus, attentionCount, forgetDevice } from 'https://core.anawj.com/sync/0.5.2/index.js';
 
 const fs = createFirestoreBackend({ sdk: async () => ({ db, F }), path: (space, coll) => ['spaces', space, coll] });
 const stores = createStores({ prefix: 'myapp-store:', colls: ['items'] });
@@ -60,7 +60,9 @@ const queue = createWriteQueue({
 });
 addEventListener('online', () => queue.kick());
 
-const off = hub.watch(currentSpace, 'items', (list, meta) => render(queue.overlay('item', currentSpace, list), meta));
+// the server's list with this device's unsent saves laid over it, again whenever either changes (0.5.2: not hub.watch
+// with queue.overlay inside, which missed the server's copy heard while a save was being sent)
+const off = watchSaved({ hub, queue, scope: currentSpace, coll: 'items', kind: 'item' }, (list, meta) => render(list, meta));
 await queue.save('item', currentSpace, { id: 'i1', text: 'Hello' }, previousCopy);   // base: the copy the edit started from
 
 const { persisted } = await persistGuard();
