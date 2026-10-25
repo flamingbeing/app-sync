@@ -40,7 +40,8 @@ separately from the API, from 0.8.0 on:
 | `_deleted` | `true` on a save or answer that deletes a record (the adapter deletes the document; others hear of it from the bin entry) |
 | option `mark` (opt-in) | the keys of the last saves applied to a merged record (a resend is applied once) |
 | `_edits` (option `edits`, opt-in) | `{ [field]: { by, device, at } }`, who changed each top-level field and when |
-| bin and leave entries | `{ id, kind, data, deletedAt }`, `data` the deleted (or departed) version; leave entries `id` = `<kind>:<record id>` (`leaveEntry`) |
+| bin entries | `{ id, kind, data, deletedAt }`, `data` the deleted version |
+| leave entries (`leaveEntry`) | `{ id: '<kind>:<record id>', kind, data: { id, updatedAt }, deletedAt }`: only the record's id and stamp, no content |
 
 The option names in brackets let an app pick another field name; whatever an app picks becomes its own stored
 format and must not change without a migration.
