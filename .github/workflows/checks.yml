@@ -100,9 +100,14 @@ jobs:
       - name: Playwright 1.56.1 and axe (the apps' plain browser scripts)
         if: matrix.pw == 'global'
         run: npm install -g playwright@1.56.1 axe-core@4
+      - name: The app's own Playwright version (setup-browser installs that browser build)
+        id: pw
+        run: |
+          if [ "${{ matrix.pw }}" = global ]; then echo "version=1.56.1" >> "$GITHUB_OUTPUT"
+          else echo "version=$(node -p "require('./app/package-lock.json').packages['node_modules/playwright-core'].version")" >> "$GITHUB_OUTPUT"; fi
       - uses: flamingbeing/app-devkit/setup-browser@v1.9.0
         with:
-          playwright-version: ${{ matrix.pw == 'global' && '1.56.1' || '' }}
+          playwright-version: ${{ steps.pw.outputs.version }}
           devkit-dir: ${{ matrix.repo == 'app-starter' && 'app/.devkit' || '' }}
       - uses: flamingbeing/app-devkit/setup-emulators@v1.9.0
         if: matrix.emulators
@@ -121,14 +126,11 @@ jobs:
         run: |
           v="$(grep -o 'core\.anawj\.com/sync/[0-9][^/]*/' app/app/sw.js | head -1 | cut -d/ -f3)"
           git clone --quiet --depth 1 --branch "v$v" https://github.com/flamingbeing/app-sync pinned
-          cp candidate/test/consumer/mixed.spec.mjs app/e2e/
-          echo "PINNED_SYNC_DIR=$PWD/pinned" >> "$GITHUB_ENV"
       - name: ${{ matrix.row }} browser tests on this engine
         id: tests
         working-directory: app
         env:
           NODE_OPTIONS: ${{ steps.candidate.outputs.node-options }}
-          SYNC_DIR: ${{ github.workspace }}/candidate   # app-starter's own fixture swap (same files)
           PORT: ${{ matrix.port }}
         run: |
           if [ "${{ matrix.pw }}" = global ]; then
@@ -136,6 +138,16 @@ jobs:
           fi
           if [ -n "$PORT" ]; then (python3 -m http.server "$PORT" >/dev/null 2>&1 &); sleep 1; fi
           ${{ matrix.cmd }}
+      # its own log: its pinned phone runs the pinned engine on purpose (the spec checks both phones' VERSION itself)
+      - name: Mixed versions (a phone on the starter's pinned tag, a phone on this commit)
+        if: matrix.repo == 'app-starter'
+        working-directory: app
+        env:
+          NODE_OPTIONS: ${{ steps.candidate.outputs.node-options }}
+          PINNED_SYNC_DIR: ${{ github.workspace }}/pinned
+        run: |
+          cp ../candidate/test/consumer/mixed.spec.mjs e2e/
+          SERVE_CANDIDATE_LOG="$RUNNER_TEMP/mixed.jsonl" npx playwright test e2e/mixed.spec.mjs
       - name: Engine VERSION each page ran, and the service worker file lists
         if: always() && steps.candidate.outcome == 'success'
         env:
@@ -150,7 +162,11 @@ jobs:
             echo '|---|---|---|---|---|'
           } >> "$GITHUB_STEP_SUMMARY"
           ok=0
-          node "$KIT/report.mjs" "${{ steps.candidate.outputs.log }}" --row "$ROW" --expect "${{ steps.candidate.outputs.version }}" || ok=1
+          log="${{ steps.candidate.outputs.log }}"
+          node "$KIT/report.mjs" "$log" --row "$ROW" --expect "${{ steps.candidate.outputs.version }}" || ok=1
+          # a matching VERSION alone could be a live copy of the same version: the candidate must have served the engine
+          served="$(node -e 'let n=0;for(const l of require("fs").readFileSync(process.argv[1],"utf8").split("\n"))if(l)n+=JSON.parse(l).served.sync;console.log(n)' "$log")"
+          if [ "$served" = 0 ]; then echo "| $ROW | fail | | | no engine file served from this checkout |" >> "$GITHUB_STEP_SUMMARY"; ok=1; fi
           { echo; echo '| row | service worker | pins | engine files | |'; echo '|---|---|---|---|---|'; } >> "$GITHUB_STEP_SUMMARY"
           node "$KIT/shell.mjs" --files candidate/files.json --origin https://core.anawj.com --row "$ROW" app
           exit "$ok"
