@@ -72,8 +72,8 @@
  */
 
 /**
- * A save in the outbox (writes.js).
- * @typedef {{ key: string, owner: string, kind: string, record: Doc, base: Doc | null, state: JobState,
+ * A save in the outbox (writes.js). v: the job format (JOB_FORMAT; none on jobs written before 0.8.0).
+ * @typedef {{ v?: number, key: string, owner: string, kind: string, record: Doc, base: Doc | null, state: JobState,
  *   accepted: boolean, at: number, error?: string, result?: Doc, remote?: Doc | null, kept?: boolean, ops?: any[],
  *   realm?: string }} Job
  */
