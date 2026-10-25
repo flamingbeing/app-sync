@@ -26,7 +26,8 @@ Additive: a modules-only app (one that imports only the entries, never `index.js
   `files.json` is unchanged (it lists what `index.js` loads, and that graph did not change).
 - Checks: the mixed-version spec accepts a page that loaded `/sync/<v>/app.js` as having run the engine, not only
   `index.js`; the consumer job reads the starter's pinned version from the import map in `index.html` (root layout),
-  else `public/sw.js`, else `app/sw.js` (the 0.x layout keeps working), and fails clearly if none pins one.
+  else `public/sw.js`, else `app/sw.js` (the 0.x layout keeps working), and fails clearly if none pins one. The
+  consumer matrix uses app-devkit v1.9.1 (serve-candidate checks a page's `app.js` entry too).
 
 ## 0.9.2 (2026-10-25)
 

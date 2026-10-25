@@ -125,7 +125,7 @@ jobs:
           repository: flamingbeing/${{ matrix.repo }}
           ref: main
           path: app
-      - uses: flamingbeing/app-devkit/setup-node@v1.9.0
+      - uses: flamingbeing/app-devkit/setup-node@v1.9.1
         with:
           working-directory: app
           install: ${{ matrix.pw == 'project' }}
@@ -137,17 +137,17 @@ jobs:
         run: |
           if [ "${{ matrix.pw }}" = global ]; then echo "version=1.56.1" >> "$GITHUB_OUTPUT"
           else echo "version=$(node -p "require('./app/package-lock.json').packages['node_modules/playwright-core'].version")" >> "$GITHUB_OUTPUT"; fi
-      - uses: flamingbeing/app-devkit/setup-browser@v1.9.0
+      - uses: flamingbeing/app-devkit/setup-browser@v1.9.1
         with:
           playwright-version: ${{ steps.pw.outputs.version }}
           devkit-dir: ${{ matrix.repo == 'app-starter' && 'app/.devkit' || '' }}
-      - uses: flamingbeing/app-devkit/setup-emulators@v1.9.0
+      - uses: flamingbeing/app-devkit/setup-emulators@v1.9.1
         if: matrix.emulators
         with:
           emulators: ${{ matrix.emulators }}
           firebase-tools-version: ${{ matrix.firebase || '13.35.1' }}
           devkit-dir: ''
-      - uses: flamingbeing/app-devkit/serve-candidate@v1.9.0
+      - uses: flamingbeing/app-devkit/serve-candidate@v1.9.1
         id: candidate
         with:
           origin: https://core.anawj.com
