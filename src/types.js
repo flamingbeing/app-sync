@@ -142,7 +142,7 @@
  */
 
 /**
- * @typedef {{ deleted: { mine: boolean, theirs: boolean }, fields: { path: string, mine: ConflictSide, theirs: ConflictSide }[],
+ * @typedef {{ deleted: { mine: boolean, theirs: boolean }, fields: { path: string, keys: string[], mine: ConflictSide, theirs: ConflictSide }[],
  *   mine: ConflictSide, theirs: ConflictSide }} ConflictView
  */
 

@@ -67,6 +67,10 @@ function device(name, shared, srv, clock, { held = false } = {}) {
   return dev;
 }
 
+const EMAILS = ['a.b@example.test', 'c.d@example.test'];
+// a note's field of each device's own (a merge collection's, each device owns one), a dotted name too (0.7.4)
+const own = d => d.name + '.fake@example.test';
+
 async function run(seed, { steps = 30, held = false } = {}) {
   const r = rng(seed), pick = xs => xs[Math.floor(r() * xs.length)];
   const srv = fakeServer(), shared = sharedSdk({ srv });
@@ -75,7 +79,7 @@ async function run(seed, { steps = 30, held = false } = {}) {
   const devs = Array.from({ length: n }, (_, i) => device('d' + i, shared, srv, Math.round((r() - 0.5) * 4 * 60e3), { held }));
   // the records every device starts from (on the server before anyone opens)
   for (const id of notes) shared.meddle(`spaces/${S}/notes/${id}`, { id, updatedAt: 1 });
-  for (const id of tasks) shared.meddle(`spaces/${S}/tasks/${id}`, { id, text: 'Fake task ' + id, done: false, updatedAt: 1 });
+  for (const id of tasks) shared.meddle(`spaces/${S}/tasks/${id}`, { id, text: 'Fake task ' + id, done: false, names: { [EMAILS[0]]: 'Fake' }, updatedAt: 1 });
   for (const d of devs) await d.start();
   await settle(30);
   const log = [], deleted = new Set();
@@ -86,17 +90,19 @@ async function run(seed, { steps = 30, held = false } = {}) {
       // a note: only this device's field changes (its own last value must win on the server)
       const id = pick(notes), base = d.shown('notes', id);
       if (!base) { log.push(`${d.name} note ${id}: not shown`); continue; }
-      const rec = { ...content(base), id, [d.name]: ++v };
+      const rec = { ...content(base), id, [own(d)]: ++v };
       log.push(`${d.name} save note ${id} ${d.name}=${v}`);
-      d.saves.push({ coll: 'notes', id, field: d.name, value: v });
+      d.saves.push({ coll: 'notes', id, field: own(d), value: v });
       void d.app.save('note', S, rec, content(base)).catch(() => {});
     } else if (x < 0.55) {
       const id = pick(tasks), base = d.shown('tasks', id);
       if (!base) { log.push(`${d.name} task ${id}: not shown`); continue; }
       const del = !deleted.has(id) && r() < 0.15;
       const rec = del ? { ...content(base), _deleted: true } : { ...content(base), text: 'Fake text ' + (++v), done: r() < 0.5 };
+      // (0.7.4) a map keyed by emails, so held clashes have '.' inside a key
+      if (!del && r() < 0.5) rec.names = { ...(base.names || {}), [pick(EMAILS)]: 'Fake name ' + v };
       if (del) deleted.add(id);
-      log.push(`${d.name} ${del ? 'delete' : 'save'} task ${id}${del ? '' : ' ' + rec.text + ' done=' + rec.done}`);
+      log.push(`${d.name} ${del ? 'delete' : 'save'} task ${id}${del ? '' : ' ' + rec.text + ' done=' + rec.done + (rec.names ? ' names=' + JSON.stringify(rec.names) : '')}`);
       void d.app.save('task', S, rec, content(base)).catch(() => {});
     } else if (x < 0.68) { log.push(`${d.name} offline`); d.goOffline(); }
     else if (x < 0.8) { log.push(`${d.name} online`); d.goOnline(); }
@@ -119,20 +125,30 @@ async function run(seed, { steps = 30, held = false } = {}) {
       for (const d of devs) {
         for (const c of d.app.conflicts()) {
           any = true;
-          const desc = d.app.describe(c.key), choice = r() < 0.5 ? 'mine' : 'theirs';
-          log.push(`${d.name} answers ${c.kind} ${c.id} ${choice} (${desc.fields.map(f => f.path).join(',') || 'whole record'})`);
+          const desc = d.app.describe(c.key), x = r();
+          // (0.7.4) also an answer per field, each side at random
+          const choice = x < 0.35 ? 'mine' : x < 0.7 ? 'theirs' : Object.fromEntries(desc.fields.map(f => [f.path, r() < 0.5 ? 'mine' : 'theirs']));
+          /** @param {{ path: string }} f */
+          const sideOf = f => typeof choice === 'string' ? choice : choice[f.path] || 'theirs';
+          // the popup shows each side's value of a clashing field (a name or a note's number, never a missing one)
+          for (const f of desc.fields) for (const sd of ['mine', 'theirs']) if (f[sd].value === undefined) problems.push(`${d.name} ${c.id}.${f.path} ${sd} shows nothing`);
+          log.push(`${d.name} answers ${c.kind} ${c.id} ${JSON.stringify(choice)} (${desc.fields.map(f => f.path).join(',') || 'whole record'})`);
           // a note (merge collection, held 'merge') clashes only on this device's own field: a later save of it made on
           // a copy from before its earlier save landed (the same as a task's); theirs then keeps that earlier value
           if (c.kind === 'note') {
-            if (desc.fields.some(f => f.path !== d.name)) problems.push(`${d.name} note ${c.id} clashed on ${desc.fields.map(f => f.path).join(',')}, not its own field`);
-            if (choice === 'theirs') d.answeredTheirs.add(c.id);
+            if (desc.fields.some(f => f.keys.join() !== own(d))) problems.push(`${d.name} note ${c.id} clashed on ${desc.fields.map(f => f.path).join(',')}, not its own field`);
+            if (desc.fields.some(f => sideOf(f) === 'theirs')) d.answeredTheirs.add(c.id);
           }
           try { await d.app.resolve(c.key, choice); } catch (e) { if (!/elsewhere|kept in/.test(e.message)) problems.push(`${d.name} answer ${c.id}: ${e.message}`); }
           await d.app.flush(3000);
-          if (choice !== 'mine' || d.app.queue.status(c.kind, c.id) !== 'synced') continue;
+          if (d.app.queue.status(c.kind, c.id) !== 'synced') continue;
           const doc = shared.docs.get(`spaces/${S}/${c.kind}s/${c.id}`) || null;
-          if (desc.deleted.mine ? doc : !doc) problems.push(`${d.name} chose its version of ${c.id}, server ${doc ? 'has' : 'lacks'} it`);
-          for (const f of desc.fields) if (doc && JSON.stringify(doc[f.path]) !== JSON.stringify(f.mine.value)) problems.push(`${d.name} chose ${c.id}.${f.path}=${JSON.stringify(f.mine.value)}, server ${JSON.stringify(doc[f.path])}`);
+          if (choice === 'mine' && (desc.deleted.mine ? doc : !doc)) problems.push(`${d.name} chose its version of ${c.id}, server ${doc ? 'has' : 'lacks'} it`);
+          for (const f of desc.fields) {
+            if (sideOf(f) !== 'mine') continue;
+            const there = f.keys.reduce((o, k) => o && typeof o === 'object' ? o[k] : undefined, doc);
+            if (doc && JSON.stringify(there) !== JSON.stringify(f.mine.value)) problems.push(`${d.name} chose ${c.id}.${f.path}=${JSON.stringify(f.mine.value)}, server ${JSON.stringify(there)}`);
+          }
         }
       }
       if (!any) break;
@@ -164,9 +180,12 @@ async function run(seed, { steps = 30, held = false } = {}) {
     for (const [id, value] of last) {
       if (held.has('notes:' + id) || d.answeredTheirs.has(id)) continue;
       const doc = shared.docs.get(`spaces/${S}/notes/${id}`);
-      if (doc?.[d.name] !== value) problems.push(`${d.name}'s last note ${id} value ${value} lost (server ${doc?.[d.name]})`);
+      if (doc?.[own(d)] !== value) problems.push(`${d.name}'s last note ${id} value ${value} lost (server ${doc?.[own(d)]})`);
     }
   }
+  // (0.7.4) an answer never splits an email key into nested keys
+  for (const doc of server('notes')) for (const d of devs) if (d.name in doc) problems.push(`note ${doc.id} has ${d.name}: ${JSON.stringify(doc[d.name])}`);
+  for (const doc of server('tasks')) for (const k of Object.keys(doc.names || {})) if (!EMAILS.includes(k)) problems.push(`task ${doc.id} has names.${k}: ${JSON.stringify(doc.names[k])}`);
   for (const d of devs) await d.stop();
   return { problems, log, n };
 }

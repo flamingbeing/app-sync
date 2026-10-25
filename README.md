@@ -77,7 +77,7 @@ const app = createApp({ …, device: 'Ward phone',
   backend: { held: true, edits: '_edits', mark: '_saves' } });   // or held: { items: { counters: ['qty'] } }
 app.status$(st => drawChip(st));                 // 'attention' while a held save is unanswered
 for (const c of app.conflicts()) {               // this phone's held saves only
-  const d = app.describe(c.key);                 // d.fields: [{ path, mine, theirs }], each { value, when (SGT), by, device }
+  const d = app.describe(c.key);                 // d.fields: [{ path, keys, mine, theirs }], each { value, when (SGT), by, device }
   await app.resolve(c.key, await askUser(d));    // 'mine' | 'theirs' | { [path]: 'mine' | 'theirs' }
 }
 ```

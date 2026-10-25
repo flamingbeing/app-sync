@@ -38,6 +38,23 @@ export function checkWrite(current, desired, base, message = 'This record change
   return true;
 }
 
+// A field's path in a held clash (0.7.4): its keys joined with '.', with a backslash before each '.' or backslash
+// inside a key, so a map keyed by an email ({ names: { 'a.b@example.com': … } }) has the path names.a\.b@example\.com,
+// never four keys. A key without '.' or backslash reads as before. pathOf(keys) -> the path; keysOf(path) -> the keys.
+/** @param {string[]} keys @returns {string} */
+export const pathOf = keys => keys.map(k => String(k).replace(/[\\.]/g, c => '\\' + c)).join('.');
+/** @param {string} path @returns {string[]} */
+export function keysOf(path) {
+  const keys = [''];
+  for (let i = 0; i < path.length; i++) {
+    const c = path[i];
+    if (c === '\\' && i + 1 < path.length) keys[keys.length - 1] += path[++i];
+    else if (c === '.') keys.push('');
+    else keys[keys.length - 1] += c;
+  }
+  return keys;
+}
+
 // Last-write-wins by field, for collections that need no conflict screen: what this device changed since base wins,
 // everything else keeps what the server holds now (current). Plain objects are merged key by key, so two devices
 // changing different keys of one map both keep their change; arrays and other values are replaced whole. A key the
@@ -76,8 +93,8 @@ export function mergeFields(current, record, base) {
 //     adding to it both count; never a conflict;
 //   - plain objects are merged key by key, the same way;
 //   - a field both changed to different values is a clash: nothing is written and it throws { code: 'write-conflict',
-//     remote: current, fields: [paths] } (a path is the field's keys joined with '.'), so the queue holds the save
-//     for the user to choose. With pick(path) -> 'mine' | 'theirs', a clash takes that side instead (resolving it).
+//     remote: current, fields: [paths] } (a path is the field's keys joined with '.', escaped: pathOf), so the queue
+//     holds the save for the user to choose. With pick(path) -> 'mine' | 'theirs', a clash takes that side instead (resolving it).
 // skip: top-level fields left out (stamps, the engine's own fields): the server's are kept. Without a base (a record
 // this device has not seen), every field it sends counts as changed. -> the merged record (current is not changed)
 /**
@@ -98,7 +115,7 @@ export function mergeHeld(current, record, base, { counters = [], skip = [], pic
     const out = isMap(cur) ? clone(cur) : {}, now = isMap(cur) ? cur : {};
     for (const k of new Set([...Object.keys(rec), ...Object.keys(was)])) {
       if (!prefix && skipped.has(k)) continue;
-      const path = prefix + k, mine = k in rec, had = k in was, there = k in now;
+      const path = prefix + pathOf([k]), mine = k in rec, had = k in was, there = k in now;
       if (mine === had && sameValue(rec[k], was[k])) continue;                       // not changed here
       if (counter.has(path) && typeof (rec[k] ?? 0) === 'number' && typeof (was[k] ?? 0) === 'number') {
         out[k] = (typeof now[k] === 'number' ? now[k] : 0) + (rec[k] ?? 0) - (was[k] ?? 0);   // (before the same-value
@@ -154,8 +171,8 @@ export function mergeClashes(current, mine, merged, base, { skip = [] } = {}) {
       const vals = [cur, me, out, was].map(o => isMap(o) && Object.hasOwn(o, k) ? o[k] : undefined);
       const w = sigAt(was, k), m = sigAt(me, k), c = sigAt(cur, k);
       if (m === w || c === w || m === c) continue;                     // changed on one side only, or alike
-      if (vals.every(v => v === undefined || isMap(v)) && vals.filter(isMap).length > 1) { walk(vals[0], vals[1], vals[2], vals[3], prefix + k + '.'); continue; }
-      if (sigAt(out, k) === m) clashes.push(prefix + k);              // merged takes mine over theirs
+      if (vals.every(v => v === undefined || isMap(v)) && vals.filter(isMap).length > 1) { walk(vals[0], vals[1], vals[2], vals[3], prefix + pathOf([k]) + '.'); continue; }
+      if (sigAt(out, k) === m) clashes.push(prefix + pathOf([k]));              // merged takes mine over theirs
     }
   };
   walk(current, mine, merged, base, '');
@@ -181,7 +198,7 @@ export function mergeFnClashes(current, record, base, merge, ops, options = {}) 
 
 /** @param {any} record @param {string} path @param {any} from (the side whose value it takes; absent there: removed) */
 const setFrom = (record, path, from) => {
-  const keys = path.split('.'), last = /** @type {string} */ (keys.pop());
+  const keys = keysOf(path), last = /** @type {string} */ (keys.pop());
   let o = record, src = from;
   for (const k of keys) { if (!isMap(o[k])) o[k] = {}; o = o[k]; src = isMap(src) ? src[k] : undefined; }
   if (isMap(src) && Object.hasOwn(src, last)) o[last] = clone(src[last]); else delete o[last];
@@ -210,15 +227,16 @@ export function whenText(ms, timeZone = 'Asia/Singapore') {
 }
 
 /** @param {any} record @param {string} path */
-const valueAt = (record, path) => path.split('.').reduce((v, k) => isMap(v) ? v[k] : undefined, record);
+const valueAt = (record, path) => keysOf(path).reduce((v, k) => isMap(v) ? v[k] : undefined, record);
 
 // What a conflict popup shows for a held save, side by side (pure; framework-free, the app renders it):
 // held: { record (this device's version), base (what it started from), remote (the server's now; null: deleted
 // there), at (when this device saved it, ms) }. options: counters, skip (as mergeHeld), edits (the field holding who
 // changed each field and when, the adapter's `edits` option), me: { by, device } (this device's signed-in name and
-// device name), timeZone. -> { deleted: { mine, theirs }, fields: [{ path, mine, theirs }], mine, theirs }: each side
-// is { value (whole record at the top), at (ms), when (text), by, device }; fields lists only the clashing ones (none
-// when either side deleted the record: then the choice is the whole record).
+// device name), timeZone. -> { deleted: { mine, theirs }, fields: [{ path, keys, mine, theirs }], mine, theirs }: each
+// side is { value (whole record at the top), at (ms), when (text), by, device }; fields lists only the clashing ones
+// (none when either side deleted the record: then the choice is the whole record). path: as resolve's choice names
+// it (escaped, pathOf); keys (0.7.4): the same path as its keys, for labels.
 /**
  * @param {HeldSave} held
  * @param {MergeOptions & { edits?: string | null, me?: { by?: string, device?: string }, timeZone?: string }} [options]
@@ -246,8 +264,8 @@ export function describeConflict({ record, base = null, remote = null, at = 0, o
   if (merge && !mineDeleted && !theirsDeleted) { try { viaMerge = mergeFnClashes(remote, record, base, merge, ops, { skip: skipAll }); } catch { viaMerge = { mine: record, fields: [] }; } }
   const mineRecord = viaMerge ? viaMerge.mine : record;
   const fields = (mineDeleted || theirsDeleted ? [] : viaMerge ? viaMerge.fields : clashingFields(remote, record, base, { counters, skip: skipAll }))
-    .map(path => ({ path, mine: mineSide(valueAt(mineRecord, path)), theirs: theirsSide(valueAt(remote, path), path.split('.')[0]) }));
-  return { deleted: { mine: mineDeleted, theirs: theirsDeleted }, fields, mine: mineSide(record), theirs: theirsSide(remote, fields.length === 1 ? fields[0].path.split('.')[0] : null) };
+    .map(path => ({ path, keys: keysOf(path), mine: mineSide(valueAt(mineRecord, path)), theirs: theirsSide(valueAt(remote, path), keysOf(path)[0]) }));
+  return { deleted: { mine: mineDeleted, theirs: theirsDeleted }, fields, mine: mineSide(record), theirs: theirsSide(remote, fields.length === 1 ? fields[0].keys[0] : null) };
 }
 
 // The version to save for a held save once the user has chosen (pure): choice 'mine' | 'theirs', or { [path]: 'mine'

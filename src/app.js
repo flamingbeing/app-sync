@@ -47,9 +47,10 @@
 //   describe(key, { timeZone }) -> what the popup shows, side by side (conflict.js describeConflict): the clashing
 //   fields, each with this device's value and the server's, when each changed (SGT by default) and who (signed-in
 //   name, device). null when that save is no longer held.
-//   resolve(key, choice) -> the saved version: choice 'mine' | 'theirs' | { [path]: 'mine' | 'theirs' } (a field not
-//   named stays theirs); this device's changes that don't clash are kept either way (conflict.js resolvedRecord), then
-//   saved over the server's copy (queue.restore). Nothing is overwritten without this answer.
+//   resolve(key, choice) -> the saved version: choice 'mine' | 'theirs' | { [path]: 'mine' | 'theirs' } (path as
+//   describe gives it, a '.' inside a key escaped (0.7.4, conflict.js pathOf); a field not named stays theirs); this
+//   device's changes that don't clash are kept either way (conflict.js resolvedRecord), then saved over the server's
+//   copy (queue.restore). Nothing is overwritten without this answer.
 //   signOut({ wait }) -> { ok, reason: 'unsent' | 'changed', reload, failed }: refuses while anything is unsent (this
 //   app's, another tab's, another registered app's on this origin), then forgets the device and signs out.
 import { createSyncHub, replanOnWake } from './sync.js';
@@ -369,8 +370,8 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
     return { ok: true, reason: '', reload: !!clear, failed: r.failed };
   }
 
-  // held conflicts (0.6.3): this device's own, one per record (the first held save; later ones on this device's own
-  // version wait behind it, and the newest of them is "mine")
+  // held conflicts (0.6.3): this device's own, one per record (the first held save: entries() is newest first, so
+  // reversed it is oldest first; later saves on this device's own version wait behind it, and the newest is "mine")
   /** @param {string} key */
   const heldOf = key => {
     const all = queue.entries().reverse(), first = all.find(x => x.key === key && x.state === 'conflict');
@@ -396,7 +397,7 @@ export function createApp(options = /** @type {AppOptions} */ ({})) {
     const seen = new Set();
     /** @type {{ key: string, kind: string, id: string, at: number }[]} */
     const out = [];
-    for (const x of queue.entries().reverse()) {
+    for (const x of queue.entries().reverse()) {   // oldest first: each record's first held save (heldOf's key)
       const k = x.kind + ':' + x.record.id;
       if (x.state !== 'conflict' || (kind && x.kind !== kind) || seen.has(k)) continue;
       seen.add(k); out.push({ key: x.key, kind: x.kind, id: x.record.id, at: x.at });
