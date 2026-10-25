@@ -1,5 +1,5 @@
 // Version order for the build tools: x.y.z with an optional pre-release (1.0.0-rc.1 sorts before 1.0.0), as semver orders them.
-export const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
+export const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const part = s => /^\d+$/.test(s) ? Number(s) : s;
 /** @param {string} a @param {string} b */
 export function byVersion(a, b) {
