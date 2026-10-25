@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.1 (2026-10-25)
+
+Model-based multi-device tests, and the bug they found. Nothing else changes for 0.6.0 callers.
+
+- New `test/model.test.mjs`: for each seed, a random run of saves, deletes, going offline and back, wakes and reloads
+  on two or three devices (`createApp`, the real Firestore adapter on a fake SDK, clocks minutes apart), then checked
+  against a simple model: every device shows the server's records (except one held for the user), each device's last
+  value of its own field in a merge collection is on the server, and nothing is left waiting. 40 seeds in the unit
+  run (about 10 s); `MODEL_SEEDS=500` for more, `MODEL_SEED=<n>` replays one (a failure prints its seed and steps).
+  The fake SDK moved to `test/fake-sdk.mjs` (shared with `test/faults.test.mjs`).
+- Fixed (`createApp`): a record deleted on this device could keep showing in its list until the weekly full read. The
+  delete's bin entry arrived while the delete was still being sent, when the engine keeps a record with unsent saves,
+  and a delta listener never hears an older record go. Once this page's delete is done (and is still the record's
+  latest save), the record leaves the device copy (`hub.drop`). Apps wired by hand can do the same. Test:
+  `test/app.test.mjs` (failed before).
+- Not explained by this: the stale `done` field on a removed list line in one app's multi-device tests (0.6.0 notes).
+
 ## 0.6.0 (2026-10-25)
 
 `createApp`, the one call that wires the safe path, so an app's cloud module becomes config. Adds only: every 0.5.1

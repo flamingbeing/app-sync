@@ -4,7 +4,9 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
 
 ## How to test
 
-- Unit: `node --test test/*.test.mjs` (fake server in `test/fake-server.mjs`, memory stores in Node).
+- Unit: `node --test test/*.test.mjs` (fake server in `test/fake-server.mjs`, fake SDK in `test/fake-sdk.mjs`, memory
+  stores in Node). The model test (`test/model.test.mjs`) runs 40 seeds; `MODEL_SEEDS=500` before a release that touches
+  sync, `MODEL_SEED=<n>` to replay a printed failure.
 - Emulator: `npm ci && npm run test:emulator` (demo project `demo-app-sync`, open test-only rules in
   `test/emulator.rules`; Java 11+).
 
