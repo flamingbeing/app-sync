@@ -56,7 +56,8 @@
 //   devices holding that tombstone show it). path (1.2.0): the collection's path segments for this write instead of
 //   path(scope, coll) (a kind saved outside the scope: kinds[kind] = { coll, path }, core.js).
 //   unstampedColls (1.2.0): collections whose documents hold only the app's fields (rules that refuse id, the stamp
-//   and the server stamp): written without them, the conflict check on the content alone. Not a merge or held one.
+//   and the server stamp): written without them, the conflict check on the content alone, and always listened to
+//   whole (no stamp to read "changed since" by). Not a merge or held one.
 //   commitRetry (1.1.0): { codes = ['aborted', 'permission-denied'], delay = 500 }: a commit refused with one of
 //   codes is tried once more after delay ms (a rule that reads a document another write is still creating can refuse
 //   the first try); a second refusal stands. Default off: refused at once, as 1.0.
@@ -212,9 +213,11 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
       if (stopped) return;
       const col = colRef(db, F, scope, coll), fs = filters(F, scope, coll);
       const from = server && field === serverField ? F.Timestamp.fromMillis(Math.max(0, /** @type {number} */ (since))) : at(/** @type {number} */ (since));
-      const q = since === null ? (fs.length ? F.query(col, ...fs) : col) : F.query(col, ...fs, F.where(field, '>', from));
+      // (an unstampedColls collection is read whole: its documents have no stamp a "changed since" read could match)
+      const whole = since === null || unstamped.has(coll);
+      const q = whole ? (fs.length ? F.query(col, ...fs) : col) : F.query(col, ...fs, F.where(field, '>', from));
       stop = F.onSnapshot(q, { includeMetadataChanges: true }, /** @param {any} snap */ snap => {
-        const server = !snap.metadata.fromCache, full = since === null && first && server;
+        const server = !snap.metadata.fromCache, full = whole && first && server;
         // pending: this device's write is not on the server yet (if it is refused, the record leaves again: checked)
         /** @type {import('./types.js').Change[]} */
         const changes = snap.docChanges().map(/** @param {any} c */ c => ({ type: c.type, id: c.doc.id, pending: c.doc.metadata.hasPendingWrites, doc: c.type === 'removed' ? null : { ...read(c.doc.data()), id: c.doc.id } }));

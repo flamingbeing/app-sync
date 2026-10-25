@@ -230,8 +230,8 @@ app.sync.facts().inStepAt;   // when the status was last synced; now while it is
 
 A kind with `{ coll, path }` saves to `path(scope, coll, record)` instead of the scope's path, through the same queue.
 `unstampedColls` writes those collections with the app's fields only (no `id`, stamp or server stamp; the conflict
-check reads the content), for rules that refuse the extra fields. `listen` puts a collection on the app's own listener
-(the adapter's `listen` shape), still kept in the device copy and watched by the watchdog. `reopen` hands the sync
+check reads the content; read whole at every listen), for rules that refuse the extra fields. `listen` puts a collection on the app's own listener
+(the adapter's `listen` shape), still kept in the device copy and watched by the watchdog. `reopen` hands every
 module a new Firestore instance after a wipe (memory-only when the old cache could not be cleared), so a switch of
 account needs no reload.
 

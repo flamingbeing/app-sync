@@ -34,3 +34,29 @@ test('backend.unstampedColls (1.2.0): those collections are written without the 
   assert.throws(() => createFirestoreBackend({ sdk: shared.device().sdk, path, unstampedColls: ['applications'], merge: { '*': (c, r) => r } }), /unstampedColls/);
   assert.throws(() => createFirestoreBackend({ sdk: shared.device().sdk, path, unstampedColls: ['applications'], held: true }), /unstampedColls/);
 });
+
+test('backend.unstampedColls (1.2.0): those collections are listened to whole, never "changed since" (no stamp to compare)', async () => {
+  /** @type {any[]} */
+  const queries = [];
+  /** @type {any[]} */
+  const snaps = [];
+  const F = {
+    collection: (/** @type {any} */ _db, /** @type {string[]} */ ...p) => ({ path: p.join('/') }),
+    where: (/** @type {any[]} */ ...w) => ({ where: w }),
+    query: (/** @type {any} */ col, /** @type {any[]} */ ...fs) => ({ ...col, fs }),
+    onSnapshot: (/** @type {any} */ q, /** @type {any} */ _o, /** @type {(s: any) => void} */ cb) => {
+      queries.push(q);
+      const d = { id: 'p1', data: () => ({ name: 'Fake Applicant' }), metadata: { hasPendingWrites: false } };
+      cb({ metadata: { fromCache: false, hasPendingWrites: false }, size: 1, docs: [d], docChanges: () => [{ type: 'added', doc: d }] });
+      return () => {};
+    },
+  };
+  const b = createFirestoreBackend({ sdk: async () => /** @type {any} */ ({ db: {}, F }), path, unstampedColls: ['applications'] });
+  b.listen(S, 'applications', { since: 1000 }, s => snaps.push(s), e => { throw e; });
+  b.listen(S, 'items', { since: 1000 }, s => snaps.push(s), e => { throw e; });
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(queries[0].fs, undefined, 'no "changed since" filter on the unstamped collection');
+  assert.equal(snaps[0].full, true, 'its server snapshot is the whole collection');
+  assert.equal(queries[1].fs.length, 1, 'other collections still read what changed since');
+  assert.equal(snaps[1].full, undefined);
+});

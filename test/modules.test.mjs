@@ -189,7 +189,8 @@ test('sync module: facts().inStepAt (1.2.0) is the last time this device was in 
 test('sync module: reopen (1.2.0) swaps the SDK instance after a wipe cleared its cache, without a reload', async () => {
   const net = [], F = { async disableNetwork(db) { net.push(db.name); }, async enableNetwork() {} };
   const opened = [];
-  const reopen = async ({ memory }) => { opened.push(memory); return { name: 'reopened' }; };
+  let shared = null;
+  const reopen = async ({ memory, sdk }) => { opened.push(memory); shared = sdk; return { name: 'reopened' }; };
   const t = await modulesApp({ F, db: { name: 'first' }, more: { reopen } });
   const { app } = t;
   await app.auth.signIn();
@@ -201,6 +202,7 @@ test('sync module: reopen (1.2.0) swaps the SDK instance after a wipe cleared it
   assert.deepEqual(t.reloads, [], 'no reload');
   assert.equal(await app.sync.reconnect(), true);
   assert.deepEqual(net, ['reopened'], 'the sync module uses the new instance');
+  assert.equal(shared.db.name, 'reopened', 'and so does every module on the shared SDK (the auth module\'s claims watch)');
   await app.sync.save('item', 'sp-u2', { id: 'r1', text: 'Fake after' });
   assert.ok(await app.sync.flush(2000), 'and sends on it');
   await app.stop();

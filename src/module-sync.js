@@ -13,8 +13,9 @@
 //   reopen (1.2.0): async ({ memory, sdk }) -> a new Firestore instance in place of the one a wipe ended, so the page
 //   need not reload: memory false asks for a persistent cache (the old one is cleared), true for a memory-only one
 //   (asked when the old cache could not be cleared, another tab still holding it, or a persistent one would not
-//   open), so the last account's cache is never read again. The sync module then uses it (config.sdk's other parts
-//   stay); one that throws both ways: reload as without reopen.
+//   open), so the last account's cache is never read again. It becomes the db of the SDK every module shares
+//   (ctx.sdk(); the auth module's claims watch too; its other parts stay); one that throws both ways: reload as
+//   without reopen.
 // The account's data on this device follows the auth module's events:
 //   signin: the scope opens (scope(user)), unsent saves send, the watches listen again.
 //   signout: nothing is sent or listened to; the device copy, the outbox and the watches stay (same account: they
@@ -57,14 +58,10 @@ export function sync(options = {}) {
     async start(ctx, { auth }) {
       const store = ctx.storage();
       const config = ctx.config;
-      // (1.2.0) the instance reopen made after a wipe ended config.sdk's; null: config.sdk's own
-      /** @type {any} */
-      let reopenedDb = null;
-      const load = async () => { const s = await ctx.sdk(); return reopenedDb ? { ...s, db: reopenedDb } : s; };
       const c = core = createSyncCore(/** @type {any} */ ({
-        ...options, name: ctx.name, sdk: load, win,
+        ...options, name: ctx.name, sdk: ctx.sdk, win,
         storage: 'storage' in config ? config.storage : (() => { try { return globalThis.localStorage || null; } catch { return null; } })(),
-      }), { load, user: () => auth.user() });
+      }), { load: ctx.sdk, user: () => auth.user() });
       const api = c.api;
 
       // the status, with the unsent saves: the open scope's (and writes outside the queue, and saves being stored),
@@ -109,12 +106,12 @@ export function sync(options = {}) {
         c.reset(); store.remove('scope'); storedUnsent = 0; tell();
         return { ended: !!clear, cleared: !!clear && !r.failed.includes('clearBackendCache') };
       };
-      // (1.2.0) a new instance from reopen: persistent once the old cache is cleared, else (or if that won't open)
-      // memory only -> true; false: none
+      // (1.2.0) a new instance from reopen, put on the SDK every module shares (ctx.sdk()'s db): persistent once the
+      // old cache is cleared, else (or if that won't open) memory only -> true; false: none
       /** @param {boolean} cleared */
       const reopen = async cleared => {
         for (const memory of cleared ? [false, true] : [true]) {
-          try { reopenedDb = await options.reopen({ memory, sdk: await ctx.sdk() }); return true; }
+          try { const sdk = await ctx.sdk(); sdk.db = await options.reopen({ memory, sdk }); return true; }
           catch (e) { console.warn('sync: reopen', /** @type {any} */ (e)?.message); }
         }
         return false;

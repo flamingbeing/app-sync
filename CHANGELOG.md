@@ -23,8 +23,8 @@ keeps no path: a kind's path is asked at each send). Each piece lands with a fai
   scope's path (a record kept outside the scope), through the same queue, outbox, conflict check and report; the
   adapter's commit takes it as `extra.path`. A bad kind fails at `sync()`, not at the first save.
 - **`backend.unstampedColls: [coll]`** (`firestore.js`): collections whose documents hold only the app's fields (rules
-  that refuse `id`, the stamp and the server stamp): written without them, the conflict check on the content alone.
-  Naming a merge or held collection throws.
+  that refuse `id`, the stamp and the server stamp): written without them, the conflict check on the content alone,
+  and always listened to whole (no stamp to read "changed since" by). Naming a merge or held collection throws.
 - **`watch(scope, coll, cb, { listen })`**: the app's own listener for that collection (the adapter's `listen` shape)
   instead of the adapter's; its snapshots go into the device copy and feed the status, `facts()` and the watchdog as
   the adapter's do. One way at a time per collection: another `listen` for it throws while it runs; a plain watch of
@@ -33,8 +33,9 @@ keeps no path: a kind's path is asked at each send). Each piece lands with a fai
   0 before.
 - **`sync({ reopen: async ({ memory, sdk }) => db })`**: after a wipe ends the SDK instance (a switch of account,
   `forget()`), a new Firestore instance in its place, so the page need not reload: a persistent cache once the old one
-  was cleared, else (or when that won't open) a memory-only one, so the last account's cache is never read again. Both
-  failing: the page reloads, as without `reopen`.
+  was cleared, else (or when that won't open) a memory-only one, so the last account's cache is never read again. It
+  becomes the `db` of the SDK every module shares (`ctx.sdk()`, the auth module's claims watch too). Both failing: the
+  page reloads, as without `reopen`.
 - `entries.json` (sync) gains `src/kinds.js`; `files.json` / `FILES` unchanged (no new `index.js` import).
 
 Modular: yes (no new entry, global or ctx field; the modularity check, types and both Vite builds pass). Shaken: none
