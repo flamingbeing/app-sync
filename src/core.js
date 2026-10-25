@@ -8,7 +8,8 @@
 //   collections synced. path(scope, coll) -> the collection's path segments. config.sdk: async () -> { A, F, auth, db,
 //   emulator }: the app's Firebase SDK, loaded once (ctx.sdk()); emulator true keeps the SDK's cache at a wipe (the
 //   emulator's own) and the page need not reload.
-//   kinds: { [kind]: coll } for saves (default: each coll is its own kind).
+//   kinds: { [kind]: coll } for saves (default: each coll is its own kind); 1.2.0: { [kind]: { coll, path } } saves
+//   that kind to path(scope, coll, record) instead of the scope's (kinds.js; the same queue, outbox and report).
 //   outbox: the queue's durable store instead of createOutbox's (same shape: name, realm, put, list, get, remove, forget).
 //   adapter: { listen, fetchOne, commit, clearCache } instead of the Firestore adapter (firestore.js); backend: its
 //   options (time, mark, stampMode, serverField, merge, where, writeId, onCommit, ...). commit(scope, kind, record,
@@ -46,10 +47,15 @@
 //   the watchdog restarts it like the lists; sign-out pauses it, as it does the lists. Needs the adapter's listenDoc (firestore.js has it).
 //   reconnect({ why }) (0.8.3) -> true once the connection was restarted (the SDK's network off and on), then sends
 //   what waits; false offline, under an unsent outside write (a restart may send it twice), or without the switch.
-//   watch(scope, coll, cb, { query, limit }): cb(list, meta), meta (0.8.2) with { changed, removed }: the ids whose copy
+//   watch(scope, coll, cb, { query, limit, listen }): cb(list, meta), meta (0.8.2) with { changed, removed }: the ids whose copy
 //   changed since the last call (all of them the first time) and the ids gone from the list. query, limit (1.1.0,
 //   view.js): cb gets only the records whose fields equal query's, the first limit of them; one leaving that view is
-//   in removed. The device copy and what is listened to stay whole.
+//   in removed. The device copy and what is listened to stay whole. listen (1.2.0): the app's own listener for that
+//   collection instead of the adapter's (adapter.listen's shape: (scope, coll, plan, onSnap, onError) -> stop), its
+//   snapshots kept in the device copy and feeding the status, facts() and the watchdog as the adapter's do; a
+//   collection is listened to one way at a time (another listen for it throws while it runs).
+//   facts() -> { persisted, confirmed, heardAt, inStepAt }: inStepAt (1.2.0): the last time the status was synced (the
+//   server heard, nothing waiting), now while it is; 0 before.
 //   copyOf(kind, id) (0.8.2) -> the copy of that record a running watch of the open scope last handed (null: none).
 //   lastSeen(kind, id) (0.8.2) -> { stamp, signature } of the server's copy as last heard (the device copy after a
 //   reload; without this device's unsent saves), to compare with queue.lastSent(kind, id) (the copy this device last
@@ -77,6 +83,7 @@ import { persistGuard } from './persist.js';
 import { syncStatus, attentionCount } from './status.js';
 import { describeConflict, mergeOf, resolvedRecord, recordSignature } from './conflict.js';
 import { viewOf } from './view.js';
+import { kindMap } from './kinds.js';
 import { createFirestoreBackend } from './firestore.js';
 
 /**
@@ -94,7 +101,7 @@ import { createFirestoreBackend } from './firestore.js';
  * @property {string[]} colls the collections synced
  * @property {(scope: string, coll: string) => (string | number)[]} path a collection's path segments
  * @property {() => Promise<AppSdk> | AppSdk} sdk the app's Firebase SDK, loaded once
- * @property {Record<string, string>} [kinds] save kinds -> collection (default: each coll is its own kind)
+ * @property {Record<string, import('./kinds.js').KindOption>} [kinds] save kinds -> collection, or { coll, path } (default: each coll is its own kind)
  * @property {Outbox} [outbox] the queue's durable store instead of createOutbox's
  * @property {any} [adapter] { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
  * @property {(owner: string, kind: string, record: Doc, base: Doc | null, extra?: CommitExtra) => Promise<Doc>} [commit] the app's own write instead of adapter.commit
@@ -121,15 +128,12 @@ import { createFirestoreBackend } from './firestore.js';
 export function createSyncCore(options, { load, user }) {
   const { name, colls, path } = options;
   const {
-    kinds = Object.fromEntries(colls.map(c => [c, c])), backend: backendOptions = {}, commit = null,
+    backend: backendOptions = {}, commit = null,
     onRefused = null, report = null, nav = globalThis.navigator, now = Date.now, watchEvery = 3000,
     win = typeof window !== 'undefined' ? window : null, wake = false,
   } = options;
   const storage = 'storage' in options ? options.storage : (() => { try { return globalThis.localStorage || null; } catch { return null; } })();
-  /** @param {string} kind */
-  const collOf = kind => kinds[kind] || kind;
-  /** @param {string} coll */
-  const kindOf = coll => Object.keys(kinds).find(k => kinds[k] === coll) || coll;
+  const kinds = kindMap(options.kinds, colls), { collOf, kindOf } = kinds;
   const online = () => nav?.onLine !== false;
   const stampField = backendOptions.field || 'updatedAt';
   const engineFields = [backendOptions.mark || '_saves', backendOptions.serverField || 'serverAt', ...(backendOptions.edits ? [backendOptions.edits] : [])];
@@ -158,12 +162,14 @@ export function createSyncCore(options, { load, user }) {
       // which other devices hold, or a clock behind the deleter's would leave it hidden there (0.6.3)
       const tomb = record && !record._deleted ? hub.tomb(owner, collOf(kind), record.id) : 0;
       if (tomb > 0) extra = { ...extra, after: tomb };
+      const at = kinds.pathOf(kind, owner, record);
+      if (at) extra = { ...extra, path: at };
       return commit ? commit(owner, kind, record, base, extra) : adapter.commit(owner, collOf(kind), record, base, extra);
     },
   });
   const hub = createSyncHub({
     openStore: stores.openStore, listen: adapter.listen, fetchOne: adapter.fetchOne, now,
-    binKinds: kinds, unsent: (_scope, coll, id) => queue.unsent(kindOf(coll), id) || unsentOutside(kindOf(coll), id) > 0,
+    binKinds: kinds.colls, unsent: (_scope, coll, id) => queue.unsent(kindOf(coll), id) || unsentOutside(kindOf(coll), id) > 0,
     onError: e => { try { report?.error?.(e?.code); } catch { /* never stops sync */ } console.warn('sync', e?.code || e?.message); },
     ...(backendOptions.stampMode ? { stampMode: backendOptions.stampMode } : {}), ...options.hub,
   });
@@ -207,19 +213,24 @@ export function createSyncCore(options, { load, user }) {
     });
   }
 
-  // the status: confirmed only once the server has answered since the page opened
-  let heard = false, heardAt = 0, persisted = true, relistens = 0;
+  // the status: confirmed only once the server has answered since the page opened; inStepAt (1.2.0): when it last
+  // said synced
+  let heard = false, heardAt = 0, inStepAt = 0, persisted = true, relistens = 0;
   /** @type {Set<(st: SyncStatus) => void>} */
   const subs = new Set();
   let lastTold = '';
   const statusNow = () => {
     const entries = queue.entries();
-    return syncStatus({ online: online(), pending: queue.pending() + unsentOutside(), attention: attentionCount(entries), persisted, stale: watchdog.stale(), confirmed: heard, atRiskOnlyOffline: true });
+    return noteInStep(syncStatus({ online: online(), pending: queue.pending() + unsentOutside(), attention: attentionCount(entries), persisted, stale: watchdog.stale(), confirmed: heard, atRiskOnlyOffline: true }));
   };
+  /** @param {SyncStatus} st */
+  const noteInStep = st => { if (st.state === 'synced') inStepAt = now(); return st; };
+  const facts = () => { statusNow(); return { persisted, confirmed: heard, heardAt, inStepAt }; };
   /** @param {boolean} [force] */
   function tell(force = false) {
+    const st = statusNow();
     if (!subs.size) return;
-    const st = statusNow(), key = st.state + ':' + st.count;
+    const key = st.state + ':' + st.count;
     if (key === lastTold && !force) return;
     lastTold = key;
     for (const fn of [...subs]) fn(st);
@@ -232,12 +243,13 @@ export function createSyncCore(options, { load, user }) {
 
   // watches: each one's list (device copy, then the server) with this device's unsent saves laid over it, again when
   // either changes (watchSaved); only what the listener hears feeds the status and the watchdog
-  /** @typedef {{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, view: ((list: Doc[]) => Doc[]) | null, off: ReturnType<typeof watchSaved> | null }} Watch */
+  /** @typedef {{ scope: string, coll: string, cb: (list: Doc[], meta: any) => void, view: ((list: Doc[]) => Doc[]) | null, listen: import('./types.js').Listen | null, off: ReturnType<typeof watchSaved> | null }} Watch */
   /** @type {Set<Watch>} */
   const watches = new Set();
-  const heardHub = { watch: (/** @type {string} */ s, /** @type {string} */ coll, /** @type {(list: Doc[], meta: any) => void} */ fn) => hub.watch(s, coll, (list, m) => { if (m) onSnap(m); fn(list, m); }) };
+  /** @param {import('./types.js').Listen | null} listen */
+  const heardHub = listen => ({ watch: (/** @type {string} */ s, /** @type {string} */ coll, /** @type {(list: Doc[], meta: any) => void} */ fn) => hub.watch(s, coll, (list, m) => { if (m) onSnap(m); fn(list, m); }, listen) });
   /** @param {Watch} w */
-  const start = w => { w.off = watchSaved({ hub: heardHub, queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll), view: w.view }, (list, m) => w.cb(/** @type {Doc[]} */ (list.map(strip)), m || {})); };
+  const start = w => { w.off = watchSaved({ hub: heardHub(w.listen), queue, scope: w.scope, coll: w.coll, kind: kindOf(w.coll), view: w.view }, (list, m) => w.cb(/** @type {Doc[]} */ (list.map(strip)), m || {})); };
   // (0.8.3) one document: handed when its copy changes, null ("gone") once when the server says it is not there or the
   // listener fails (a failed one is finished); a device-copy answer that it is not there is never "gone"
   /** @typedef {{ segments: string[], cb: (d: Doc | null, meta: any) => void, onError: ((e: any) => void) | null, last: string, failed: boolean, off: (() => void) | null }} DocWatch */
@@ -281,12 +293,15 @@ export function createSyncCore(options, { load, user }) {
     for (const w of watches) { w.off?.(); w.off = null; }
     for (const w of docWatches) { const off = w.off; w.off = null; off?.(); }
   };
-  const startWatches = () => { for (const w of watches) if (!w.off) start(w); for (const w of docWatches) if (!w.off && !w.failed) startDoc(w); };
+  // (the ones on the app's own listener first: a plain watch of that collection then joins it, never the other way)
+  const startWatches = () => { for (const w of [...watches].sort((a, b) => Number(!a.listen) - Number(!b.listen))) if (!w.off) start(w); for (const w of docWatches) if (!w.off && !w.failed) startDoc(w); };
   /** @param {string} s @param {string} coll @param {(list: Doc[], meta: any) => void} cb @param {import('./types.js').WatchOptions} [options] @returns {() => void} */
   function watch(s, coll, cb, options) {
+    const listen = options?.listen ?? null;
+    if (listen !== null && typeof listen !== 'function') throw new Error('watch: listen is a function');
     /** @type {Watch} */
-    const w = { scope: s, coll, cb, view: viewOf(options), off: null };
-    watches.add(w); start(w);
+    const w = { scope: s, coll, cb, view: viewOf(options), listen, off: null };
+    start(w); watches.add(w);
     if (watchEvery > 0 && !timer) { timer = setInterval(() => watchdog.check(), watchEvery); /** @type {any} */ (timer).unref?.(); }
     return () => { w.off?.(); watches.delete(w); };
   }
@@ -467,13 +482,13 @@ export function createSyncCore(options, { load, user }) {
     if (scopeOf) { try { await open(scopeOf(u)); } catch (e) { console.warn('open', /** @type {any} */ (e)?.message); } }
   }
   // what a wipe leaves: no watches, no scope, nothing heard or tracked
-  const reset = () => { stopWatches(); watches.clear(); docWatches.clear(); scope = ''; heard = false; heardAt = 0; told.clear(); deleting.clear(); tracked.clear(); };
+  const reset = () => { stopWatches(); watches.clear(); docWatches.clear(); scope = ''; heard = false; heardAt = 0; inStepAt = 0; told.clear(); deleting.clear(); tracked.clear(); };
   // signed out, data kept (the sync module): nothing is sent or listened to until the next sign-in
   const close = () => { stopWatches(); scope = ''; heard = false; tell(); };
   const parts = { hub, queue, stores, adapter, watchdog, registry, outbox };
   return {
     api: {
-      open, watch, save, flush, status$, nudge, relistens: () => relistens, facts: () => ({ persisted, confirmed: heard, heardAt }),
+      open, watch, save, flush, status$, nudge, relistens: () => relistens, facts,
       conflicts, describe, resolve, hub, queue, parts, track, unsentOutside, outsideSettled, heard: heardOf, idle, copyOf,
       lastSeen, watchDoc, reconnect,
     },

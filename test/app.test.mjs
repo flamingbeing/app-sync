@@ -393,7 +393,7 @@ test('facts: persisted, confirmed and when the server was last heard, reset at s
   let now = 1000;
   const { app, srv } = await makeApp({ nav, options: { now: () => now } });
   await app.onUser(() => {});
-  assert.deepEqual(app.facts(), { persisted: true, confirmed: false, heardAt: 0 });
+  assert.deepEqual(app.facts(), { persisted: true, confirmed: false, heardAt: 0, inStepAt: 0 });
   await app.signIn(); await app.open('s1');
   app.watch('s1', 'items', () => {});
   assert.ok(await until(() => app.facts().confirmed));

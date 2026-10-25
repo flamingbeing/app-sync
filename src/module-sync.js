@@ -5,11 +5,17 @@
 // what its phones hold, and two apps on one origin still wait for each other's saves.
 //
 // sync({ colls, path, kinds, scope, backend, adapter, commit, outbox, hub, stores, queue, onRefused, forget, report,
-//        device, outside, wake, watchEvery, nav, now, win, reload })
+//        device, outside, wake, watchEvery, nav, now, win, reload, reopen })
 //   Documented in core.js (the sign-in ones are the auth module's; name, sdk, storage are config's).
 //   scope(user) -> the scope opened at each sign-in; without it the app calls open(scope).
 //   reload: () -> void, called once the SDK's offline cache was cleared by a wipe (the SDK instance can't be used
 //   again; default: location.reload()): after a switch, at the new account's sign-in; after forget(), straight away.
+//   reopen (1.2.0): async ({ memory, sdk }) -> a new Firestore instance in place of the one a wipe ended, so the page
+//   need not reload: memory false asks for a persistent cache (the old one is cleared), true for a memory-only one
+//   (asked when the old cache could not be cleared, another tab still holding it, or a persistent one would not
+//   open), so the last account's cache is never read again. It becomes the db of the SDK every module shares
+//   (ctx.sdk(); the auth module's claims watch too; its other parts stay); one that throws both ways: reload as
+//   without reopen.
 // The account's data on this device follows the auth module's events:
 //   signin: the scope opens (scope(user)), unsent saves send, the watches listen again.
 //   signout: nothing is sent or listened to; the device copy, the outbox and the watches stay (same account: they
@@ -27,6 +33,7 @@
 //    heard, idle, copyOf, lastSeen, unsentOutside, outsideSettled, relistens, queue, hub, parts: as core.js documents them.
 import { createSyncCore } from './core.js';
 import { forgetDevice } from './forget.js';
+import { kindMap } from './kinds.js';
 
 const FINISHED = ['synced', 'archived'];
 /** @param {{ state: string, refused?: boolean }} x */
@@ -36,6 +43,7 @@ const unsentJob = x => !FINISHED.includes(x.state) || !!x.refused;
 export function sync(options = {}) {
   if (!Array.isArray(options.colls) || !options.colls.length) throw new Error('sync needs colls');
   if (typeof options.path !== 'function') throw new Error('sync needs path');
+  kindMap(options.kinds, options.colls);   // (a bad kind fails here, not at the first save)
   const win = 'win' in options ? options.win : typeof window !== 'undefined' ? window : null;
   const reload = options.reload || (() => { try { win?.location?.reload(); } catch { /* not a page */ } });
   const { scope: scopeOf = null, forget = {} } = options;
@@ -80,7 +88,8 @@ export function sync(options = {}) {
       // the device copy and the SDK's cache, then the app's own lists
       // unless forced: refused (throws) while anything of that account is unsent, here, in another tab (the shared
       // outbox) or in another app on the origin: the old one-object createApp's sign-out check (queue.flush())
-      /** @param {boolean} force */
+      // -> { ended, cleared }: whether the wipe ended the SDK instance (cleared its cache, or tried to), and cleared it
+      /** @param {boolean} force @returns {Promise<{ ended: boolean, cleared: boolean }>} */
       const wipe = async force => {
         const last = store.get('scope') || '';
         c.close();
@@ -95,7 +104,25 @@ export function sync(options = {}) {
         if (r.failed.length) ctx.report({ event: 'wipe', failed: r.failed });
         if (r.failed.includes('wipeStores') || r.failed.includes('forget')) throw new Error('sync: the wipe failed: ' + r.failed.join(', '));
         c.reset(); store.remove('scope'); storedUnsent = 0; tell();
-        return !!clear && !r.failed.includes('clearBackendCache');
+        return { ended: !!clear, cleared: !!clear && !r.failed.includes('clearBackendCache') };
+      };
+      // (1.2.0) a new instance from reopen, put on the SDK every module shares (ctx.sdk()'s db): persistent once the
+      // old cache is cleared, else (or if that won't open) memory only -> true; false: none
+      /** @param {boolean} cleared */
+      const reopen = async cleared => {
+        for (const memory of cleared ? [false, true] : [true]) {
+          try { const sdk = await ctx.sdk(); sdk.db = await options.reopen({ memory, sdk }); return true; }
+          catch (e) { console.warn('sync: reopen', /** @type {any} */ (e)?.message); }
+        }
+        return false;
+      };
+      // after a wipe -> true: the page must reload. Without reopen only once the cache was cleared (as 1.0: one not
+      // cleared stays until the other tabs close); with it, only when it made no instance
+      /** @param {{ ended: boolean, cleared: boolean }} w */
+      const reloadOwed = async ({ ended, cleared }) => {
+        if (!ended) return false;
+        if (!options.reopen) return cleared;
+        return !(await reopen(cleared));
       };
       offs.push(
         ctx.on('signin', async ({ user }) => {
@@ -106,8 +133,8 @@ export function sync(options = {}) {
           c.startWatches(); tell();
         }),
         ctx.on('signout', async () => { const last = c.scope() || store.get('scope') || ''; c.close(); await countStored(last); }),
-        ctx.on('switch', async () => { owed = await wipe(false); }),
-        ctx.on('forget', async ({ force }) => { if (await wipe(!!force)) setTimeout(reload, 0); }),
+        ctx.on('switch', async () => { owed = await reloadOwed(await wipe(false)); }),
+        ctx.on('forget', async ({ force }) => { if (await reloadOwed(await wipe(!!force))) setTimeout(reload, 0); }),
       );
       // (a save counts as unsent from the moment it is made, before it is stored)
       /** @type {typeof api.save} */

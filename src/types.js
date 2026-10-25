@@ -94,7 +94,7 @@
 
 /**
  * The last argument of a backend commit: the save's own key and ops, and a stamp floor for a re-created record.
- * @typedef {{ key?: string, ops?: any[], after?: number }} CommitExtra
+ * @typedef {{ key?: string, ops?: any[], after?: number, path?: (string | number)[] }} CommitExtra
  */
 
 /**
@@ -177,7 +177,7 @@
 
 /**
  * Built in 1.1.0 (SHAPES.md 4+ and 5).
- * @typedef {{ query?: Record<string, any>, limit?: number }} WatchOptions  watch(scope, coll, cb, options) (view.js)
+ * @typedef {{ query?: Record<string, any>, limit?: number, listen?: Listen }} WatchOptions  watch(scope, coll, cb, options) (view.js; listen 1.2.0, core.js)
  * @typedef {(kind: string, scope: string, records: Doc[]) => Promise<PromiseSettledResult<Doc>[]>} SaveMany  sync.saveMany
  */
 

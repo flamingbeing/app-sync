@@ -13,7 +13,7 @@
  * @property {string[]} colls the collections synced
  * @property {(scope: string, coll: string) => (string | number)[]} path a collection's path segments
  * @property {() => Promise<AppSdk> | AppSdk} sdk the app's Firebase SDK, loaded once
- * @property {Record<string, string>} [kinds] save kinds -> collection (default: each coll is its own kind)
+ * @property {Record<string, import('./kinds.js').KindOption>} [kinds] save kinds -> collection, or { coll, path } (default: each coll is its own kind)
  * @property {Outbox} [outbox] the queue's durable store instead of createOutbox's
  * @property {any} [adapter] { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
  * @property {(owner: string, kind: string, record: Doc, base: Doc | null, extra?: CommitExtra) => Promise<Doc>} [commit] the app's own write instead of adapter.commit
@@ -54,6 +54,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
             persisted: boolean;
             confirmed: boolean;
             heardAt: number;
+            inStepAt: number;
         };
         conflicts: (kind?: string) => {
             key: string;
@@ -70,7 +71,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         }) | null;
         resolve: (key: string, choice: ConflictChoice) => Promise<import("./types.js").Doc>;
         hub: {
-            watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void): () => void;
+            watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void, own?: Listen | null): () => void;
             drop(scope: string, coll: string, ids: string[]): Promise<void>;
             settle(scope: string): Promise<void>;
             tomb(scope: string, coll: string, id: any): any;
@@ -115,7 +116,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         };
         parts: {
             hub: {
-                watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void): () => void;
+                watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void, own?: Listen | null): () => void;
                 drop(scope: string, coll: string, ids: string[]): Promise<void>;
                 settle(scope: string): Promise<void>;
                 tomb(scope: string, coll: string, id: any): any;
@@ -196,7 +197,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         }) => Promise<boolean>;
     };
     hub: {
-        watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void): () => void;
+        watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void, own?: Listen | null): () => void;
         drop(scope: string, coll: string, ids: string[]): Promise<void>;
         settle(scope: string): Promise<void>;
         tomb(scope: string, coll: string, id: any): any;
@@ -310,9 +311,9 @@ export type SyncCoreOptions = {
      */
     sdk: () => Promise<AppSdk> | AppSdk;
     /**
-     * save kinds -> collection (default: each coll is its own kind)
+     * save kinds -> collection, or { coll, path } (default: each coll is its own kind)
      */
-    kinds?: Record<string, string> | undefined;
+    kinds?: Record<string, import("./kinds.js").KindOption> | undefined;
     /**
      * the queue's durable store instead of createOutbox's
      */

@@ -151,6 +151,7 @@ export type CommitExtra = {
     key?: string;
     ops?: any[];
     after?: number;
+    path?: (string | number)[];
 };
 /**
  * The write queue's backend: throws a CodedError ('write-conflict' with `remote`, a transient code, or any other).
@@ -276,11 +277,12 @@ export type AppSdk = {
     emulator?: boolean;
 };
 /**
- * watch(scope, coll, cb, options) (view.js)
+ * watch(scope, coll, cb, options) (view.js; listen 1.2.0, core.js)
  */
 export type WatchOptions = {
     query?: Record<string, any>;
     limit?: number;
+    listen?: Listen;
 };
 /**
  * sync.saveMany
