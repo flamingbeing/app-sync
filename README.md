@@ -235,6 +235,28 @@ check reads the content; read whole at every listen), for rules that refuse the 
 module a new Firestore instance after a wipe (memory-only when the old cache could not be cleared), so a switch of
 account needs no reload.
 
+### Sign-in methods and public read (1.3.0)
+
+```js
+import { auth, emailLink, password, passcode, anonymous } from '@core/auth';   // name only those the page uses
+auth({ methods: ['google', password(), anonymous()] });   // or SHAPES.md names: 'emailLink', 'passcode', ... (loaded when asked)
+await app.auth.signIn({ method: 'password', email, password: secret });   // -> { ok, reason }
+await app.auth.signIn({ method: 'emailLink', email });   // reason 'sent'; the page the link opens: the same call signs in
+await app.auth.signIn({ method: 'passcode', code });   // passcode({ url }): POST { code, email? } -> { token }; else 'refused'
+sync({ ..., colls: ['items', 'news'], public: ['news'] });
+app.sync.watch('public:all', 'news', list => draw(list));   // no sign-in needed; read only
+```
+
+Each method is its own export, so a page bundles only those it names; a string name loads its file the first time
+`signIn` asks for it (a passcode needs its `url`, so it is named with `passcode({ url })`). Signed in anonymously,
+another method links its account to the anonymous one: the uid stays, so do the device's data and unsent saves (no
+switch), and the owner gets the account's email. An account that exists already signs in instead (a switch, guarded
+as any); a passcode's custom token always signs in. The engine keeps no email for an email link: the app keeps it.
+`public` collections are read in scopes named `public:<name>` with or without an account: those watches run signed
+out, are listened again at sign-in (under the account's rules), and carry on through a switch or `forget()` (their
+copy is wiped with the rest: read only, it loses nothing). `open`, `save` and `saveMany` on a `public:` scope throw
+"read only"; only the `public` collections can be watched there.
+
 ### Held conflicts by field (0.6.3, opt-in)
 
 ```js

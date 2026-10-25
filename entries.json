@@ -6,6 +6,10 @@
   "auth": [
     "auth.js",
     "src/auth.js",
+    "src/signin/anonymous.js",
+    "src/signin/email-link.js",
+    "src/signin/passcode.js",
+    "src/signin/password.js",
     "src/user.js"
   ],
   "sync": [

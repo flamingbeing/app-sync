@@ -22,6 +22,7 @@
  * @property {Record<string, any>} [stores] more options for createStores
  * @property {Record<string, any>} [queue] more options for createWriteQueue
  * @property {(user: AppUser) => string} [scope] the scope opened at sign-in
+ * @property {string[]} [public] (1.3.0) colls read with no account, in `public:*` scopes
  * @property {(err: { code: string, message?: string }, entry: Job) => any} [onRefused] 'archive' sets a refused save aside
  * @property {{ extra?: (() => Promise<any>) | null, keep?: string[] | (() => string[] | Promise<string[]>) }} [forget]
  * @property {import('./types.js').Report | null} [report] the nothing-lost report (createReport), opt-in
@@ -76,6 +77,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
             settle(scope: string): Promise<void>;
             tomb(scope: string, coll: string, id: any): any;
             stopAll(): Promise<void>;
+            stopScope(scope: string): Promise<void>;
             replan(): number;
             flush: () => Promise<any[]>;
         };
@@ -83,7 +85,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
             activate: (email: string) => Promise<void>;
             save: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null, { ops, meta }?: {
                 ops?: any;
-                meta?: any;
+                meta? /** @param {string} [kind] @param {string} [id] @returns {number} */: any;
             }) => Promise<import("./writes.js").Doc>;
             restore: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null) => Promise<import("./types.js").Doc>;
             overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
@@ -121,6 +123,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
                 settle(scope: string): Promise<void>;
                 tomb(scope: string, coll: string, id: any): any;
                 stopAll(): Promise<void>;
+                stopScope(scope: string): Promise<void>;
                 replan(): number;
                 flush: () => Promise<any[]>;
             };
@@ -128,7 +131,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
                 activate: (email: string) => Promise<void>;
                 save: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null, { ops, meta }?: {
                     ops?: any;
-                    meta?: any;
+                    meta? /** @param {string} [kind] @param {string} [id] @returns {number} */: any;
                 }) => Promise<import("./writes.js").Doc>;
                 restore: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null) => Promise<import("./types.js").Doc>;
                 overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
@@ -202,6 +205,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         settle(scope: string): Promise<void>;
         tomb(scope: string, coll: string, id: any): any;
         stopAll(): Promise<void>;
+        stopScope(scope: string): Promise<void>;
         replan(): number;
         flush: () => Promise<any[]>;
     };
@@ -209,7 +213,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         activate: (email: string) => Promise<void>;
         save: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null, { ops, meta }?: {
             ops?: any;
-            meta?: any;
+            meta? /** @param {string} [kind] @param {string} [id] @returns {number} */: any;
         }) => Promise<import("./writes.js").Doc>;
         restore: (kind: string, email: string, record: import("./writes.js").Doc, base?: import("./writes.js").Doc | null) => Promise<import("./types.js").Doc>;
         overlay: (kind: string, email: string, list: import("./writes.js").Doc[]) => import("./writes.js").Doc[];
@@ -270,8 +274,23 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         failed: boolean;
         off: (() => void) | null;
     }) => void;
-    startWatches: () => void;
-    stopWatches: () => void;
+    startWatches: (only?: Set<{
+        scope: string;
+        coll: string;
+        cb: (list: Doc[], meta: any) => void;
+        view: ((list: Doc[]) => Doc[]) | null;
+        listen: import("./types.js").Listen | null;
+        off: ReturnType<typeof watchSaved> | null;
+    } | {
+        segments: string[];
+        cb: (d: Doc | null, meta: any) => void;
+        onError: ((e: any) => void) | null;
+        last: string;
+        failed: boolean;
+        off: (() => void) | null;
+    }> | null) => void;
+    stopWatches: (keepPublic?: boolean) => void;
+    stopPublic: () => Promise<void>;
     scope: () => string;
     watching: () => number;
 };
@@ -347,6 +366,10 @@ export type SyncCoreOptions = {
      */
     scope?: ((user: AppUser) => string) | undefined;
     /**
+     * (1.3.0) colls read with no account, in `public:*` scopes
+     */
+    public?: string[] | undefined;
+    /**
      * 'archive' sets a refused save aside
      */
     onRefused?: ((err: {
@@ -395,3 +418,4 @@ export type SyncCoreOptions = {
      */
     quiet?: (() => boolean) | undefined;
 };
+import { watchSaved } from './writes.js';

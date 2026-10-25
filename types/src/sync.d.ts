@@ -151,6 +151,7 @@ export function createTombFeed({ scope, store, listen, apply, kinds, coll, now, 
  * @property {string | null} [bin]
  * @property {Record<string, string>} [binKinds]
  * @property {Record<string, Record<string, string>>} [feeds]
+ * @property {(scope: string) => boolean} [feedsIn]
  * @property {'skip' | 'full'} [unstamped]
  * @property {Record<string, { field: string, after: number }>} [expire]
  * @property {'client' | 'server'} [stampMode]
@@ -159,7 +160,7 @@ export function createTombFeed({ scope, store, listen, apply, kinds, coll, now, 
  * @property {(scope: string, coll: string, id: string, doc: Doc) => void} [onLeave]
  */
 /** @param {SyncHubOptions} options */
-export function createSyncHub({ openStore, listen, fetchOne, now, onError, grace, bin, binKinds, feeds: extraFeeds, unstamped, expire, stampMode, serverField, unsent, onLeave }: SyncHubOptions): {
+export function createSyncHub({ openStore, listen, fetchOne, now, onError, grace, bin, binKinds, feeds: extraFeeds, feedsIn, unstamped, expire, stampMode, serverField, unsent, onLeave }: SyncHubOptions): {
     /** @param {string} scope @param {string} coll @param {(list: Doc[], meta: SnapMeta) => void} cb @param {Listen | null} [own] @returns {() => void} */
     watch(scope: string, coll: string, cb: (list: Doc[], meta: SnapMeta) => void, own?: Listen | null): () => void;
     /** @param {string} scope @param {string} coll @param {string[]} ids @returns {Promise<void>} */
@@ -169,6 +170,8 @@ export function createSyncHub({ openStore, listen, fetchOne, now, onError, grace
     /** @param {string} scope @param {string} coll @param {any} id */
     tomb(scope: string, coll: string, id: any): any;
     stopAll(): Promise<void>;
+    /** @param {string} scope @returns {Promise<void>} */
+    stopScope(scope: string): Promise<void>;
     replan(): number;
     flush: () => Promise<any[]>;
 };
@@ -250,6 +253,7 @@ export type SyncHubOptions = {
     bin?: string | null | undefined;
     binKinds?: Record<string, string> | undefined;
     feeds?: Record<string, Record<string, string>> | undefined;
+    feedsIn?: ((scope: string) => boolean) | undefined;
     unstamped?: "skip" | "full" | undefined;
     expire?: Record<string, {
         field: string;

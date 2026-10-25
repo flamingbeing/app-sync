@@ -278,3 +278,93 @@ test('sync module: kinds[kind] = { coll, path } (1.2.0) saves that kind to its o
   assert.throws(() => sync({ colls: ['items'], path: () => [], kinds: { bad: { coll: 'x' } } }), /path/);
   await app.stop();
 });
+
+// ---- 1.3.0: public read (SHAPES.md 7): sync({ public }) collections read in public:* scopes with no sign-in ----
+
+const PUBLIC = { colls: ['items', 'news'], public: ['news'] };
+
+test('public read: a public:* watch runs with no sign-in, and on through sign-in and sign-out; it is listened again at sign-in', async () => {
+  const t = await modulesApp({ more: PUBLIC });
+  const { app, srv } = t;
+  srv.set('news', { id: 'n1', text: 'Fake news one', updatedAt: 1 });
+  let news = [];
+  app.sync.watch('public:all', 'news', l => { news = l; });
+  assert.ok(await until(() => news.some(d => d.id === 'n1')), 'read with no account');
+  const before = srv.listens;
+  await app.auth.signIn();
+  assert.ok(await until(() => srv.listens > before), 're-scoped: listened again under the account');
+  let items = [];
+  app.sync.watch('sp-u1', 'items', l => { items = l; });
+  await app.auth.signOut();
+  await settle(10);
+  srv.set('news', { id: 'n2', text: 'Fake news two', updatedAt: 2 });
+  srv.set('items', { id: 'i1', text: 'Fake item', updatedAt: 2 });
+  assert.ok(await until(() => news.some(d => d.id === 'n2')), 'still heard, signed out');
+  await settle(10);
+  assert.ok(!items.some(d => d.id === 'i1'), 'the account\'s watch is paused, as in 1.0');
+  await app.stop();
+});
+
+test('public read: a switch wipes the public copy with the rest (nothing is lost) and the public watch starts again', async () => {
+  const t = await modulesApp({ more: { ...PUBLIC, reopen: async () => ({}) } });
+  const { app, srv } = t;
+  srv.set('news', { id: 'n1', text: 'Fake news one', updatedAt: 1 });
+  let news = [];
+  app.sync.watch('public:all', 'news', l => { news = l; });
+  await app.auth.signIn();
+  await app.auth.signOut();
+  t.sdk.next = fakeUser({ uid: 'u2', email: 'other.fake@example.test' });
+  assert.equal((await app.auth.signIn()).ok, true);
+  assert.deepEqual(t.reloads, [], 'reopen made a new instance: no reload');
+  news = [];
+  srv.set('news', { id: 'n2', text: 'Fake news two', updatedAt: 2 });
+  assert.ok(await until(() => news.some(d => d.id === 'n1') && news.some(d => d.id === 'n2')), 'the public watch carries on after the switch');
+  await app.stop();
+});
+
+test('public read: read only and kept apart: no saves to public:*, no account scope public:*, only public collections there', async () => {
+  assert.throws(() => sync({ colls: ['items'], path: (s, c) => [s, c], public: ['news'] }), /public: news is not in colls/);
+  const t = await modulesApp({ more: PUBLIC });
+  const { app } = t;
+  await app.auth.signIn();
+  await assert.rejects(app.sync.save('news', 'public:all', { id: 'n1' }), /public:all is read only/);
+  assert.deepEqual(await Promise.allSettled([app.sync.saveMany('news', 'public:all', [{ id: 'n1' }])]).then(r => r[0].value[0].status), 'rejected');
+  await assert.rejects(app.sync.open('public:all'), /public:all is read only/);
+  assert.throws(() => app.sync.watch('public:all', 'items', () => {}), /items is not a public collection/);
+  assert.equal(app.sync.queue.entries().length, 0);
+  await app.stop();
+});
+
+test('public read: a public:* scope listens to its collections only, no bin or tombstone feeds (those read account data)', async () => {
+  const srv = fakeServer(), base = fakeAdapter(srv), heard = [];
+  const adapter = { ...base, listen: (s, c, ...rest) => { heard.push(s + ' ' + c); return base.listen(s, c, ...rest); } };
+  const { app } = await modulesApp({ srv, adapter, more: { ...PUBLIC, hub: { feeds: { moved: { item: 'items' } } } } });
+  app.sync.watch('public:all', 'news', () => {});
+  await app.auth.signIn();
+  app.sync.watch('sp-u1', 'items', () => {});
+  assert.ok(await until(() => heard.includes('sp-u1 items')));
+  await settle(20);
+  assert.deepEqual([...new Set(heard.filter(h => h.startsWith('public:')))], ['public:all news'], 'no bin or feeds in the public scope (listened again at sign-in)');
+  assert.ok(heard.includes('sp-u1 bin') && heard.includes('sp-u1 moved'), 'the account scope keeps its bin and feeds');
+  await app.stop();
+});
+
+test('public read: a relisten while signed out (the public watch still listening) starts only what was running', async () => {
+  const srv = fakeServer(), base = fakeAdapter(srv), heard = [];
+  let t = Date.now();
+  const adapter = { ...base, listen: (s, c, ...rest) => { heard.push(c); return base.listen(s, c, ...rest); } };
+  const { app } = await modulesApp({ srv, adapter, more: { ...PUBLIC, now: () => t } });
+  app.sync.watch('public:all', 'news', () => {});
+  await app.auth.signIn();
+  app.sync.watch('sp-u1', 'items', () => {});
+  assert.ok(await until(() => heard.includes('items')));
+  await app.auth.signOut();
+  await settle(10);
+  heard.length = 0;
+  t += 60000;
+  assert.equal(app.sync.nudge('wake'), true, 'nothing heard for a minute: listened again');
+  assert.ok(await until(() => heard.includes('news')), 'the public watch listened again');
+  await settle(20);
+  assert.deepEqual(heard, ['news'], 'the account\'s watch stays paused, signed out');
+  await app.stop();
+});

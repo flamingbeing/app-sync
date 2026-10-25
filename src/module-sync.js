@@ -4,7 +4,7 @@
 // device copy `<name>-sync:`, outbox `<name>-outbox`, the origin's outbox list), so an app moving to the modules keeps
 // what its phones hold, and two apps on one origin still wait for each other's saves.
 //
-// sync({ colls, path, kinds, scope, backend, adapter, commit, outbox, hub, stores, queue, onRefused, forget, report,
+// sync({ colls, path, kinds, scope, public, backend, adapter, commit, outbox, hub, stores, queue, onRefused, forget, report,
 //        device, outside, wake, watchEvery, nav, now, win, reload, reopen })
 //   Documented in core.js (the sign-in ones are the auth module's; name, sdk, storage are config's).
 //   scope(user) -> the scope opened at each sign-in; without it the app calls open(scope).
@@ -44,6 +44,7 @@ export function sync(options = {}) {
   if (!Array.isArray(options.colls) || !options.colls.length) throw new Error('sync needs colls');
   if (typeof options.path !== 'function') throw new Error('sync needs path');
   kindMap(options.kinds, options.colls);   // (a bad kind fails here, not at the first save)
+  for (const c of options.public || []) if (!options.colls.includes(c)) throw new Error('sync: public: ' + c + ' is not in colls');
   const win = 'win' in options ? options.win : typeof window !== 'undefined' ? window : null;
   const reload = options.reload || (() => { try { win?.location?.reload(); } catch { /* not a page */ } });
   const { scope: scopeOf = null, forget = {} } = options;
@@ -130,11 +131,13 @@ export function sync(options = {}) {
           if (scopeOf) { const s = scopeOf(user); store.set('scope', s); }
           await c.signedIn(user, scopeOf);
           c.queue.kick();   // (same account after a sign-out: its queue was kept, so open() didn't start it again)
+          await c.stopPublic();   // (1.3.0: listened again under the account)
           c.startWatches(); tell();
         }),
         ctx.on('signout', async () => { const last = c.scope() || store.get('scope') || ''; c.close(); await countStored(last); }),
         ctx.on('switch', async () => { owed = await reloadOwed(await wipe(false)); }),
-        ctx.on('forget', async ({ force }) => { if (await reloadOwed(await wipe(!!force))) setTimeout(reload, 0); }),
+        // (the public watches start again at once after forget(), at the sign-in after a switch)
+        ctx.on('forget', async ({ force }) => { if (await reloadOwed(await wipe(!!force))) setTimeout(reload, 0); else c.startWatches(); }),
       );
       // (a save counts as unsent from the moment it is made, before it is stored)
       /** @type {typeof api.save} */

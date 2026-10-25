@@ -7,7 +7,7 @@
     "test": "node --test 'worker/test/*.test.mjs' && npm run test:unit",
     "test:unit": "node --test test/*.test.mjs update/test/*.test.mjs",
     "test:update-browser": "node update/test/e2e.mjs",
-    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-app-sync \"node test/firestore.emulator.mjs && node test/app.emulator.mjs\"",
+    "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-app-sync \"node test/firestore.emulator.mjs && node test/app.emulator.mjs && node test/signin.emulator.mjs\"",
     "types": "tsc -p tsconfig.types.json",
     "modularity": "node tools/modularity.mjs",
     "vite": "node test/vite/build.mjs external && node test/vite/build.mjs source"
@@ -19,7 +19,7 @@
     "vite": "6.3.5"
   },
   "name": "app-sync",
-  "version": "1.2.2",
+  "version": "1.3.1",
   "description": "Offline-first sync engine for web apps: delta listeners, a durable outbox, tombstones, conflict checks; backend injected (Firestore adapter included).",
   "license": "Apache-2.0",
   "exports": {

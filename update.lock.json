@@ -27,8 +27,12 @@
     "sw-core.js": "3fcedaf3da4b418e5caa79e2f1c1a209cd4ae105b58e218fffc3186113349309",
     "register.js": "f39860dd6db0b3bfbb46aec91e2caa3e030206b78e6c7fed424d938dbdd74fe8"
   },
-  "1.2.2": {
-    "sw-core.js": "1411807d4e698fc5fd57fda05b51e408a7c6e5c008580ee62e157e4e9e26eeca",
-    "register.js": "17407d888a6fc7514fb233a9d6d560387087279c9b6f7eafc17b135806b5448b"
+  "1.3.0": {
+    "sw-core.js": "967d329d110203f6e49f162fdd1731ee49b2a3ce32c77eedb4bb5310846b2ad8",
+    "register.js": "4d960a4a674c823210b37052634035b31b7654bd3120baf0e0e859143e2fe6b2"
+  },
+  "1.3.1": {
+    "sw-core.js": "c6cffcc4e334ff2a37125fd4d9ee135a6f7aef7d08b6b8cee16e7d69ba0f6880",
+    "register.js": "71c6a37c6584a322ee53d6b8a839648cbdb882ec4db4ab50a90fd35fadfec865"
   }
 }
