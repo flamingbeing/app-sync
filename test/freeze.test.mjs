@@ -28,7 +28,7 @@ function importGraph(entry) {
 }
 
 // the promised public names (1.0 keeps these; 1.x only adds)
-const PUBLIC = ['createApp', 'userOf', 'claimsBehind', 'createReport', 'REPORT_ENDPOINT', 'createOutbox', 'createOutboxRegistry',
+const PUBLIC = ['userOf', 'claimsBehind', 'createReport', 'REPORT_ENDPOINT', 'createOutbox', 'createOutboxRegistry',
   'REGISTRY_KEY', 'forgetDevice', 'leaveEntry', 'persistGuard', 'firestoreCache', 'cacheFailure', 'CACHE_KEY', 'CACHE_MODES',
   'syncStatus', 'attentionCount', 'createFirestoreBackend', 'createSyncHub', 'createWatchdog', 'replanOnWake', 'eachSettled',
   'SKEW', 'createWriteQueue', 'createStores', 'recordSignature', 'checkWrite', 'mergeFields', 'mergeHeld', 'describeConflict',
@@ -49,15 +49,18 @@ test('FILES lists exactly the files index.js loads, and files.json says the same
 
 test('index.js names the promised public API; engine internals load from src/internal.js', () => {
   const src = read('index.js');
-  // the names index.js exports by name (the `export *` from internal.js is the deprecated alias set, gone in 1.0)
+  // the names index.js exports, all by name (1.0.0-rc.1: the `export *` alias set from internal.js is gone)
+  assert.doesNotMatch(src, /export \*/);
   const named = [...src.matchAll(/^export (?:const (\w+)|\{([^}]+)\})/gm)].flatMap(m => m[1] ? [m[1]] : m[2].split(',').map(s => s.trim().split(/\s+as\s+/).pop()));
   assert.deepEqual([...named].sort(), [...PUBLIC].sort());
   for (const name of PUBLIC) assert.ok(name in index, name);
   for (const name of Object.keys(internal)) assert.ok(!PUBLIC.includes(name), `${name} is public and internal`);
   for (const name of ['plan', 'applyChanges', 'createCollectionSync', 'planServer', 'decide', 'watchSaved', 'buildReport', 'GRACE', 'SEND_TIMEOUT'])
     assert.equal(typeof internal[name] === 'undefined', false, `internal.js exports ${name}`);
-  // 0.8.x: every moved name still loads from index.js, the same value (removed in 1.0)
-  for (const [name, value] of Object.entries(internal)) assert.equal(index[name], value, name);
+  // 1.0.0-rc.1: no moved name loads from index.js any more; and the one-object createApp is gone (app.js + modules)
+  for (const name of Object.keys(internal)) assert.ok(!(name in index), `${name} still loads from index.js`);
+  assert.ok(!('createApp' in index), 'createApp(options) is removed: createApp({ config, modules }) loads from app.js');
+  assert.ok(!fs.existsSync(path.join(ROOT, 'src/app.js')), 'src/app.js (the one-object createApp) is removed');
 });
 
 test('stored formats: keys, prefixes, job states and the job format number are the promised ones', async () => {

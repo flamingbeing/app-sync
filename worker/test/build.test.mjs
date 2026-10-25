@@ -45,3 +45,16 @@ test('--lock and --check refuse to relock a released version, and require the lo
   assert.equal(t.run('--lock').status, 0);
   assert.equal(t.run('--check').status, 0);
 });
+
+test('a pre-release tag (v1.0.0-rc.1) builds and sorts before its release; latest stays the last stable version', () => {
+  const t = mk(); t.release('0.9.4'); t.release('1.0.0-rc.1');
+  let r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(fs.readFileSync(path.join(t.dir, 'dist/sync/1.0.0-rc.1/src/a.js'), 'utf8'), '// 1.0.0-rc.1');
+  const listed = () => JSON.parse(fs.readFileSync(path.join(t.dir, 'dist/sync/versions.json'), 'utf8'));
+  assert.deepEqual(listed(), { latest: '0.9.4', versions: ['0.9.4', '1.0.0-rc.1'] });
+  t.release('1.0.0'); t.release('0.10.0');
+  r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(listed(), { latest: '1.0.0', versions: ['0.9.4', '0.10.0', '1.0.0-rc.1', '1.0.0'] });
+});

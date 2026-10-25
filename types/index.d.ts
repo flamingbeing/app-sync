@@ -18,13 +18,12 @@ export function createReport(options: Omit<import("./src/report.js").ReportOptio
     start(): void;
     stop(): void;
 };
-export * from "./src/internal.js";
 export const FILES: string[];
-export const VERSION: "0.9.4";
+export const VERSION: "1.0.0-rc.1";
 export { createSyncHub, replanOnWake, leaveEntry, eachSettled, SKEW } from "./src/sync.js";
 export { createWriteQueue, JOB_FORMAT, JOB_STATES } from "./src/writes.js";
 export { recordSignature, checkWrite, mergeFields, mergeHeld, describeConflict, resolvedRecord, pathOf } from "./src/conflict.js";
 export { firestoreCache, cacheFailure, CACHE_KEY, CACHE_MODES } from "./src/cache.js";
 export { syncStatus, attentionCount } from "./src/status.js";
 export { createOutboxRegistry, REGISTRY_KEY } from "./src/registry.js";
-export { createApp, userOf, claimsBehind } from "./src/app.js";
+export { userOf, claimsBehind } from "./src/user.js";

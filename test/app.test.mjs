@@ -4,7 +4,7 @@
 // adapter over the fake server (the real adapter: test/firestore.emulator.mjs). Made-up data only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createApp, onModules } from './factory.mjs';
+import { createApp } from './factory.mjs';
 import { ESCALATE_MS } from '../src/watchdog.js';
 import { checkWrite, recordSignature } from '../src/conflict.js';
 import { fakeServer } from './fake-server.mjs';
@@ -283,21 +283,6 @@ test('sign-out refuses while a save is unsent and deletes nothing; once sent it 
   assert.equal(app.parts.queue.entries().length, 0, 'the outbox forgot this account');
   const st = await app.parts.stores.openStore('s1');
   assert.equal((await st.load('items')).docs.length, 0, 'the device copy is gone');
-});
-
-test('sign-out stops when someone else signed in meanwhile (another tab): nothing deleted, listeners back', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test switch/forget' }, async () => {
-  const sdkParts = fakeAuthSdk();
-  const { app, srv, adapter } = await makeApp({ sdkParts });
-  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
-  let list = [];
-  app.watch('s1', 'items', l => { list = l; });
-  const flush = app.parts.queue.flush;
-  app.parts.queue.flush = async ms => { sdkParts.auth.currentUser = fakeUser({ uid: 'u2', email: 'other@example.test' }); return flush(ms); };
-  const r = await app.signOut();
-  assert.deepEqual({ ok: r.ok, reason: r.reason }, { ok: false, reason: 'changed' });
-  assert.equal(adapter.cleared, 0);
-  srv.set('items', { id: 'n', text: 'Fake new', updatedAt: Date.now() });
-  assert.ok(await until(() => list.some(d => d.id === 'n')), 'watching again after the stop');
 });
 
 test('the emulator keeps its SDK cache (clearCache is skipped) and the page need not reload', async () => {
@@ -579,37 +564,6 @@ test('signOut({ force }): unsent saves and tracked writes are forgotten, the dev
   assert.equal(app.unsentOutside(), 0, 'forgotten with the device');
 });
 
-test('signOut({ force }) still stops when someone else signed in meanwhile (0.8.1)', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test forget' }, async () => {
-  const sdkParts = fakeAuthSdk();
-  const { app, adapter } = await makeApp({ sdkParts });
-  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
-  const flush = app.parts.queue.flush;
-  app.parts.queue.flush = async ms => { sdkParts.auth.currentUser = fakeUser({ uid: 'u2', email: 'other@example.test' }); return flush(ms); };
-  const r = await app.signOut({ force: true });
-  assert.deepEqual({ ok: r.ok, reason: r.reason }, { ok: false, reason: 'changed' });
-  assert.equal(adapter.cleared, 0);
-});
-
-test('signOut({ before }): runs after the listeners stop and before the wipe; a throw is named in failed (0.8.1)', { skip: onModules() && 'one-object order; modules: auth.test forget order' }, async () => {
-  const order = [];
-  const { app } = await makeApp({ options: { forget: { extra: async () => order.push('extra') } } });
-  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
-  const stopAll = app.parts.hub.stopAll, wipe = app.parts.stores.wipeStores;
-  app.parts.hub.stopAll = async () => { order.push('stopAll'); return stopAll(); };
-  app.parts.stores.wipeStores = async k => { order.push('wipe'); return wipe(k); };
-  const r = await app.signOut({ before: async () => { order.push('before'); throw new Error('fake'); } });
-  assert.equal(r.ok, true);
-  assert.deepEqual(order, ['stopAll', 'before', 'wipe', 'extra']);
-  assert.deepEqual(r.failed, ['before']);
-  const b = await makeApp();
-  await b.app.onUser(() => {}); await b.app.signIn(); await b.app.open('s1');
-  let ran = 0;
-  void b.app.track(new Promise(() => {}));
-  const r2 = await b.app.signOut({ wait: 30, before: async () => { ran++; } });
-  assert.equal(r2.ok, false);
-  assert.equal(ran, 0, 'never when the gate refuses');
-});
-
 test('one gate over every registered outbox: another app\'s unsent save on this origin keeps this app\'s lists (the drafts case) (0.8.1)', async () => {
   const storage = memStorage(), boxes = new Map();
   const box = name => { if (!boxes.has(name)) boxes.set(name, memOutbox(name)); return boxes.get(name); };
@@ -636,19 +590,6 @@ test('flush: a save made while outside writes settle keeps the gate shut (review
   assert.equal(await app.flush(300), false);
   const r = await app.signOut({ wait: 300 });
   assert.equal(r.ok, false);
-});
-
-test('signOut({ before }): someone else signed in during before stops the wipe; signed out (none) goes on (review, 0.8.1)', { skip: onModules() && 'one-object sign-out wipe; modules: auth.test forget' }, async () => {
-  const sdkParts = fakeAuthSdk();
-  const { app, adapter } = await makeApp({ sdkParts });
-  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
-  const r = await app.signOut({ force: true, before: async () => { sdkParts.auth.currentUser = fakeUser({ uid: 'u2', email: 'other@example.test' }); } });
-  assert.deepEqual({ ok: r.ok, reason: r.reason }, { ok: false, reason: 'changed' });
-  assert.equal(adapter.cleared, 0);
-  const b = await makeApp();
-  await b.app.onUser(() => {}); await b.app.signIn(); await b.app.open('s1');
-  const r2 = await b.app.signOut({ before: async () => { await b.sdk.A.signOut(b.sdk.auth); } });
-  assert.equal(r2.ok, true, 'the app\'s own Auth sign-out in before');
 });
 
 test('a tracked write that settles applies deletes held for its record (review, 0.8.1)', async () => {
@@ -845,20 +786,6 @@ test('reconnect: a switch past the 4 s cap keeps the lock until it settles; no s
   assert.deepEqual(calls, ['off', 'on', 'off', 'on']);
 });
 
-test('signOut: doc and claims watches are stopped before the wipe and started again when it stops (review, 0.8.3)', { skip: onModules() && 'one-object sign-out restarts watches; modules: sign-out keeps watches' }, async () => {
-  const srv = fakeServer(), feed = docFeed(), sdkParts = fakeAuthSdk();
-  const { app } = await makeApp({ srv, sdkParts, adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc } });
-  await app.onUser(() => {}); await app.signIn(); await app.open('s1');
-  app.watchDoc(['households', 'h1'], () => {});
-  await settle();
-  let live = -1;
-  const r = await app.signOut({ force: true, before: async () => { live = feed.live; sdkParts.auth.currentUser = fakeUser({ uid: 'u2', email: 'other@example.test' }); } });
-  assert.equal(live, 0, 'stopped before the hook and the wipe');
-  assert.equal(r.ok, false);
-  await settle();
-  assert.equal(feed.live, 1, 'sign-out stopped: listening again');
-});
-
 // a browser window: its listeners, a page that can be hidden
 function fakeWin() {
   const on = {}, doc = { visibilityState: 'visible', addEventListener: (t, f) => (on[t] ||= []).push(f), removeEventListener() {} };
@@ -884,38 +811,6 @@ test('wake: true nudges the watchdog when the page comes back (online, pageshow,
   const [hidden, visible] = await run(true);
   assert.equal(hidden, 1, 'pageshow after a quiet spell: listen again; a hidden page is not a wake');
   assert.equal(visible, 2, 'visible again after the throttle: listen again');
-});
-
-test('claims.watch: the role doc is listened to, the claims refreshed when it moves, onClaims told the status (0.8.3)', { skip: onModules() && 'one-object reads the role doc through the injected adapter; auth module uses the SDK (auth.test)' }, async () => {
-  const user = fakeUser({ claims: { v: 1, g: { _: 'viewer' } } });
-  const srv = fakeServer(), feed = docFeed(), posts = [], told = [];
-  let status = 200;
-  const fetch = async (url, o) => { posts.push(url); if (status === 200) user.claims = { v: 2, g: { _: 'admin' } }; return { ok: status === 200, status }; };
-  const { app } = await makeApp({ srv, sdkParts: fakeAuthSdk({ user }), adapter: { ...fakeAdapter(srv), listenDoc: feed.listenDoc },
-    options: { fetch, claims: { url: '/api/claims', watch: true, doc: u => ['members', u.uid], onClaims: x => told.push(x) } } });
-  await app.onUser(() => {}); await app.signIn();
-  await settle(10);
-  assert.deepEqual(feed.opened.map(l => l.segments), [['members', 'u1']], 'the signed-in account\'s role doc');
-  assert.deepEqual(posts, [], 'nothing asked before the role doc is heard');
-  feed.send(null, { fromCache: true });
-  await settle(10);
-  assert.deepEqual(posts, [], 'not on the device: not known yet');
-  feed.send({ id: 'u1', role: 'viewer', v: 1 });
-  await settle(10);
-  assert.deepEqual(posts, [], 'the token is up to date');
-  assert.deepEqual(told.map(x => [x.asked, x.status]), [[false, 0]]);
-  feed.send({ id: 'u1', role: 'admin', v: 2 });
-  assert.ok(await until(() => told.length === 2));
-  assert.deepEqual(posts, ['/api/claims'], 'v moved: new claims asked');
-  assert.equal(user.refreshed, 1, 'and the token refreshed');
-  assert.deepEqual(told.map(x => [x.asked, x.status]).at(-1), [true, 200]);
-  status = 503;
-  feed.send({ id: 'u1', role: 'member', v: 3 });
-  assert.ok(await until(() => told.length === 3));
-  assert.deepEqual(told.at(-1).status, 503, 'the HTTP status reaches the app (e.g. 503: not set up)');
-  const r = await app.signOut();
-  assert.equal(r.ok, true);
-  assert.equal(feed.live, 0, 'sign-out stops the role doc listener');
 });
 
 // (for test/modules.test.mjs's module-only tests)

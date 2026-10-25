@@ -1,5 +1,6 @@
-# Tags each new version: on a push to main, if package.json's version has no tag yet, tag that commit vX.Y.Z; the same
-# for the update module (update/VERSION -> update-vX.Y.Z).
+# Tags each new version: on a push to main, if package.json's version has no tag yet, tag that commit vX.Y.Z. From
+# 1.0.0-rc.1 one version covers both: the tag also serves the update module (/update/X.Y.Z/); update-vX.Y.Z tags stop
+# (the old ones stay served).
 # An existing tag is never moved or replaced (versions are immutable). Also runs by hand.
 # A new tag then starts the Deploy workflow: the push's own deploy built dist/ before the tag existed, so the new
 # version would otherwise stay unserved until the next push (0.6.4 and 0.7.0 were). A tag pushed with the workflow's
@@ -33,6 +34,9 @@ jobs:
           v="v$(node -p "require('./package.json').version")"
           code="$(node -p "require('fs').readFileSync('index.js','utf8').match(/VERSION = '([^']+)'/)[1]")"
           if [ "$v" != "v$code" ]; then echo "::error::package.json ($v) and index.js (v$code) disagree"; exit 1; fi
+          for f in app.js update/sw-core.js update/register.js; do
+            if ! grep -Eq "(VERSION|CORE_VERSION) = '${v#v}'" "$f"; then echo "::error::$f and package.json ($v) disagree"; exit 1; fi
+          done
           if git ls-remote --exit-code --tags origin "refs/tags/$v" >/dev/null; then echo "$v exists; nothing to do"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -40,22 +44,8 @@ jobs:
           git push origin "refs/tags/$v"
           echo "tagged $v at $GITHUB_SHA"
           echo "tagged=true" >> "$GITHUB_OUTPUT"
-      - name: Tag the update module if its version is new
-        id: update
-        run: |
-          v="update-v$(tr -d '[:space:]' < update/VERSION)"
-          for f in update/sw-core.js update/register.js; do
-            if ! grep -q "CORE_VERSION = '${v#update-v}'" "$f"; then echo "::error::$f and update/VERSION disagree"; exit 1; fi
-          done
-          if git ls-remote --exit-code --tags origin "refs/tags/$v" >/dev/null; then echo "$v exists; nothing to do"; exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$v" -m "app-update ${v#update-v}" "$GITHUB_SHA"
-          git push origin "refs/tags/$v"
-          echo "tagged $v at $GITHUB_SHA"
-          echo "tagged=true" >> "$GITHUB_OUTPUT"
       - name: Deploy the new version
-        if: steps.sync.outputs.tagged == 'true' || steps.update.outputs.tagged == 'true'
+        if: steps.sync.outputs.tagged == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run deploy.yml --ref "$GITHUB_REF_NAME"

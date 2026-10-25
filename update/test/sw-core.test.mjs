@@ -1,6 +1,7 @@
 // sw-core.js in a fake service worker world (test/fake-sw.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { makeServer, makeWorld, FakeCaches } from './fake-sw.mjs';
 
 const SCOPE = 'https://app.test/app/';
@@ -160,7 +161,7 @@ test('the page can ask for the stamped version', async () => {
   let got; const port = { postMessage: m => { got = m; } };
   await w.fire('message', { data: { type: 'update:version' }, ports: [port] });
   assert.equal(got.version, 'demo-2026-10-24-aaaaaaaa');
-  assert.equal(got.core, '0.2.0');
+  assert.equal(got.core, JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version);   // one version (1.0.0-rc.1)
 });
 
 test('init refuses a version that does not start with the app name', () => {

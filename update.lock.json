@@ -6,5 +6,9 @@
   "0.2.0": {
     "sw-core.js": "ec68b141711dc18dfe05d53fb6e51235527c9bbafb9acb9b676c08892c43b5d2",
     "register.js": "b77edf29f91f0628cebe4a7d805827ffe0bd5f1a72e7ffb029485d39ac3dd0dd"
+  },
+  "1.0.0-rc.1": {
+    "sw-core.js": "7c6fe6d602362f5e18255a11cafab0013a453712cd26046fffd75d7da8cac607",
+    "register.js": "7a46773241efc59dfe4154d078188c8cfd435a3f6e9f120ac3f226431eee1a42"
   }
 }

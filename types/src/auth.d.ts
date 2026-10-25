@@ -2,7 +2,7 @@
  * @typedef {import('./user.js').AppUser} AppUser
  * @typedef {{ uid: string, email: string }} Owner
  * @typedef {object} AuthOptions
- * @property {any} [claims] as createApp's claims (url, entry, behind, when, watch, doc, onClaims)
+ * @property {any} [claims] the claims check (url, entry, behind, when, watch, doc, onClaims; above)
  * @property {(r: { from: Owner, to: AppUser }) => any} [beforeSwitch] the app's step before another account's data replaces the last one's
  * @property {boolean} [popupOnly]
  * @property {() => boolean} [redirectFirst]
@@ -19,7 +19,7 @@ export type Owner = {
 };
 export type AuthOptions = {
     /**
-     * as createApp's claims (url, entry, behind, when, watch, doc, onClaims)
+     * the claims check (url, entry, behind, when, watch, doc, onClaims; above)
      */
     claims?: any;
     /**

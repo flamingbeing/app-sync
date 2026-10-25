@@ -1,18 +1,15 @@
-// The createApp the createApp tests run on: the one-object createApp (src/app.js), or, with APP_SYNC_MODULES=1
-// (test/modules.test.mjs), the same api built from the modules: createApp({ config, modules: [auth(), sync()] }),
-// so the old tests prove the modules behave the same. signOut maps to the flush gate, then auth.forget() (the only
+// The createApp the createApp tests (app, held conflicts, model) run on: the old one-object api, built from the
+// modules: createApp({ config, modules: [auth(), sync()] }). The one-object createApp itself is gone (1.0.0-rc.1);
+// these tests were written for it and now prove the modules behave the same. signOut maps to the flush gate, then auth.forget() (the only
 // wipe in the modules; signOut there keeps the data). Made-up data only.
-import { createApp as oneObject } from '../src/app.js';
 import { createApp as runner } from '../app.js';
 import { auth } from '../auth.js';
 import { sync } from '../sync.js';
 
-export const onModules = () => process.env.APP_SYNC_MODULES === '1';
 const tick = (ms = 1) => new Promise(r => setTimeout(r, ms));
 
 /** @param {any} options */
 export function createApp(options = {}) {
-  if (!onModules()) return oneObject(options);
   const { name, colls, path, sdk } = options;
   for (const [k, ok] of [['name', typeof name === 'string' && name], ['colls', Array.isArray(colls) && colls.length], ['path', typeof path === 'function'], ['sdk', typeof sdk === 'function']]) {
     if (!ok) throw new Error('createApp needs ' + k);

@@ -1,11 +1,11 @@
-// createApp (src/app.js) end to end against the local Auth and Firestore emulators (demo project: nothing reaches a
-// real Firebase project): sign in, save offline, come back online and sync, then sign out and wipe the device.
+// createApp({ config, modules: [auth(), sync()] }) (through test/factory.mjs's one-object api) end to end against the local Auth and Firestore emulators (demo project: nothing reaches a
+// real Firebase project): sign in, save offline, come back online and sync, then sign out and forget the device (forget() wipes; sign-out alone keeps the data).
 // Run with: npm run test:emulator (needs Java). Made-up data only.
 import assert from 'node:assert/strict';
 import { initializeApp } from 'firebase/app';
 import * as A from 'firebase/auth';
 import * as F from 'firebase/firestore';
-import { createApp } from '../src/app.js';
+import { createApp } from './factory.mjs';
 
 const FS = (process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8085').split(':');
 const AUTH = process.env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
@@ -39,7 +39,7 @@ const space = 'app-' + Date.now().toString(36);
 const parts = sdkFor('app-e2e'), other = sdkFor('app-e2e-other');
 const nav = { onLine: true, storage: { persisted: async () => true } };
 const outbox = memOutbox('e2e-outbox');
-const app = createApp({
+const app = await createApp({
   name: 'e2e', colls: ['items'], path: (s, coll) => ['spaces', s, coll], sdk: async () => parts,
   scope: () => space, nav, outbox, storage: null, watchEvery: 0, win: null,
 });

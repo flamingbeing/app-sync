@@ -1,6 +1,68 @@
 // The sync core (0.9.1, internal): the device copy, the outbox and queue, the watches, the watchdog, the status and the
-// held conflicts, as one closure. The one-object createApp (app.js) and the sync module (module-sync.js) are both
-// built on it, so they behave the same; neither signs in here. Options: createApp's (app.js), less the sign-in ones.
+// held conflicts, as one closure. The sync module (module-sync.js) is built on it; it does not sign in (auth.js does).
+//
+// The sync options (sync(options), module-sync.js; 1.0.0-rc.1: moved here from the one-object createApp, removed):
+// sync({ colls, path, kinds, scope, backend, adapter, commit, outbox, hub, stores, queue, onRefused, forget, report,
+//        device, outside, wake, watchEvery, nav, now, win, reload })
+//   config.name (createApp's): the app's id: device copy `<name>-sync:`, outbox `<name>-outbox`. colls: the
+//   collections synced. path(scope, coll) -> the collection's path segments. config.sdk: async () -> { A, F, auth, db,
+//   emulator }: the app's Firebase SDK, loaded once (ctx.sdk()); emulator true keeps the SDK's cache at a wipe (the
+//   emulator's own) and the page need not reload.
+//   kinds: { [kind]: coll } for saves (default: each coll is its own kind).
+//   outbox: the queue's durable store instead of createOutbox's (same shape: name, realm, put, list, get, remove, forget).
+//   adapter: { listen, fetchOne, commit, clearCache } instead of the Firestore adapter (firestore.js); backend: its
+//   options (time, mark, stampMode, serverField, merge, where, writeId, onCommit, ...). commit(scope, kind, record,
+//   base, extra): the app's own write instead of adapter.commit (its own transactions; the queue, the outbox and the
+//   switch and forget() gate stay as they are).
+//   hub, stores, queue: more options for createSyncHub, createStores, createWriteQueue (e.g. bin, binKinds,
+//   unstamped, expire; metaOnly; otherPending, sendTimeout, labels).
+//   scope(user) -> the scope opened at sign-in (e.g. the account's email); without it the app calls open(scope).
+//   onRefused(err, entry) -> 'archive' | anything: a save the server refused (err.code, as the backend threw it);
+//   'archive' sets it aside, kept with its code for queue.refused(), retry(key) and discard(key) (0.8.2; after a
+//   reload too: the code is on the job, and a refused save found then is told once more). The outbox is then its only
+//   copy, so a switch or forget() is refused while it is there, until it is retried or discarded, or forget({ force }).
+//   Otherwise it stays failed: shown as attention, and refuses a switch or forget() the same way until the user chooses.
+//   forget: { extra, keep }: forgetDevice's (the app's own lists; the scopes whose device copy stays).
+//   report: the nothing-lost report (createReport), opt-in. config.storage: where the origin's outbox list is kept
+//   (default localStorage; null: no registry). nav, now, win: the browser's, for tests.
+//   watchEvery: ms between watchdog checks (0: only on nudge()).
+//   wake (0.8.3): true binds online, pageshow and visibilitychange (shown again) to nudge('wake') and sending what
+//   waits (default off: the app may wire its own).
+//   outside() -> how many writes the app knows of outside the queue and not yet acknowledged, a number at once (0.8.1;
+//   e.g. writes an older version left in the SDK's own offline queue). They count as track()'s do (below).
+//   quiet() (0.7.3, deprecated: use outside or track): false counts as one such write.
+//   The hub reads by backend.stampMode unless hub.stampMode says otherwise (an app whose server stamps are not on
+//   every record yet passes hub: { stampMode: 'client' }).
+//   device: this device's name as people know it ('Ward phone'), shown in conflict popups with held conflicts (0.6.3).
+//   Held conflicts (0.6.3, opt-in): backend: { held, edits, mark } (firestore.js). A same-field clash holds the save
+//   on the phone that made it, and only there: the server never has it, so other phones have nothing to answer (and
+//   two phones can't choose different versions); the held phone's status$ says attention until it is answered.
+// -> api { open, watch, save, flush, status$, refreshClaims, nudge, relistens, facts,
+//      conflicts, describe, resolve, track, unsentOutside, outsideSettled, heard, idle, copyOf, lastSeen, watchDoc, reconnect,
+//      hub, queue, parts }
+//   watchDoc(path, cb, onError) (0.8.3) -> stop(): one document (path: segments or 'a/b'), cb(doc | null, meta) when
+//   its copy changes; null ("gone") once, only when the server says it is not there or the listener fails (then
+//   onError(e) too, and that watch is finished), never from the device copy alone. It feeds facts() and the status;
+//   the watchdog restarts it like the lists; sign-out pauses it, as it does the lists. Needs the adapter's listenDoc (firestore.js has it).
+//   reconnect({ why }) (0.8.3) -> true once the connection was restarted (the SDK's network off and on), then sends
+//   what waits; false offline, under an unsent outside write (a restart may send it twice), or without the switch.
+//   watch(scope, coll, cb): cb(list, meta), meta (0.8.2) with { changed, removed }: the ids whose copy changed since the
+//   last call (all of them the first time) and the ids gone from the list.
+//   copyOf(kind, id) (0.8.2) -> the copy of that record a running watch of the open scope last handed (null: none).
+//   lastSeen(kind, id) (0.8.2) -> { stamp, signature } of the server's copy as last heard (the device copy after a
+//   reload; without this device's unsent saves), to compare with queue.lastSent(kind, id) (the copy this device last
+//   sent): both differ only when someone else saved since. null: no running watch has that record.
+//   Outside writes (0.8.1): track(promise, { kind, id }) -> the same promise; a write the app sends another way (straight
+//   to the SDK) counts as unsent until it settles (either way: a failure is the app's answer to handle). Unsent outside
+//   writes keep the status saving, flush and a switch or forget() shut, idle() false, and the watchdog from restarting
+//   the connection under them; with kind and id, that record is held like one with unsent saves (a delete heard from
+//   elsewhere waits). unsentOutside(kind?, id?) -> their count now (with outside()'s, unless kind is given).
+//   outsideSettled(ms = 4000) -> true once none is left (false after ms). queue: { otherPending } still works
+//   (deprecated: an async check, only for the switch and forget() gate).
+//   heard(meta?) (0.8.1): a read or listener the app runs itself answered ({ fromCache, hasPendingWrites } as its
+//   snapshot said; none: the server did): it feeds facts().confirmed/heardAt, the status and the watchdog.
+//   idle() (0.8.1) -> true when nothing is being stored, sent, held in the queue (failed and conflicts included) or
+//   written outside it: for an update's canReload.
 // host: { load() -> the app's SDK (shared, loaded once), user() -> the account signed in (AppUser) or null }.
 // -> the api pieces both hand on, plus what each needs to sign out or switch (no promise: src/internal).
 import { createSyncHub, replanOnWake } from './sync.js';
@@ -22,9 +84,37 @@ import { createFirestoreBackend } from './firestore.js';
  * @typedef {import('./types.js').ConflictChoice} ConflictChoice
  * @typedef {import('./types.js').ConflictView} ConflictView
  * @typedef {{ uid: string, email: string, name: string, photo: string, verified: boolean }} AppUser
+ * @typedef {import('./types.js').Outbox} Outbox
+ * @typedef {import('./types.js').CommitExtra} CommitExtra
+ * @typedef {object} SyncCoreOptions the sync module's options (sync.js), with config's name, sdk and storage
+ * @property {string} name the app's id: device copy `<name>-sync:`, outbox `<name>-outbox`
+ * @property {string[]} colls the collections synced
+ * @property {(scope: string, coll: string) => (string | number)[]} path a collection's path segments
+ * @property {() => Promise<AppSdk> | AppSdk} sdk the app's Firebase SDK, loaded once
+ * @property {Record<string, string>} [kinds] save kinds -> collection (default: each coll is its own kind)
+ * @property {Outbox} [outbox] the queue's durable store instead of createOutbox's
+ * @property {any} [adapter] { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
+ * @property {(owner: string, kind: string, record: Doc, base: Doc | null, extra?: CommitExtra) => Promise<Doc>} [commit] the app's own write instead of adapter.commit
+ * @property {Partial<import('./firestore.js').FirestoreBackendOptions> & Record<string, any>} [backend] the Firestore adapter's options
+ * @property {Record<string, any>} [hub] more options for createSyncHub
+ * @property {Record<string, any>} [stores] more options for createStores
+ * @property {Record<string, any>} [queue] more options for createWriteQueue
+ * @property {(user: AppUser) => string} [scope] the scope opened at sign-in
+ * @property {(err: { code: string, message?: string }, entry: Job) => any} [onRefused] 'archive' sets a refused save aside
+ * @property {{ extra?: (() => Promise<any>) | null, keep?: string[] | (() => string[] | Promise<string[]>) }} [forget]
+ * @property {import('./types.js').Report | null} [report] the nothing-lost report (createReport), opt-in
+ * @property {any} [nav] the browser's navigator, for tests
+ * @property {Pick<Storage, 'getItem' | 'setItem'> | null} [storage] where the origin's outbox list is kept (null: no registry)
+ * @property {() => number} [now]
+ * @property {number} [watchEvery] ms between watchdog checks (0: only on nudge())
+ * @property {any} [win] the browser's window, for tests
+ * @property {string} [device] this device's name as people know it, shown in conflict popups
+ * @property {() => number} [outside] writes the app knows of outside the queue, not yet acknowledged (0.8.1)
+ * @property {boolean} [wake] (0.8.3) online, pageshow and a page shown again nudge the watchdog and send what waits
+ * @property {() => boolean} [quiet] deprecated (0.8.1: outside or track): false counts as one write outside the queue
  */
 
-/** @param {import('./app.js').AppOptions} options @param {{ load: () => Promise<AppSdk>, user: () => AppUser | null }} host */
+/** @param {SyncCoreOptions} options @param {{ load: () => Promise<AppSdk>, user: () => AppUser | null }} host */
 export function createSyncCore(options, { load, user }) {
   const { name, colls, path } = options;
   const {

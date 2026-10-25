@@ -6,9 +6,37 @@
  * @typedef {import('./types.js').ConflictChoice} ConflictChoice
  * @typedef {import('./types.js').ConflictView} ConflictView
  * @typedef {{ uid: string, email: string, name: string, photo: string, verified: boolean }} AppUser
+ * @typedef {import('./types.js').Outbox} Outbox
+ * @typedef {import('./types.js').CommitExtra} CommitExtra
+ * @typedef {object} SyncCoreOptions the sync module's options (sync.js), with config's name, sdk and storage
+ * @property {string} name the app's id: device copy `<name>-sync:`, outbox `<name>-outbox`
+ * @property {string[]} colls the collections synced
+ * @property {(scope: string, coll: string) => (string | number)[]} path a collection's path segments
+ * @property {() => Promise<AppSdk> | AppSdk} sdk the app's Firebase SDK, loaded once
+ * @property {Record<string, string>} [kinds] save kinds -> collection (default: each coll is its own kind)
+ * @property {Outbox} [outbox] the queue's durable store instead of createOutbox's
+ * @property {any} [adapter] { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
+ * @property {(owner: string, kind: string, record: Doc, base: Doc | null, extra?: CommitExtra) => Promise<Doc>} [commit] the app's own write instead of adapter.commit
+ * @property {Partial<import('./firestore.js').FirestoreBackendOptions> & Record<string, any>} [backend] the Firestore adapter's options
+ * @property {Record<string, any>} [hub] more options for createSyncHub
+ * @property {Record<string, any>} [stores] more options for createStores
+ * @property {Record<string, any>} [queue] more options for createWriteQueue
+ * @property {(user: AppUser) => string} [scope] the scope opened at sign-in
+ * @property {(err: { code: string, message?: string }, entry: Job) => any} [onRefused] 'archive' sets a refused save aside
+ * @property {{ extra?: (() => Promise<any>) | null, keep?: string[] | (() => string[] | Promise<string[]>) }} [forget]
+ * @property {import('./types.js').Report | null} [report] the nothing-lost report (createReport), opt-in
+ * @property {any} [nav] the browser's navigator, for tests
+ * @property {Pick<Storage, 'getItem' | 'setItem'> | null} [storage] where the origin's outbox list is kept (null: no registry)
+ * @property {() => number} [now]
+ * @property {number} [watchEvery] ms between watchdog checks (0: only on nudge())
+ * @property {any} [win] the browser's window, for tests
+ * @property {string} [device] this device's name as people know it, shown in conflict popups
+ * @property {() => number} [outside] writes the app knows of outside the queue, not yet acknowledged (0.8.1)
+ * @property {boolean} [wake] (0.8.3) online, pageshow and a page shown again nudge the watchdog and send what waits
+ * @property {() => boolean} [quiet] deprecated (0.8.1: outside or track): false counts as one write outside the queue
  */
-/** @param {import('./app.js').AppOptions} options @param {{ load: () => Promise<AppSdk>, user: () => AppUser | null }} host */
-export function createSyncCore(options: import("./app.js").AppOptions, { load, user }: {
+/** @param {SyncCoreOptions} options @param {{ load: () => Promise<AppSdk>, user: () => AppUser | null }} host */
+export function createSyncCore(options: SyncCoreOptions, { load, user }: {
     load: () => Promise<AppSdk>;
     user: () => AppUser | null;
 }): {
@@ -258,4 +286,111 @@ export type AppUser = {
     name: string;
     photo: string;
     verified: boolean;
+};
+export type Outbox = import("./types.js").Outbox;
+export type CommitExtra = import("./types.js").CommitExtra;
+/**
+ * the sync module's options (sync.js), with config's name, sdk and storage
+ */
+export type SyncCoreOptions = {
+    /**
+     * the app's id: device copy `<name>-sync:`, outbox `<name>-outbox`
+     */
+    name: string;
+    /**
+     * the collections synced
+     */
+    colls: string[];
+    /**
+     * a collection's path segments
+     */
+    path: (scope: string, coll: string) => (string | number)[];
+    /**
+     * the app's Firebase SDK, loaded once
+     */
+    sdk: () => Promise<AppSdk> | AppSdk;
+    /**
+     * save kinds -> collection (default: each coll is its own kind)
+     */
+    kinds?: Record<string, string> | undefined;
+    /**
+     * the queue's durable store instead of createOutbox's
+     */
+    outbox?: import("./types.js").Outbox | undefined;
+    /**
+     * { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
+     */
+    adapter?: any;
+    /**
+     * the app's own write instead of adapter.commit
+     */
+    commit?: ((owner: string, kind: string, record: Doc, base: Doc | null, extra?: CommitExtra) => Promise<Doc>) | undefined;
+    /**
+     * the Firestore adapter's options
+     */
+    backend?: (Partial<import("./firestore.js").FirestoreBackendOptions> & Record<string, any>) | undefined;
+    /**
+     * more options for createSyncHub
+     */
+    hub?: Record<string, any> | undefined;
+    /**
+     * more options for createStores
+     */
+    stores?: Record<string, any> | undefined;
+    /**
+     * more options for createWriteQueue
+     */
+    queue?: Record<string, any> | undefined;
+    /**
+     * the scope opened at sign-in
+     */
+    scope?: ((user: AppUser) => string) | undefined;
+    /**
+     * 'archive' sets a refused save aside
+     */
+    onRefused?: ((err: {
+        code: string;
+        message?: string;
+    }, entry: Job) => any) | undefined;
+    forget?: {
+        extra?: (() => Promise<any>) | null;
+        keep?: string[] | (() => string[] | Promise<string[]>);
+    } | undefined;
+    /**
+     * the nothing-lost report (createReport), opt-in
+     */
+    report?: import("./types.js").Report | null | undefined;
+    /**
+     * the browser's navigator, for tests
+     */
+    nav?: any;
+    /**
+     * where the origin's outbox list is kept (null: no registry)
+     */
+    storage?: Pick<Storage, "getItem" | "setItem"> | null | undefined;
+    now?: (() => number) | undefined;
+    /**
+     * ms between watchdog checks (0: only on nudge())
+     */
+    watchEvery?: number | undefined;
+    /**
+     * the browser's window, for tests
+     */
+    win?: any;
+    /**
+     * this device's name as people know it, shown in conflict popups
+     */
+    device?: string | undefined;
+    /**
+     * writes the app knows of outside the queue, not yet acknowledged (0.8.1)
+     */
+    outside?: (() => number) | undefined;
+    /**
+     * (0.8.3) online, pageshow and a page shown again nudge the watchdog and send what waits
+     */
+    wake?: boolean | undefined;
+    /**
+     * deprecated (0.8.1: outside or track): false counts as one write outside the queue
+     */
+    quiet?: (() => boolean) | undefined;
 };

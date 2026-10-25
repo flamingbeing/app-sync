@@ -2,8 +2,9 @@
 
 One service worker core and one page module for the owner's web apps, so every app updates the same way: a new
 version installs in the background, takes over at once, and the open page reloads once. Plain files, no build step,
-no run-time dependencies. Served from `https://core.anawj.com/update/<x.y.z>/` (exact pin, immutable), tag
-`update-vX.Y.Z`. Brand-neutral: nothing app-specific lives here.
+no run-time dependencies. Served from `https://core.anawj.com/update/<x.y.z>/` (exact pin, immutable). From 1.0.0-rc.1
+it has the engine's version (one tag `vX.Y.Z` serves `/sync/<x.y.z>/` and `/update/<x.y.z>/`); 0.1.0 and 0.2.0 (tags
+`update-vX.Y.Z`) stay served. Brand-neutral: nothing app-specific lives here.
 
 ## In an app
 
@@ -11,9 +12,9 @@ no run-time dependencies. Served from `https://core.anawj.com/update/<x.y.z>/` (
 
 ```js
 const VERSION = 'myapp-v1';                 // the deploy stamps it: myapp-2026-10-24-ab12cd34
-const SHELL = ['./', 'app.js', 'style.css', 'https://core.anawj.com/update/0.2.0/register.js'];
+const SHELL = ['./', 'app.js', 'style.css', 'https://core.anawj.com/update/1.0.0-rc.1/register.js'];
 const MANIFEST = {};                        // the deploy fills it: a hash per shell file
-importScripts('https://core.anawj.com/update/0.2.0/sw-core.js');
+importScripts('https://core.anawj.com/update/1.0.0-rc.1/sw-core.js');
 AppUpdate.init({ app: 'myapp', version: VERSION, shell: SHELL, manifest: MANIFEST });
 ```
 
@@ -21,7 +22,7 @@ The page:
 
 ```html
 <script type="module">
-  import { register, version, versionLabel, forceLatest, retryUpdate } from 'https://core.anawj.com/update/0.2.0/register.js';
+  import { register, version, versionLabel, forceLatest, retryUpdate } from 'https://core.anawj.com/update/1.0.0-rc.1/register.js';
   register({ app: 'myapp', sw: 'sw.js', canReload: () => !typing() && !sheetOpen() && !sending() });
   // settings / about:  (await versionLabel())  ->  "2026-10-24 (ab12cd34)"
   // "Get the latest version" button:  forceLatest()   (refused while canReload says no)
@@ -90,9 +91,10 @@ hash every deploy, so the phones fetch it again (and every deploy is a new versi
 
 ## Releasing a version
 
-1. Change the files under `update/`; set `update/VERSION` and `CORE_VERSION` in `sw-core.js` and `register.js`.
+1. Change the files under `update/`; set `CORE_VERSION` in `sw-core.js` and `register.js` to the engine's new version
+   (the repo's release steps, AGENTS.md "Releasing").
 2. `node tools/build-update.mjs --lock` and commit `update.lock.json`.
-3. Merge with Checks green: `release.yml` tags `update-vX.Y.Z`, and the deploy publishes it. A released version never
+3. Merge with Checks green: `release.yml` tags `vX.Y.Z`, and the deploy publishes it. A released version never
    changes; fixes go in a new version.
 
 Tests: `node --test update/test/*.test.mjs` (fake worker world) and `node update/test/e2e.mjs` (real Chromium through

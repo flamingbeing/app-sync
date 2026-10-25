@@ -5,7 +5,8 @@
 // 3. wrangler.jsonc keeps preview links and the workers.dev address off.
 // 4. The package.json version is locked in versions.lock.json (a released version never changes).
 // 5. The Worker's tests pass (node --test 'worker/test/*.test.mjs').
-// 6. The update module's version (update/VERSION) is locked in update.lock.json and matches its files.
+// 6. The update module's version (package.json's from 1.0.0-rc.1; update/VERSION before) is locked in update.lock.json
+//    and matches its files.
 // 7. Size budget (core admission rule, README "Stability"): the public index and src/ stay under BUDGET bytes.
 //    Raising a budget is a CHANGELOG line.
 // Exits 1 on any failure.

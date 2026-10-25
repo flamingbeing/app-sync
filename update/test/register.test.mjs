@@ -1,6 +1,7 @@
 // register.js in a fake page world: navigator.serviceWorker, window, document, location, sessionStorage.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 
 let n = 0;
 const tick = () => new Promise(r => setTimeout(r, 0));
@@ -104,5 +105,6 @@ test('forceLatest refuses while canReload says no, before touching anything', as
   assert.equal(fetched, 0); assert.ok(!p.reg.gone); assert.equal(p.reloads, 0);
   await p.mod.forceLatest({ canReload: () => true });
   assert.ok(p.reg.gone); assert.equal(p.reloads, 1);
-  assert.equal(p.mod.CORE_VERSION, '0.2.0');
+  // 1.0.0-rc.1: one version for both: the update core's is the engine's
+  assert.equal(p.mod.CORE_VERSION, JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version);
 });
