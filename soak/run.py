@@ -6,6 +6,8 @@ import json, os, pathlib, re, subprocess, sys, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = pathlib.Path(os.environ['TEMP']) / 'sync-soak'
 OUT.mkdir(exist_ok=True)
+DEADLINE = time.time() + 85 * 60
+(OUT/'driver.pid').write_text(str(os.getpid()))
 QUICK = '--quick' in sys.argv
 
 def execute(suite, base, count, repeat=None):
@@ -37,6 +39,7 @@ def execute(suite, base, count, repeat=None):
     return row
 
 def task(suite, base, count, repeat=None):
+    if time.time() > DEADLINE: return {'skipped':True}
     row = execute(suite,base,count,repeat)
     if row['status']:
         row['replays'] = [execute(suite,seed,1,repeat) for seed in row['failedSeeds'] for _ in range(3)] if repeat is None else [execute(suite,base,count,repeat+1000+k) for k in range(3)]
@@ -45,18 +48,23 @@ def task(suite, base, count, repeat=None):
 if __name__ == '__main__':
     start=time.time()
     jobs=[]
-    for suite,total,base in [('model',20000,1000),('auth.model',5000,1000),('cache',5000,1)]:
+    for suite,total,base in [('auth.model',5000,1000),('cache',5000,1),('model',20000,1000)]:
         total = 10 if QUICK else total
         for offset in range(0,total,50): jobs.append((suite,base+offset,min(50,total-offset),None))
     for suite in ['faults','held','writes','sync','fixes']:
         for repeat in range(1,(1 if QUICK else 200)+1): jobs.append((suite,0,0,repeat))
-    results=[]
+    jobs.sort(key=lambda j: j[0] == 'model')
+    prior = json.loads((OUT/'results.json').read_text()) if (OUT/'results.json').exists() and not QUICK else []
+    done = {(r.get('suite'),r.get('base'),r.get('count'),r.get('repeat')) for r in prior}
+    jobs = [j for j in jobs if j not in done]
+    results=prior
     with cf.ThreadPoolExecutor(max_workers=6) as pool:
         pending={pool.submit(task,*job):job for job in jobs}
         for future in cf.as_completed(pending):
             try: row=future.result()
             except Exception as error: row=dict(job=pending[future],error=str(error))
+            if row.get('skipped'): continue
             results.append(row)
             (OUT/'results.json').write_text(json.dumps(results,indent=2))
-            if len(results)%10==0 or row.get('status',0) or 'error' in row: print(f'{len(results)}/{len(jobs)} elapsed={time.time()-start:.1f}s last={row}',flush=True)
+            if len(results)%10==0 or 'error' in row: print(f'{len(results)}/{len(jobs)} elapsed={time.time()-start:.1f}s last={row}',flush=True)
     print('COMPLETE',len(results),'elapsed',time.time()-start,flush=True)
