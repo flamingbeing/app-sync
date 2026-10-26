@@ -10,6 +10,7 @@ import { checkWrite, recordSignature } from '../src/conflict.js';
 import { fakeServer } from './fake-server.mjs';
 import { createFirestoreBackend } from '../src/firestore.js';
 import { createOutboxRegistry } from '../src/registry.js';
+import { createStores } from '../src/store.js';
 import { memOutbox as sharedOutbox, sharedSdk } from './fake-sdk.mjs';
 
 const settle = (ms = 5) => new Promise(r => setTimeout(r, ms));
@@ -811,6 +812,42 @@ test('wake: true nudges the watchdog when the page comes back (online, pageshow,
   const [hidden, visible] = await run(true);
   assert.equal(hidden, 1, 'pageshow after a quiet spell: listen again; a hidden page is not a wake');
   assert.equal(visible, 2, 'visible again after the throttle: listen again');
+});
+
+// 1.3.9: a save the server answered is in the device copy before it counts as done, so a reload offline right after
+// "synced" shows it (the listener had not heard it yet: the copy laid over the list was only in memory, 1.3.7)
+test('a save the server answered is in the device copy before it counts as done: a reload offline shows it (1.3.9)', async () => {
+  const srv = fakeServer(), name = uniq(), records = new Map();
+  const { openStore } = createStores({ prefix: name + '-sync:', colls: ['items'] });   // one device copy for both pages
+  srv.set('items', { id: 'old', text: 'Fake old', updatedAt: 5, serverAt: 5 });
+  srv.set('items', { id: 'bye', text: 'Fake bye', updatedAt: 6, serverAt: 6 });
+  let deaf = false;   // the connection drops after the server answers, before the listener hears the save
+  const adapter = { ...fakeAdapter(srv), listen: (s, c, o, cb) => srv.listen(s, c, o, snap => { if (!deaf) cb(snap); }) };
+  adapter.commit = async (_scope, coll, record) => {
+    const at = Date.now(), doc = { ...record, updatedAt: at };
+    if (record._deleted) { srv.del(coll, record.id); return { id: record.id, _deleted: true }; }
+    srv.set(coll, { ...doc, serverAt: at }); return doc;
+  };
+  const one = await makeApp({ srv, name, adapter, options: { outbox: memOutbox(name + '-outbox', 'default', records), hub: { openStore } } });
+  await one.app.onUser(() => {}); await one.app.signIn(); await one.app.open('s1');
+  const seen = [];
+  const off = one.app.watch('s1', 'items', list => seen.push(list.map(d => d.text).sort()));
+  assert.ok(await until(() => seen.some(l => l.includes('Fake old'))), 'the list came from the server');
+  deaf = true;
+  await one.app.save('item', 's1', { id: 'new', text: 'Fake new' });
+  await one.app.save('item', 's1', { id: 'old', text: 'Fake edited' }, { id: 'old', text: 'Fake old', updatedAt: 5, serverAt: 5 });
+  await one.app.save('item', 's1', { id: 'bye', _deleted: true }, { id: 'bye', text: 'Fake bye', updatedAt: 6, serverAt: 6 });
+  assert.ok(await until(() => one.app.queue.pending() === 0), 'all synced');
+  assert.equal(await one.app.flush(500), true);
+  off();
+  // the reload, offline: the listener never answers, so the list is the device copy
+  const offline = { ...fakeAdapter(srv), listen: () => () => {} };
+  const two = await makeApp({ srv, name, adapter: offline, options: { outbox: memOutbox(name + '-outbox', 'default', records), hub: { openStore } } });
+  await two.app.onUser(() => {}); await two.app.signIn(); await two.app.open('s1');
+  const after = [];
+  two.app.watch('s1', 'items', list => after.push(list.map(d => d.text).sort()));
+  assert.ok(await until(() => after.length > 0), 'the device copy shows offline');
+  assert.deepEqual(after.at(-1), ['Fake edited', 'Fake new'], 'the saves the server answered are in it, the delete too');
 });
 
 // (for test/modules.test.mjs's module-only tests)

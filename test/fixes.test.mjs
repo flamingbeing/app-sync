@@ -557,3 +557,43 @@ test('pending() counts the same save of a failed record once while it is stored 
   hold = false; gates.shift()();
   await p.catch(() => {});
 });
+
+test('a save\'s answer goes into the device copy, never over a newer copy, a tombstone or with an unresolved server stamp (1.3.9)', async () => {
+  const { openStore } = createStores({ prefix: 'fix-a3:', colls: ['items'] });
+  const store = await openStore(S), srv = fakeServer();
+  srv.set('items', { id: 'a', text: 'Fake A', updatedAt: T0, serverAt: T0 });
+  srv.set('items', { id: 'b', text: 'Fake B2', updatedAt: T0 + 50, serverAt: T0 + 50 });
+  let deaf = false;
+  const listen = (s, c, o, cb) => srv.listen(s, c, o, snap => { if (!deaf) cb(snap); });
+  const e = createCollectionSync({ scope: S, coll: 'items', store, listen, stampMode: 'server', now: () => T0 + 100 });
+  const lists = [];
+  e.subscribe(l => lists.push(l));
+  await e.ready; await settle(); await e.flush();
+  deaf = true;
+  await e.land({ id: 'n', text: 'Fake new', updatedAt: T0 + 60, serverAt: { sentinel: true } });
+  await e.land({ id: 'b', text: 'Fake B1', updatedAt: T0 + 40 });   // older than the copy held (heard from elsewhere)
+  await e.drop(['a']);
+  await e.land({ id: 'a', text: 'Fake A late', updatedAt: T0 });   // at its tombstone (the deleted version's stamp)
+  await e.land({ id: 'b', _deleted: true });
+  await e.flush();
+  const got = await store.load('items'), by = new Map(got.docs.map(d => [d.id, d]));
+  assert.deepEqual([...by.keys()].sort(), ['n'], 'the new record is in the device copy; the tombstoned and deleted ones are not');
+  assert.equal(by.get('n').text, 'Fake new');
+  assert.equal('serverAt' in by.get('n'), false, 'an unresolved server stamp is left out (the listener brings the stored one)');
+  assert.deepEqual(lists.at(-1).map(d => d.id), ['n'], 'the list shows the same');
+  await e.stop();
+});
+
+test('a save\'s answer does not replace a newer copy the listener already heard (1.3.9)', async () => {
+  const { openStore } = createStores({ prefix: 'fix-a3b:', colls: ['items'] });
+  const store = await openStore(S), srv = fakeServer();
+  srv.set('items', { id: 'b', text: 'Fake B2', updatedAt: T0 + 50 });
+  const e = createCollectionSync({ scope: S, coll: 'items', store, listen: srv.listen, now: () => T0 + 100 });
+  await e.ready; await settle(); await e.flush();
+  await e.land({ id: 'b', text: 'Fake B1', updatedAt: T0 + 40 });
+  await e.land({ id: 'c', text: 'Fake C', updatedAt: T0 + 60 });
+  await e.flush();
+  const by = new Map((await store.load('items')).docs.map(d => [d.id, d.text]));
+  assert.equal(by.get('b'), 'Fake B2'); assert.equal(by.get('c'), 'Fake C');
+  await e.stop();
+});

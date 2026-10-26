@@ -455,6 +455,22 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
       await persist({ del, meta });
       if (del.length) emit();
     },
+    // (1.3.9) the server's answer to this device's save, into the list and the device copy before the save counts as
+    // done (the listener may not hear it before the page goes offline and reloads). Never over a newer copy held or a
+    // tombstone at or after it; a server stamp not resolved yet is left out (the listener brings the stored one)
+    /** @param {Doc} doc */
+    async land(doc) {
+      await ready;
+      if (stopped || !doc || doc.id == null) return;
+      const id = String(doc.id), held = docs.get(id), gone = meta.gone || {};
+      if (doc._deleted) return this.drop([id]);
+      const d = /** @type {Doc & Record<string, any>} */ ({ ...doc, id });
+      if (server && !(timeOf(d[serverField]) > 0)) delete d[serverField];
+      if ((gone[id] != null && stamp(d) <= gone[id]) || (held && stamp(held) > stamp(d)) || (held && same(held, d))) return;
+      docs.set(id, d);
+      await persist({ put: [d], meta });
+      emit();
+    },
     // tombstones from the bin or a feed; a record with saves not sent yet stays and is reported, as when it leaves
     // the query (its tombstone is not remembered, so the save's answer shows)
     /** @param {Tomb[] | null | undefined} list */
@@ -576,6 +592,14 @@ export function createTombFeed({ scope, store, listen, apply, kinds = {}, coll =
 // expire ({ [coll]: { field, after } }) and stampMode ('client' | 'server', with serverField; the bin and feeds too):
 // see the top of this file.
 export const GRACE = 1500;
+// (1.3.9) landSaved(hub, scope, coll, doc) -> Promise: the server's answer to a save into that collection's running
+// engine (its list and the device copy); a collection no page watches gets it at its next listen. Internal (core.js),
+// not a method of the hub, which is public.
+/** @type {WeakMap<object, (scope: string, coll: string, doc: Doc) => Promise<void>>} */
+const landers = new WeakMap();
+/** @param {object} hub @param {string} scope @param {string} coll @param {Doc} doc @returns {Promise<void>} */
+export function landSaved(hub, scope, coll, doc) { const fn = landers.get(hub); return fn ? fn(scope, coll, doc) : Promise.resolve(); }
+
 /**
  * @typedef {object} SyncHubOptions
  * @property {(scope: string) => Promise<import('./types.js').Store>} openStore
@@ -682,7 +706,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     if ([...engines.keys()].some(k => k.startsWith(scope + '\n'))) return;
     for (const [k, f] of feeds) if (k.startsWith(scope + '\n')) { f.stop(); feeds.delete(k); }
   }
-  return {
+  const hub = {
     // own (1.2.0): the app's listener for this collection instead of listen; one way at a time per collection
     /** @param {string} scope @param {string} coll @param {(list: Doc[], meta: SnapMeta) => void} cb @param {Listen | null} [own] @returns {() => void} */
     watch(scope, coll, cb, own = null) {
@@ -750,6 +774,11 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
     // tests: wait for pending local writes
     flush: () => Promise.all([...[...engines.values(), ...feeds.values()].map(x => x.flush()), ...[...tombing.values()].map(p => p.catch(() => {}))]),
   };
+  landers.set(hub, (scope, coll, doc) => {
+    const e = engines.get(key(scope, coll));
+    return e ? e.land(doc).catch((/** @type {any} */ err) => console.warn('Local store not updated', err)) : Promise.resolve();
+  });
+  return hub;
 }
 
 // Call hub.replan() when the page is shown again, the browser comes back online, and every `every` ms while the page
