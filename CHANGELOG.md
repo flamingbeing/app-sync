@@ -14,6 +14,19 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.11 (2026-10-26)
+
+Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in
+the collection engine (`src/sync.js`).
+
+- **A record restored on the server after this device deleted it shows here again**: a delete's answer has no
+  stamp, and since 1.3.9 it drops the record a second time (the answer, then the delete's job done); the record was
+  no longer held, so that drop set the tombstone at this device's clock, later than a restore another device made
+  meanwhile (it answered its held conflict "mine"). The restore then never showed on the device that deleted it
+  (model test, held-conflict modes: about 2% of seeds). A drop of a record not held now keeps the tombstone it has
+  (the deleted version's stamp); this clock is used only when there is none. Seed 1158 always runs in the model test.
+- **Size budget:** `src/` 294000 -> 294500 bytes, for this fix.
+
 ## 1.3.10 (2026-10-26)
 
 Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in

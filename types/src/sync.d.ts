@@ -217,7 +217,7 @@ export function leaveEntry(kind: string, record: Doc, at?: Stamp): {
     };
     deletedAt: Stamp;
 };
-export function dropTombs(docs: Map<string, Doc>, ids: any[], at: number): Tomb[];
+export function dropTombs(docs: Map<string, Doc>, ids: any[], at: number, gone?: Record<string, number>): Tomb[];
 export function pruneGone(gone: Record<string, number> | null | undefined, now: number): Record<string, number>;
 export const GRACE: 1500;
 export type CollectionSyncOptions = {

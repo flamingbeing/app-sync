@@ -187,9 +187,10 @@ export function applyTombs(docs, gone, tombs) {
   return del;
 }
 
-// records deleted on this device -> tombstones: each at the deleted version's stamp; at (now) only for one not held here
-/** @param {Map<string, Doc>} docs @param {any[]} ids @param {number} at @returns {Tomb[]} */
-export const dropTombs = (docs, ids, at) => ids.map(id => ({ id: String(id), deletedAt: stamp(docs.get(String(id))) || at }));
+// records deleted on this device -> tombstones: each at the deleted version's stamp; one not held here keeps its
+// tombstone (1.3.11), at (now) only for one with neither
+/** @param {Map<string, Doc>} docs @param {any[]} ids @param {number} at @param {Record<string, number>} [gone] @returns {Tomb[]} */
+export const dropTombs = (docs, ids, at, gone = {}) => ids.map(id => ({ id: String(id), deletedAt: stamp(docs.get(String(id))) || gone[String(id)] || at }));
 
 // tombstones [{ id, deletedAt }] kept back (the record has saves not sent) -> later, { id: ms }, the highest per id
 /**
@@ -451,7 +452,7 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     /** @param {string[]} ids @param {number} [at] */
     async drop(ids, at = now()) {
       await ready;
-      const del = applyTombs(docs, meta.gone ||= {}, dropTombs(docs, ids, at));
+      const del = applyTombs(docs, meta.gone ||= {}, dropTombs(docs, ids, at, meta.gone));
       await persist({ del, meta });
       if (del.length) emit();
     },
@@ -670,7 +671,7 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       /** @param {Tomb} t */
       const held = t => { if (!docs.has(t.id) || stamp(docs.get(t.id)) > timeOf(t.deletedAt)) return false; try { return !!unsent(scope, coll, t.id); } catch { return true; } };
       const kept = drop ? [] : (list || []).filter(t => t && t.id && held(t));
-      const del = applyTombs(docs, meta.gone ||= {}, drop ? dropTombs(docs, list, now()) : list.filter(t => !kept.includes(t)));
+      const del = applyTombs(docs, meta.gone ||= {}, drop ? dropTombs(docs, list, now(), meta.gone) : list.filter(t => !kept.includes(t)));
       let m = kept.length ? { ...meta, later: deferTombs(meta.later, kept) } : meta;
       for (const t of kept) { try { onLeave(scope, coll, t.id, copy(/** @type {Doc} */ (docs.get(t.id)))); } catch (e) { console.warn('onLeave', e); } }
       // (and deferred ones whose saves are done: a settle, here while the collection isn't running)
