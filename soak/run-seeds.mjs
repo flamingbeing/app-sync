@@ -1,6 +1,6 @@
 // Soak runner for the seeded model tests (test only; engine code untouched).
 // The tests always start at seed 1000 (model, auth.model) or 1 (cache), so this makes a patched copy of the
-// test file in soak/.gen/ whose seed list starts at SEED_BASE, then runs it with MODEL_SEEDS=SEED_COUNT.
+// test file in the external log directory whose seed list starts at SEED_BASE, then runs it with MODEL_SEEDS=SEED_COUNT.
 //
 // usage: node soak/run-seeds.mjs <model|auth.model|cache> <base> <count> [logDir]
 // split example (6 procs x 3334 seeds): run with base 1000, 4334, 7668, ... in parallel.
@@ -22,8 +22,8 @@ const src = readFileSync(join(root, 'test', `${suite}.test.mjs`), 'utf8');
 const patched = suite === 'cache'
   ? src.replace('for (let seed = 1; seed <= seeds; seed++)', `for (let seed = ${base}; seed < ${base} + seeds; seed++)`)
   : src.replace('(_, i) => 1000 + i', `(_, i) => ${base} + i`);
-if (patched === src) { console.error('seed line not found; test file changed?'); process.exit(2); }
-// generated copy lives in test/ so its relative imports still resolve; it is untracked and not committed
+if (!(suite === 'cache' ? src.includes('for (let seed = 1; seed <= seeds; seed++)') : src.includes('(_, i) => 1000 + i'))) { console.error('seed line not found; test file changed?'); process.exit(2); }
+// Generated copies stay outside git; absolute import URLs preserve module identity.
 mkdirSync(logDir, { recursive: true });
 const gen = join(logDir, `.soak-${suite}-${base}.test.mjs`);
 const relocated = patched.replace(/(from\s+['"])(\.\.?\/[^'"]+)(['"])/g, (_, a, rel, b) => a + pathToFileURL(join(root, 'test', rel)).href + b);
@@ -32,7 +32,7 @@ mkdirSync(logDir, { recursive: true });
 const env = { ...process.env, MODEL_SEEDS: String(count) };
 delete env.MODEL_SEED;
 const r = spawnSync(process.execPath, ['--test', '--test-isolation=none', gen], { env, cwd: root, encoding: 'utf8', maxBuffer: 1 << 30 });
-const out = (r.stdout || '') + (r.stderr || '');
+const out = (r.stdout || '') + (r.stderr || '') + (r.error ? String(r.error) : '');
 writeFileSync(join(logDir, `soak-${suite}-${base}.log`), out);
 const failedSeeds = suite === 'cache'
   ? [...out.matchAll(/not ok \d+ - seed (\d+):/g)].map(m => Number(m[1]))
@@ -43,6 +43,7 @@ if (true) {
   for (const seed of new Set(failedSeeds)) {
     let bad = 0;
     for (let i = 0; i < 3; i++) {
+      if (suite === 'cache') writeFileSync(gen, relocated.replace(`for (let seed = ${base}; seed < ${base} + seeds; seed++)`, `for (let seed = ${seed}; seed < ${seed} + seeds; seed++)`));
       const replayFile = suite === 'cache' ? gen : join(root, 'test', `${suite}.test.mjs`);
       const rr = spawnSync(process.execPath, ['--test', '--test-isolation=none', replayFile], { env: { ...process.env, MODEL_SEED: String(seed), MODEL_SEEDS: '1' }, cwd: root, encoding: 'utf8' });
       writeFileSync(join(logDir, `replay-${suite}-${seed}-${i+1}.log`), (rr.stdout || '') + (rr.stderr || ''));
