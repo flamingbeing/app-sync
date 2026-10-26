@@ -74,3 +74,19 @@ Read-only timestamp diagnostics for one seed (expected failure exit status if th
 ```powershell
 node soak/inspect-seed.mjs 1158 > "$env:TEMP\sync-soak\inspect-1158.log"
 ```
+
+## Four-worker extended seed range
+
+```bash
+python3 soak/run.py --round4 --fresh --minutes 69
+```
+
+This configuration uses four Node hosts (three isolated model realms per host), model seeds 20000–35000
+inclusive plus 1158, and auth/cache seeds 5000–12000 inclusive. It changes seed selection only in generated
+TEMP copies, runs all three model modes, and replays each failing seed individually twice. The fixed model
+regression seed is selected separately so range blocks do not duplicate it. No backend service is contacted.
+Single-file runs invoke Node directly, which supports Node 22 without `--test-isolation=none`.
+Use `--out <external-log-directory>` to resume completed blocks. Admission stops after `--minutes`; allow
+extra time for admitted blocks and replays. Exit-status failures without a reported failing seed must be
+investigated before considering a block complete. `results.json` records seeded counts; cache's additional
+unseeded unit tests are excluded from seeded totals.
