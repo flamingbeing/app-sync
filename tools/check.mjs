@@ -43,7 +43,7 @@ for (const app of apps) {
   for (const f of shell) if (!fs.existsSync(path.join(ROOT, f))) fail(`${swPath}: SHELL lists ${f}, which doesn't exist`);
 }
 
-const BUDGET = { 'index.js': 2600, 'src/': 290000 };
+const BUDGET = { 'index.js': 2600, 'src/': 291000 };
 const bytesOf = rel => {
   const abs = path.join(ROOT, rel);
   return fs.statSync(abs).isDirectory() ? fs.readdirSync(abs).reduce((n, f) => n + bytesOf(path.posix.join(rel, f)), 0) : fs.statSync(abs).size;

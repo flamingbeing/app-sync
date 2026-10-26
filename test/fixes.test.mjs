@@ -423,3 +423,77 @@ test('a forget does not wait for ever on a store write that never ends', async (
   await settle();
   await q.forget();
 });
+
+test('a save done before the listener hears it keeps showing while offline (1.3.7)', async () => {
+  // The server answers a save just as the connection drops: the save is done, so the queue no longer lays it over the
+  // list, but the listener never heard the server's copy (it only hears the device copy now). The record vanished
+  // from the list (a new one) or went back to its old copy (an edit) until back online. Seen in a real browser with
+  // an item's edit sheet open: added, then offline at once.
+  const records = new Map();
+  const store = { async put(x) { records.set(x.key, structuredClone(x)); }, async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; }, async remove(k) { records.delete(k); }, async forget() {} };
+  /** @type {(() => void)[]} */
+  const answers = [];
+  const backend = (_o, _k, r) => new Promise(res => { answers.push(() => res({ ...r, updatedAt: (r.updatedAt || 0) + 100 })); });
+  const q = createWriteQueue({ store, getOwner: () => 'a', backend, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const subs = new Set();
+  const hub = { watch: (_s, _c, cb) => { subs.add(cb); return () => subs.delete(cb); } };
+  const hear = (list, fromCache = false) => { for (const cb of subs) cb(structuredClone(list), { fromCache, hasPendingWrites: false }); };
+  const shown = [];
+  const off = watchSaved({ hub, queue: q, scope: 'a', coll: 'items', kind: 'item' }, list => shown.push(list));
+  const v1 = { id: 'old', text: 'Fake old', updatedAt: 1 };
+  hear([v1]);
+  const texts = () => shown.at(-1).map(d => d.text).sort();
+
+  // a new record and an edit, both answered by the server while offline (the listener hears only the device copy)
+  await q.save('item', 'a', { id: 'new', text: 'Fake new', updatedAt: 2 }, null);
+  await q.save('item', 'a', { ...v1, text: 'Fake edited', updatedAt: 3 }, v1);
+  await settle(10);
+  assert.equal(answers.length, 2, 'both are being sent');
+  hear([v1], true);   // offline: the cached copy, without either save
+  for (const a of answers) a();
+  await q.settle('item', ['new', 'old']); await settle(10);
+  assert.equal(q.status('item', 'new'), 'synced'); assert.equal(q.status('item', 'old'), 'synced');
+  assert.deepEqual(texts(), ['Fake edited', 'Fake new'], 'the saves done show (the server has them), not the old copies');
+  hear([v1], true);
+  assert.deepEqual(texts(), ['Fake edited', 'Fake new'], 'and keep showing while the listener hears only the device copy');
+
+  // back online: the listener hears the server, which is the truth again (here another device deleted the new one)
+  hear([{ ...v1, text: 'Fake edited', updatedAt: 103 }]);
+  assert.deepEqual(texts(), ['Fake edited'], 'what the server says shows once it answers the listener');
+  off();
+});
+
+test('a save the store refuses does not bring back an earlier save over a newer server copy (1.3.7)', async () => {
+  // Before a new save is stored the queue's latest job of that record is still the earlier one, done and heard. If the
+  // store refuses the new save, that earlier job's result must not show over what the server holds now.
+  const records = new Map();
+  let full = false;
+  const store = { async put(x) { if (full) throw new Error('quota'); records.set(x.key, structuredClone(x)); }, async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; }, async remove(k) { records.delete(k); }, async forget() {} };
+  const backend = async (_o, _k, r) => ({ ...r, updatedAt: (r.updatedAt || 0) + 100 });
+  const q = createWriteQueue({ store, getOwner: () => 'a', backend, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const subs = new Set();
+  const hub = { watch: (_s, _c, cb) => { subs.add(cb); return () => subs.delete(cb); } };
+  const hear = (list, fromCache = false) => { for (const cb of subs) cb(structuredClone(list), { fromCache, hasPendingWrites: false }); };
+  const shown = [];
+  const off = watchSaved({ hub, queue: q, scope: 'a', coll: 'items', kind: 'item' }, list => shown.push(list));
+  const v1 = { id: 'one', text: 'Fake first', updatedAt: 1 };
+  hear([v1]);
+  const texts = () => shown.at(-1).map(d => d.text);
+
+  await q.save('item', 'a', { ...v1, text: 'Fake mine', updatedAt: 2 }, v1);
+  await q.settle('item', ['one']); await settle(10);
+  assert.equal(q.status('item', 'one'), 'synced');
+  hear([{ ...v1, text: 'Fake mine', updatedAt: 102 }]);           // the listener hears the save
+  hear([{ ...v1, text: 'Fake theirs', updatedAt: 300 }], true);    // another device's edit since, now cached offline
+  assert.deepEqual(texts(), ['Fake theirs']);
+
+  full = true;
+  await assert.rejects(q.save('item', 'a', { ...v1, text: 'Fake refused', updatedAt: 301 }, { ...v1, text: 'Fake theirs', updatedAt: 300 }));
+  await settle(10);
+  assert.deepEqual(texts(), ['Fake theirs'], 'the server copy shows, not the earlier save');
+  hear([{ ...v1, text: 'Fake theirs', updatedAt: 300 }], true);
+  assert.deepEqual(texts(), ['Fake theirs'], 'and still after the next cached snapshot');
+  off();
+});

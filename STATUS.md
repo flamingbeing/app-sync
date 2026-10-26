@@ -1,6 +1,7 @@
 # Status
 
 ## Now
+- 1.3.7 (26 Oct): a save done just before going offline keeps showing (`watchSaved`); no API or format change.
 - 1.2.0 (26 Oct): `kinds[kind] = { coll, path }`, `backend.unstampedColls`, `watch(..., { listen })`, `facts().inStepAt`, `sync({ reopen })`; additive, no format change.
 - 1.1.0 (26 Oct): `sync.saveMany`, `watch(..., { query, limit })`, `backend.merge["*"]` + `replaceRecord`, `backend.commitRetry`; additive, no format change.
 - 0.9.2 (25 Oct): the freeze: entries + import-map names `@core/*` (reserved UI-kit names), strict JSDoc + generated `types/`, package `exports`, modularity check, Vite check (external / source / git-installed), FORMATS.md scope rule pinned by hash, SHAPES.md (1.x additions); no runtime change.
