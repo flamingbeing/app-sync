@@ -19,6 +19,12 @@ Replay one model seed directly:
 $env:MODEL_SEED='1158'; node --test --test-isolation=none test/model.test.mjs
 ```
 
+Repeat the fixes suite 200 times with six workers and fresh logs:
+
+```powershell
+python soak/run.py --suite fixes --fresh
+```
+
 Replay a regression file directly:
 
 ```powershell

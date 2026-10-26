@@ -4,7 +4,7 @@ Usage: python soak/run.py [--quick]
 import concurrent.futures as cf
 import json, os, pathlib, re, subprocess, sys, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-OUT = pathlib.Path(os.environ['TEMP']) / 'sync-soak'
+OUT = pathlib.Path(os.environ['TEMP']) / ('sync-soak-' + time.strftime('%Y%m%d-%H%M%S') if '--fresh' in sys.argv else 'sync-soak')
 OUT.mkdir(exist_ok=True)
 DEADLINE = time.time() + 80 * 60
 (OUT/'driver.pid').write_text(str(os.getpid()))
@@ -54,6 +54,11 @@ if __name__ == '__main__':
         for offset in range(0,total,50): jobs.append((suite,base+offset,min(50,total-offset),None))
     for suite in ['faults','held','writes','sync','fixes']:
         for repeat in range(1,(1 if QUICK else 200)+1): jobs.append((suite,0,0,repeat))
+    if '--suite' in sys.argv:
+        selected = sys.argv[sys.argv.index('--suite')+1]
+        jobs = [j for j in jobs if j[0] == selected]
+        if not jobs: raise SystemExit('unknown suite')
+    print('Logs:',OUT,flush=True)
     jobs.sort(key=lambda j: j[0] == 'model')
     prior = json.loads((OUT/'results.json').read_text()) if (OUT/'results.json').exists() and not QUICK else []
     done = {(r.get('suite'),r.get('base'),r.get('count'),r.get('repeat')) for r in prior}
