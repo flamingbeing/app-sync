@@ -75,7 +75,9 @@ test('a backend call that never settles times out and the save is sent again', a
   await settle(60);
   assert.equal(q.status('item', '1'), 'pending', 'still pending: nothing lost');
   hang = false; q.kick();
-  await settle(40);
+  // the hung call can still be inside its 30 ms timeout plus the 10 ms retry delay (kick does not replace it): wait
+  // for the resend rather than a fixed time
+  for (const end = Date.now() + 1000; q.status('item', '1') !== 'synced' && Date.now() < end;) await settle(5);
   assert.equal(q.status('item', '1'), 'synced');
   assert.ok(calls >= 2); assert.equal(remote.get('1').text, 'Fake');
 });
