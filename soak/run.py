@@ -10,6 +10,7 @@ minutes = float(sys.argv[sys.argv.index('--minutes')+1]) if '--minutes' in sys.a
 if minutes <= 0: raise SystemExit('minutes must be positive')
 DEADLINE = time.time() + minutes * 60
 (OUT/'driver.pid').write_text(str(os.getpid()))
+ROUND4 = '--round4' in sys.argv
 QUICK = '--quick' in sys.argv
 
 def execute(suite, base, count, repeat=None, replay_index=None):
@@ -25,6 +26,9 @@ def execute(suite, base, count, repeat=None, replay_index=None):
             old, new = '(_, i) => 1000 + i', f'(_, i) => {base} + i'
         assert old in text
         text = text.replace(old, new)
+        if ROUND4 and suite == 'model':
+            # Range jobs cover exactly their requested seeds; run regression 1158 separately.
+            text = text.replace('const FIXED = [1158];', 'const FIXED = [];')
         text = re.sub(r'''(from\s+['"])(\.\.?/[^'"]+)(['"])''', lambda m: m[1] + (source.parent / m[2]).resolve().as_uri() + m[3], text)
         target = OUT / f'{key}.mjs'
         target.write_text(text)
@@ -46,7 +50,7 @@ def task(suite, base, count, repeat=None):
     if time.time() > DEADLINE: return {'skipped':True}
     row = execute(suite,base,count,repeat)
     if row['status']:
-        row['replays'] = [execute(suite,seed,1,repeat,k+1) for seed in row['failedSeeds'] for k in range(3)] if repeat is None else [execute(suite,base,count,repeat,k+1) for k in range(3)]
+        row['replays'] = [execute(suite,seed,1,repeat,k+1) for seed in row['failedSeeds'] for k in range(2 if ROUND4 else 3)] if repeat is None else [execute(suite,base,count,repeat,k+1) for k in range(2 if ROUND4 else 3)]
     return row
 
 if __name__ == '__main__':
@@ -55,7 +59,12 @@ if __name__ == '__main__':
     for suite,total,base in [('auth.model',5000,1000),('cache',5000,1),('model',20000,1000)]:
         total = 10 if QUICK else total
         for offset in range(0,total,50): jobs.append((suite,base+offset,min(50,total-offset),None))
-    for suite in ['faults','held','writes','sync','fixes']:
+    if ROUND4:
+        jobs = [('model',1158,1,None)]
+        for suite, first, last in [('model',20000,35000),('auth.model',5000,12000),('cache',5000,12000)]:
+            for base in range(first,last+1,50):
+                jobs.append((suite,base,min(50,last-base+1),None))
+    for suite in ([] if ROUND4 else ['faults','held','writes','sync','fixes']):
         for repeat in range(1,(1 if QUICK else 200)+1): jobs.append((suite,0,0,repeat))
     if '--suite' in sys.argv:
         selected = sys.argv[sys.argv.index('--suite')+1]
@@ -68,7 +77,7 @@ if __name__ == '__main__':
     jobs = [j for j in jobs if j not in done]
     prior_count=len(prior)
     results=prior
-    with cf.ThreadPoolExecutor(max_workers=6) as pool:
+    with cf.ThreadPoolExecutor(max_workers=4 if ROUND4 else 6) as pool:
         pending={pool.submit(task,*job):job for job in jobs}
         for future in cf.as_completed(pending):
             try: row=future.result()
