@@ -193,18 +193,24 @@ async function run(seed, { steps = 30, held = false } = {}) {
 const one = process.env.MODEL_SEED ? [Number(process.env.MODEL_SEED)] : null;
 const count = Number(process.env.MODEL_SEEDS) || 40;
 const start = Number(process.env.MODEL_START) || 1000;
+// Each run injects its own server, SDK, outbox, navigator and null storage/window.
+// Overlap independent scenarios without spawning Node child processes; replay stays isolated.
+const concurrency = Math.max(1, Math.min(4, Math.floor(Number(process.env.MODEL_CONCURRENCY) || 4)));
 // (1.3.11) seeds that once failed, always run: 1158 (a restore after this device's delete stayed hidden)
 const FIXED = [1158];
 const seeds = one || [...new Set([...Array.from({ length: count }, (_, i) => start + i), ...FIXED])];
 
 for (const held of [false, true, 'merge']) test(`model${held === 'merge' ? ' (held conflicts with a merge collection, 0.7.1)' : held ? ' (held conflicts, 0.6.3)' : ''}: ${seeds.length} seeded runs of two or three devices agree with the model`, { timeout: 600e3 }, async () => {
   const failed = [];
-  for (const seed of seeds) {
-    const { problems, log, n } = await run(seed, { held });
-    if (problems.length) {
-      failed.push(seed);
-      console.log(`seed ${seed}${held ? ' (held)' : ''} failed (${n} devices; replay: MODEL_SEED=${seed} node --test test/model.test.mjs)\n  steps: ${log.join('; ')}\n  ${problems.join('\n  ')}`);
-    }
+  for (let offset = 0; offset < seeds.length; offset += concurrency) {
+    await Promise.all(seeds.slice(offset, offset + concurrency).map(async seed => {
+      const { problems, log, n } = await run(seed, { held });
+      if (problems.length) {
+        failed.push(seed);
+        console.log(`mode: ${held === 'merge' ? 'held merge' : held ? 'held tasks' : 'ordinary'}`);
+        console.log(`seed ${seed}${held ? ' (held)' : ''} failed (${n} devices; replay: MODEL_SEED=${seed} node --test test/model.test.mjs)\n  steps: ${log.join('; ')}\n  ${problems.join('\n  ')}`);
+      }
+    }));
   }
   assert.deepEqual(failed, [], 'failing seeds: ' + failed.join(', '));
 });
