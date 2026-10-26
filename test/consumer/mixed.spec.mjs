@@ -33,6 +33,7 @@ async function edit(page, from, to) {
 async function remove(page, text) {
   await page.getByRole('button', { name: text }).click();
   await page.click('#edit-delete');
+  await page.getByRole('button', { name: 'Delete', exact: true }).last().click();   // the starter's confirm (app-starter #14)
 }
 
 test('a phone on the pinned engine and a phone on the candidate share one account', async ({ browser }) => {
