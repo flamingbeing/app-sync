@@ -26,6 +26,8 @@ Fix, no API, module-contract or stored-format change; modular: yes, shaken: no n
   the copy the server stored shows in its place until the listener hears that record change or the server answers the
   listener (then the listener's list is the truth again, a delete elsewhere included). Only in memory: a reload while
   still offline shows the device copy as before (the record comes back with the next server answer).
+  Only a save still being sent when it was laid over the list takes its place: a later save the store refuses does
+  not bring an earlier, already heard save back over a newer server copy.
 - **Size budget:** `src/` 290000 -> 291000 bytes, for this fix.
 
 ## 1.3.6 (2026-10-26)

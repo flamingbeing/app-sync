@@ -482,8 +482,10 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view 
   // (1.3.7) a save done before the listener heard anything of its record (the connection dropped between the server's
   // answer and the listener's news) shows the server's copy, not the list's, until the listener hears that record
   // change or the server answers it: it neither vanishes nor goes back to its old copy offline.
-  // laid: ids the queue lays over the list -> { job key, list copy, heard since }; landed: id -> { doc, list copy }
-  /** @type {Map<string, { key: string, seen: string, heard: boolean }>} */
+  // laid: ids the queue lays over the list -> { job key, still open then, list copy, heard since }; landed: id -> { doc,
+  // list copy }. Only a job still open when laid can land: before a new save is stored, the latest job is the earlier,
+  // done one, and a save the store refuses must not bring its result back over a newer server copy.
+  /** @type {Map<string, { key: string, open: boolean, seen: string, heard: boolean }>} */
   const laid = new Map();
   /** @type {Map<string, { doc: Doc | null, seen: string }>} */
   const landed = new Map();
@@ -495,14 +497,14 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view 
     for (const id of was.keys()) if (!over.has(id)) now.add(id);
     for (const id of now) {
       const key = queue.jobKey(kind, id), seen = text(id), w = laid.get(id);
-      if (w?.key !== key) laid.set(id, { key, seen, heard: false }); else if (w.seen !== seen) Object.assign(w, { seen, heard: true });
+      if (w?.key !== key) laid.set(id, { key, open: !!key && !queue.finished(key), seen, heard: false }); else if (w.seen !== seen) Object.assign(w, { seen, heard: true });
       landed.delete(id);
     }
     for (const [id, w] of laid) {
       if (now.has(id)) continue;
       laid.delete(id);
       const job = queue.finished(w.key), doc = job?.result?.id != null ? job.result : job?.record;
-      if (!w.heard && text(id) === w.seen && job?.state === 'synced' && job.owner === owner && doc) landed.set(id, { doc: doc._deleted ? null : doc, seen: w.seen });
+      if (w.open && !w.heard && text(id) === w.seen && job?.state === 'synced' && job.owner === owner && doc) landed.set(id, { doc: doc._deleted ? null : doc, seen: w.seen });
     }
     for (const [id, l] of landed) {
       if (text(id) !== l.seen) landed.delete(id); else if (l.doc) over.set(id, l.doc); else over.delete(id);
