@@ -6,12 +6,13 @@ import json, os, pathlib, re, subprocess, sys, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = pathlib.Path(os.environ['TEMP']) / 'sync-soak'
 OUT.mkdir(exist_ok=True)
-DEADLINE = time.time() + 85 * 60
+DEADLINE = time.time() + 80 * 60
 (OUT/'driver.pid').write_text(str(os.getpid()))
 QUICK = '--quick' in sys.argv
 
-def execute(suite, base, count, repeat=None):
+def execute(suite, base, count, repeat=None, replay_index=None):
     key = f'{suite}-{base}-{count}' if repeat is None else f'{suite}-repeat-{repeat}'
+    if replay_index is not None: key += f'-replay-{replay_index}'
     source = ROOT / 'test' / f'{suite}.test.mjs'
     if repeat is None:
         text = source.read_text()
@@ -42,7 +43,7 @@ def task(suite, base, count, repeat=None):
     if time.time() > DEADLINE: return {'skipped':True}
     row = execute(suite,base,count,repeat)
     if row['status']:
-        row['replays'] = [execute(suite,seed,1,repeat) for seed in row['failedSeeds'] for _ in range(3)] if repeat is None else [execute(suite,base,count,repeat+1000+k) for k in range(3)]
+        row['replays'] = [execute(suite,seed,1,repeat,k+1) for seed in row['failedSeeds'] for k in range(3)] if repeat is None else [execute(suite,base,count,repeat,k+1) for k in range(3)]
     return row
 
 if __name__ == '__main__':
