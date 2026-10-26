@@ -23,7 +23,7 @@ def run(i):
     if a.suite == 'model':
         env['MODEL_SEED'] = str(key)
     log = logs / f'{key}.log'
-    cmd = ['node', '--test', '--test-isolation=none', f'test/{a.suite}.test.mjs']
+    cmd = ['node', f'test/{a.suite}.test.mjs']
     start = time.monotonic()
     with log.open('w') as out:
         try:
@@ -38,7 +38,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=a.workers) as pool:
         results.extend(r for r in batch if r is not None)
         (logs / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
         if len(results) % 20 < a.workers or any(r and r['code'] for r in batch):
-            print(json.dumps(dict(suite=a.suite, runs=len(results), failed=[r['index'] for r in results if r['code']])), flush=True)
+            print(json.dumps(dict(suite=a.suite, runs=len(results), failed=sum(r['code'] != 0 for r in results))), flush=True)
         if time.monotonic() >= end:
             break
 failed = sum(r['code'] != 0 for r in results)
