@@ -15,12 +15,20 @@ const files = fileArg.split(',').map(s => s.trim()).filter(Boolean);
 
 function parseTapFailure(out, file) {
   const lines = out.split(/\r?\n/);
-  const notOk = lines.find(l => /^not ok \d+\s*-/.test(l)) || '';
+  const idx = lines.findIndex(l => /^not ok \d+\s*-/.test(l));
+  const notOk = idx >= 0 ? lines[idx] : '';
   const testName = notOk.replace(/^not ok \d+\s*-\s*/, '').trim() || basename(file);
-  const msgLine = lines.find(l => /^\s*(?:error|message|actual|expected|AssertionError):/i.test(l)) || lines.find(l => /Error/.test(l)) || '';
+  const block = idx >= 0 ? lines.slice(idx + 1, idx + 35) : lines;
+  const actual = block.find(l => /^\s*actual:\s*/.test(l))?.replace(/^\s*actual:\s*/, '').trim();
+  const expected = block.find(l => /^\s*expected:\s*/.test(l))?.replace(/^\s*expected:\s*/, '').trim();
+  const errLine = block.find(l => /^\s*error:\s*/.test(l))?.replace(/^\s*error:\s*/, '').trim()
+    || lines.find(l => /AssertionError|Error:/.test(l))?.trim();
+  const mismatch = (expected !== undefined && actual !== undefined)
+    ? `expected ${expected}, actual ${actual}`
+    : (errLine || 'non-zero exit');
   return {
     mode: testName,
-    mismatch: msgLine.trim() || 'non-zero exit',
+    mismatch,
     replay: `node --test --test-isolation=none ${file}`
   };
 }
@@ -57,7 +65,7 @@ if (files.length === 1) {
     if (again < 3) flaky++; else deterministic++;
     const info = parseTapFailure(out, file);
     failures.push({ repeat: i, replayFailed: again, statuses, ...info });
-    console.log(`  ${file} repeat ${i}: failed; rerun alone failed ${again}/3 (${info.mode})`);
+    console.log(`  ${file} repeat ${i}: failed; rerun alone failed ${again}/3 (${info.mode}: ${info.mismatch})`);
   }
   console.log(`${file} runs=${runs} pass=${pass} fail=${fail} flaky=${flaky} deterministic=${deterministic}`);
   writeFileSync(join(logDir, `loop-${basename(file)}.json`), JSON.stringify({ file, runs, pass, fail, flaky, deterministic, failures }, null, 2));
@@ -93,11 +101,12 @@ if (files.length === 1) {
         if (again < 3) st.flaky++; else st.deterministic++;
         const info = parseTapFailure(out, file);
         st.failures.push({ repeat: i, replayFailed: again, statuses, ...info });
-        console.log(`  ${file} repeat ${i}: failed; rerun alone failed ${again}/3 (${info.mode})`);
+        console.log(`  ${file} repeat ${i}: failed; rerun alone failed ${again}/3 (${info.mode}: ${info.mismatch})`);
       }
-      if (i % 50 === 0 || i === runs) {
+      const done = st.pass + st.fail;
+      if (done % 50 === 0 || done === runs) {
         writeFileSync(join(logDir, `loop-${basename(file)}.json`), JSON.stringify(st, null, 2));
-        if (i === runs) console.log(`${file} runs=${runs} pass=${st.pass} fail=${st.fail} flaky=${st.flaky} deterministic=${st.deterministic}`);
+        if (done === runs) console.log(`${file} runs=${runs} pass=${st.pass} fail=${st.fail} flaky=${st.flaky} deterministic=${st.deterministic}`);
       }
     }
   }
