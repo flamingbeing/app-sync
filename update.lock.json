@@ -70,5 +70,9 @@
   "1.3.10": {
     "sw-core.js": "ec57d6ddc4d49dfcbd71e9eed6ee50e5b90eeee281038caefebf6929ee963aee",
     "register.js": "48be9f7b5ca976ea22fa1c28e7a5871a2195657e1e3231ccea1b726258f466a2"
+  },
+  "1.3.11": {
+    "sw-core.js": "00dc64f41a1604554bcdcaf8e0f26b7963b727c38274a9daf2f76ef88644d22c",
+    "register.js": "1b2057a49909e34ecc85f6317af8ccca6bc4c22db80c1bcfc7495a16a3a04262"
   }
 }

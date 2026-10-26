@@ -597,3 +597,23 @@ test('a save\'s answer does not replace a newer copy the listener already heard 
   assert.equal(by.get('b'), 'Fake B2'); assert.equal(by.get('c'), 'Fake C');
   await e.stop();
 });
+
+test('a record restored on the server after this device deleted it shows here again (1.3.11)', async () => {
+  // the delete's answer has no stamp: dropping it again (the answer, then the job done) kept a tombstone at this
+  // clock, newer than a restore stamped before it, so the restore never showed on the device that deleted it
+  const { openStore } = createStores({ prefix: 'fix-a4:', colls: ['items'] });
+  const store = await openStore(S), srv = fakeServer();
+  srv.set('items', { id: 't1', text: 'Fake old', updatedAt: T0 });
+  let t = T0 + 100;
+  const e = createCollectionSync({ scope: S, coll: 'items', store, listen: srv.listen, now: () => t });
+  await e.ready; await settle(); await e.flush();
+  await e.drop(['t1']);                          // deleted here (offline)
+  t = T0 + 66e3;
+  await e.land({ id: 't1', _deleted: true });    // the delete's answer, later
+  await e.drop(['t1']);                          // and the delete's job done
+  srv.set('items', { id: 't1', text: 'Fake restored', updatedAt: T0 + 10 });   // another device keeps its copy
+  await settle(); await e.flush();
+  const by = new Map((await store.load('items')).docs.map(d => [d.id, d.text]));
+  assert.equal(by.get('t1'), 'Fake restored', 'the restore is in the device copy');
+  await e.stop();
+});
