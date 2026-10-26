@@ -398,3 +398,210 @@ test('passcode: the code goes to the app\'s url, its token signs in; a refused c
   assert.deepEqual(t.sdk.calls, ['token tok1']);
   assert.equal(t.app.auth.user().uid, 'guest-tok1');
 });
+
+test('passcode: a sign-out while the code is out wins: its token signs nobody in', async () => {
+  let answer;
+  const fetch = () => new Promise(r => { answer = () => r({ ok: true, status: 200, json: async () => ({ token: 'tok1' }) }); });
+  const t = setup({ options: { methods: [passcode({ url: 'https://guest.example.test/token', fetch })] } });
+  await t.app.ready;
+  const pending = t.app.auth.signIn({ method: 'passcode', code: 'right' });
+  await settle();
+  await t.app.auth.signOut();
+  answer();
+  assert.deepEqual(await pending, { ok: false, reason: 'refused' });
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.equal(t.app.auth.user(), null);
+  assert.deepEqual(t.log, []);
+});
+
+test('forget(): a wipe that throws keeps the owner, so the next account is a switch that wipes again', async () => {
+  const device = { rows: [], unsent: 0 }, log = [];
+  let broken = true;
+  const flaky = {
+    name: 'flaky', needs: ['auth'],
+    start(ctx) {
+      ctx.on('forget', () => { if (broken) throw new Error('wipe failed'); });
+      ctx.on('switch', () => { log.push('flaky switch'); });
+      return {};
+    },
+    stop() {},
+  };
+  const sdk = fakeSdk();
+  const app = createApp({ config: { name: 'fake-app', storage: memStorage(), sdk: sdk.sdk }, modules: [auth(), fakeData(device, log), flaky] });
+  await app.ready;
+  await app.auth.signIn();
+  assert.deepEqual(await app.auth.forget(), { ok: true, reason: '', failed: ['flaky'] });
+  broken = false;
+  sdk.as(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  assert.deepEqual(await app.auth.signIn(), { ok: true, reason: '' });
+  assert.deepEqual(log, ['signin u1', 'signout u1', 'forget u1', 'switch u1>u2', 'flaky switch', 'signin u2']);
+});
+
+test('stop() while the app\'s beforeSwitch runs: the switch goes no further, no claims watch is left', async () => {
+  let release, entered;
+  const inBefore = new Promise(r => { entered = r; });
+  const t = setup({ options: {
+    beforeSwitch: () => { entered(); return new Promise(r => { release = r; }); },
+    claims: { url: 'https://claims.example.test', watch: true, doc: u => 'roles/' + u.uid },
+  } });
+  await t.app.ready;
+  await t.app.auth.signIn();
+  await t.app.auth.signOut();
+  t.sdk.as(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  void t.app.auth.signIn();
+  await inBefore;
+  await t.app.stop();
+  release();
+  await settle();
+  assert.equal(t.sdk.docCbs.size, 0, 'no claims watch after stop');
+  assert.deepEqual(t.log, ['signin u1', 'signout u1']);
+});
+
+test('a sign-out during the SDK\'s own sign-in wins too: the late account is signed straight out, no switch, no wipe', async () => {
+  const t = setup();
+  await t.app.ready;
+  await t.app.auth.signIn();
+  t.app.data.save({ id: 'kept' });
+  t.app.data.sent();
+  await t.app.auth.signOut();
+  await t.app.stop();
+  let land;
+  t.sdk.A.signInWithCustomToken = (a, token) => new Promise(r => { land = () => { a.set(fakeUser({ uid: 'guest-' + token, email: '' })); r(); }; });
+  const late = { name: 'late', signIn: async () => ({ token: 'tok2' }) };
+  const t2 = setup({ storage: t.storage, sdk: t.sdk, device: t.device, log: t.log, options: { methods: [late] } });
+  await t2.app.ready;
+  const pending = t2.app.auth.signIn({ method: 'late' });
+  await settle();
+  await t2.app.auth.signOut();
+  land();
+  assert.deepEqual(await pending, { ok: false, reason: 'refused' });
+  await settle();
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.deepEqual(t.device.rows, [{ id: 'kept' }]);
+  assert.ok(!t.log.some(l => l.startsWith('switch') || l === 'signin guest-tok2'), t.log.join());
+});
+
+test('stop() while the switch\'s wipes run: the new account is not made the owner', async () => {
+  let release, entered;
+  const inWipe = new Promise(r => { entered = r; });
+  const slow = { name: 'slow', needs: ['auth'], start(ctx) { ctx.on('switch', () => { entered(); return new Promise(r => { release = r; }); }); return {}; }, stop() {} };
+  const storage = memStorage(), sdk = fakeSdk();
+  const app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), slow] });
+  await app.ready;
+  await app.auth.signIn();
+  await app.auth.signOut();
+  sdk.as(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  void app.auth.signIn();
+  await inWipe;
+  await app.stop();
+  release();
+  await settle();
+  assert.match([...storage.m.values()].join(), /"uid":"u1"/);
+});
+
+test('a sign-out during a self-signing method wins too: the account it signed in is signed straight out, no switch', async () => {
+  const t = setup();
+  await t.app.ready;
+  await t.app.auth.signIn();
+  t.app.data.save({ id: 'kept' });
+  t.app.data.sent();
+  await t.app.auth.signOut();
+  await t.app.stop();
+  let land;
+  // signs in by itself (a popup's own sign-in): Auth has the account when its promise ends, and tells of it later
+  const self = { name: 'self', signIn: x => new Promise(r => { land = () => {
+    const u = fakeUser({ uid: 'u2', email: 'other@example.test' });
+    x.auth.currentUser = u;
+    setTimeout(() => { for (const cb of [...x.auth.cbs]) cb(x.auth.currentUser); }, 0);
+    r({});
+  }; }) };
+  const t2 = setup({ storage: t.storage, sdk: t.sdk, device: t.device, log: t.log, options: { methods: [self] } });
+  await t2.app.ready;
+  const pending = t2.app.auth.signIn({ method: 'self' });
+  await settle();
+  await t2.app.auth.signOut();
+  land();
+  assert.deepEqual(await pending, { ok: false, reason: 'refused' });
+  await settle();
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.deepEqual(t.device.rows, [{ id: 'kept' }]);
+  assert.ok(!t.log.some(l => l.startsWith('switch') || l === 'signin u2'), t.log.join());
+});
+
+test('a sign-out during the app\'s beforeSwitch wins: nothing is wiped, the old account stays the owner, no signin', async () => {
+  let release, entered;
+  const inBefore = new Promise(r => { entered = r; });
+  const t = setup({ options: { beforeSwitch: () => { entered(); return new Promise(r => { release = r; }); } } });
+  await t.app.ready;
+  await t.app.auth.signIn();
+  t.app.data.save({ id: 'kept' });
+  t.app.data.sent();
+  await t.app.auth.signOut();
+  t.sdk.as(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  const pending = t.app.auth.signIn();
+  await inBefore;
+  const out = t.app.auth.signOut();
+  await settle();
+  release();
+  await out;
+  assert.deepEqual(await pending, { ok: false, reason: 'refused' });
+  await settle();
+  assert.equal(t.sdk.auth.currentUser, null);
+  assert.deepEqual(t.device.rows, [{ id: 'kept' }]);
+  assert.match([...t.storage.m.values()].join(), /"uid":"u1"/);
+  assert.deepEqual(t.log, ['signin u1', 'signout u1']);
+});
+
+test('stop() during forget\'s wipes: the owner stays (a wipe may not have run)', async () => {
+  let app;
+  const stopper = { name: 'stopper', needs: ['auth'], start(ctx) { ctx.on('forget', () => app.stop()); return {}; }, stop() {} };
+  const storage = memStorage(), sdk = fakeSdk(), device = { rows: [], unsent: 0 }, log = [];
+  app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), stopper, fakeData(device, log)] });
+  await app.ready;
+  await app.auth.signIn();
+  app.data.save({ id: 'kept' });
+  app.data.sent();
+  await app.auth.forget();
+  assert.deepEqual(device.rows, [{ id: 'kept' }]);
+  assert.match([...storage.m.values()].join(), /"uid":"u1"/);
+});
+
+test('a slow module stop: a switch the stop cut short does not make the new account the owner', async () => {
+  let release, app;
+  const slowStop = { name: 'slowStop', needs: ['auth'], start() { return {}; }, stop() { return new Promise(r => { release = r; }); } };
+  const storage = memStorage(), sdk = fakeSdk(), device = { rows: [], unsent: 0 }, log = [];
+  app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), fakeData(device, log), slowStop] });
+  await app.ready;
+  await app.auth.signIn();
+  device.rows.push({ id: 'kept' });
+  await app.auth.signOut();
+  const stopping = app.stop();
+  await settle();
+  sdk.auth.set(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  await settle();
+  release();
+  await stopping;
+  assert.deepEqual(device.rows, [{ id: 'kept' }]);
+  assert.match([...storage.m.values()].join(), /"uid":"u1"/);
+});
+
+test('a stop that clears a later module\'s handlers mid-switch: the owner stays (its wipe did not run)', async () => {
+  let release, gate;
+  const slow = { name: 'slow', needs: ['auth'], start(ctx) { ctx.on('switch', () => new Promise(r => { gate = r; })); return {}; }, stop() { return new Promise(r => { release = r; }); } };
+  const storage = memStorage(), sdk = fakeSdk(), device = { rows: [], unsent: 0 }, log = [];
+  const app = createApp({ config: { name: 'fake-app', storage, sdk: sdk.sdk }, modules: [auth(), slow, fakeData(device, log)] });
+  await app.ready;
+  await app.auth.signIn();
+  device.rows.push({ id: 'kept' });
+  await app.auth.signOut();
+  sdk.auth.set(fakeUser({ uid: 'u2', email: 'other@example.test' }));
+  await settle();
+  const stopping = app.stop();
+  await settle();
+  gate();
+  await settle();
+  release();
+  await stopping;
+  assert.deepEqual(device.rows, [{ id: 'kept' }]);
+  assert.match([...storage.m.values()].join(), /"uid":"u1"/);
+});

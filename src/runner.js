@@ -7,7 +7,8 @@
 //   needs: a module never imports another module's entry. A start that throws stops the ones already started.
 // ctx (frozen, one per module): name (config.name), module (its own name), config (frozen), sdk() (the app's Firebase
 //   SDK, config.sdk, loaded once for every module; a failed load is tried again next time), user(), on(event, fn) ->
-//   off, emit(event, data) -> the names of the modules whose handler threw, storage(ns), status, report(fact), ready
+//   off, emit(event, data) -> the names of the modules whose handler threw (or did not run: the app stopped),
+//   storage(ns), status, report(fact), ready
 //   (resolves once every module has started, rejects if one failed or the app stopped first; never awaited in start).
 // events: signin { user } | signout { user } (the device keeps its data) | switch { from, to } (another account:
 //   the old one's data is wiped) | forget { user, force } (wiped on purpose). Only the module named auth emits these four;
@@ -104,14 +105,19 @@ export function createApp({ config, modules } = /** @type {any} */ ({})) {
   /** @param {string} from @param {string} event @param {any} data @returns {Promise<string[]>} */
   async function emit(from, event, data = {}) {
     if (CORE.includes(event) && from !== 'auth') throw new Error(`only the auth module emits ${event}`);
-    if (stopped) return [];
+    if (stopped) return order.map(m => m.name);   // (a wipe asked after stop did not run: as if it threw)
     const d = Object.freeze({ ...data });
     if (event === 'signin') current = d.user || null;
     else if (event === 'signout' || event === 'forget') current = null;
     /** @type {string[]} */
     const failed = [];
-    for (const m of order) {
+    // (the app stopped: nothing more runs, the modules not reached are named as if their handler threw; checked
+    // before each module too, as stop clears a module's handlers)
+    const cut = (/** @type {number} */ i) => [...new Set([...failed, ...order.slice(i).map(n => n.name)])];
+    for (const [i, m] of order.entries()) {
+      if (stopped) return cut(i);
       for (const fn of [...handlers.get(m.name)?.get(event) || []]) {
+        if (stopped) return cut(i);
         try { await fn(d); } catch (e) { if (!failed.includes(m.name)) failed.push(m.name); console.warn(`${m.name}: ${event}`, e?.message || e); }
       }
     }

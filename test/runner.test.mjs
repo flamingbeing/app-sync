@@ -159,3 +159,14 @@ test('status: modules report in, the app reads one status (most urgent state, un
   assert.deepEqual(seen, ['synced:0:0', 'saving:2:2', 'attention:1:3', 'saving:2:2']);
   assert.equal(app.b.ctx.status.get().state, 'synced');
 });
+
+test('events: a handler that stops the app ends the emit, no later handler runs after stop (1.3.6)', async () => {
+  const log = [];
+  let app;
+  const m = mod('x', log, { start(ctx) { ctx.on('custom', async () => { await app.stop(); log.push('first'); }); ctx.on('custom', () => log.push('second')); return { ctx }; } });
+  app = createApp({ config: config(), modules: [m, mod('y', log, { start(ctx) { ctx.on('custom', () => log.push('third')); return { ctx }; } })] });
+  await app.ready;
+  log.length = 0;
+  await app.x.ctx.emit('custom', {});
+  assert.deepEqual(log.filter(l => !l.startsWith('stop')), ['first']);
+});

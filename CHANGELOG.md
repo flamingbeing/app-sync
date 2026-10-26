@@ -14,6 +14,32 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.6 (2026-10-26)
+
+Fix, no API or stored-format change (one module-contract clarification, below); modular: yes, shaken: no new export or option, the fixes are a
+few lines in `src/auth.js`, `src/runner.js` and `src/signin/passcode.js` (the passcode method still has its own chunk).
+
+- **A sign-out wins over a sign-in still out**: a passcode sign-in whose token came back after `signOut()` or
+  `forget()` signed the account back in. A sign-in that was out when either came now signs nobody in and answers
+  `{ ok: false, reason: 'refused' }`, whatever the method: an account that lands anyway (a popup, an SDK call already
+  out, a method that signs in by itself) is signed straight out again, before any switch or `signin`. The passcode method hands its token to the auth
+  module (`{ token }`, an optional field of a sign-in method's answer) instead of signing in itself.
+- **A failed forget keeps the owner**: a module whose `forget` wipe threw still cleared the device's owner, so the next
+  account's sign-in was no switch and the old account's rows stayed under the new one. The owner now stays when a wipe
+  threw (`failed` names it, as before): another account's sign-in is a switch that wipes again.
+- **`stop()` during the app's `beforeSwitch` ends the switch**: the switch went on after `app.stop()` and left a live
+  claims watch; a stop during the switch's wipes still made the new account the owner. Once the app has stopped, nothing
+  is wiped, the owner stays and nothing more is started.
+  A stop during `forget()`'s wipes keeps the owner too.
+- **A sign-out during the app's `beforeSwitch` wins**: the switch went on (wiped, made the new account the owner, sent
+  `signin`) before the sign-out. Now nothing is wiped and the old account stays the owner.
+- **A handler that stops the app ends the event**: `emit` ran the handlers after one that awaited `app.stop()`. It now
+  stops there, and names the modules it did not reach as failed (as an event sent after stop now does), so a switch
+  or forget cut short by a stop, also a slow one, keeps the old owner.
+- **Contract clarification**: `ctx.emit` returns the modules whose handler threw *or did not run because the app
+  stopped* (also those whose handlers the stop already removed). Callers that treat the list as "did not happen" fail
+  closed, as the auth module does; no 1.x name or shape changes.
+
 ## 1.3.5 (2026-10-26)
 
 Fix, no API, module contract or stored-format change; modular: yes, shaken: no new export or option, the fix is a few
