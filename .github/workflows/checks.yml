@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: flamingbeing/app-devkit/setup-node@v1
+      - uses: flamingbeing/app-devkit/setup-node@v1.11.0
         with:
           install: 'false'
       - name: Types (JSDoc, tsc --checkJs)
@@ -49,7 +49,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: flamingbeing/app-devkit/setup-node@v1
+      - uses: flamingbeing/app-devkit/setup-node@v1.11.0
         with:
           install: 'false'
       - name: Vite (dev dependency, not saved)
@@ -72,8 +72,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: flamingbeing/app-devkit/setup-node@v1
-      - uses: flamingbeing/app-devkit/setup-emulators@v1
+      - uses: flamingbeing/app-devkit/setup-node@v1.11.0
+      - uses: flamingbeing/app-devkit/setup-emulators@v1.11.0
         with:
           firebase-tools-version: '13.35.1'   # same as package.json
           devkit-dir: ''
@@ -85,7 +85,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: flamingbeing/app-devkit/setup-node@v1
+      - uses: flamingbeing/app-devkit/setup-node@v1.11.0
         with:
           install: 'false'
       - name: Playwright with Chromium (not saved in package.json)
@@ -101,7 +101,8 @@ jobs:
   consumer:
     name: consumer (${{ matrix.row }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # report-only rows pass in <= 5 min or fail fast; the ones that hang used to hold the whole run to the 20 min cap
+    timeout-minutes: ${{ matrix.blocking && 20 || 8 }}
     continue-on-error: ${{ !matrix.blocking }}
     strategy:
       fail-fast: false
@@ -125,7 +126,7 @@ jobs:
           repository: flamingbeing/${{ matrix.repo }}
           ref: main
           path: app
-      - uses: flamingbeing/app-devkit/setup-node@v1.9.1
+      - uses: flamingbeing/app-devkit/setup-node@v1.11.0
         with:
           working-directory: app
           install: ${{ matrix.pw == 'project' }}
@@ -137,17 +138,17 @@ jobs:
         run: |
           if [ "${{ matrix.pw }}" = global ]; then echo "version=1.56.1" >> "$GITHUB_OUTPUT"
           else echo "version=$(node -p "require('./app/package-lock.json').packages['node_modules/playwright-core'].version")" >> "$GITHUB_OUTPUT"; fi
-      - uses: flamingbeing/app-devkit/setup-browser@v1.9.1
+      - uses: flamingbeing/app-devkit/setup-browser@v1.11.0
         with:
           playwright-version: ${{ steps.pw.outputs.version }}
           devkit-dir: ${{ matrix.repo == 'app-starter' && 'app/.devkit' || '' }}
-      - uses: flamingbeing/app-devkit/setup-emulators@v1.9.1
+      - uses: flamingbeing/app-devkit/setup-emulators@v1.11.0
         if: matrix.emulators
         with:
           emulators: ${{ matrix.emulators }}
           firebase-tools-version: ${{ matrix.firebase || '13.35.1' }}
           devkit-dir: ''
-      - uses: flamingbeing/app-devkit/serve-candidate@v1.9.1
+      - uses: flamingbeing/app-devkit/serve-candidate@v1.11.0
         id: candidate
         with:
           origin: https://core.anawj.com
