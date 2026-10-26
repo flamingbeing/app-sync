@@ -619,3 +619,40 @@ test('a record restored on the server after this device deleted it shows here ag
   assert.equal(by.get('t1'), 'Fake restored', 'the restore is in the device copy');
   await e.stop();
 });
+
+test('a full read that arrives after a tombstone does not bring the deleted version back (1.3.13)', async () => {
+  // the items and bin listeners are separate: the bin's tombstone can land first, then the items listener's first full
+  // read still carries the deleted version. The delta path skipped it; the full path put it back on screen and device
+  const { openStore } = createStores({ prefix: 'fix-a5:', colls: ['items'] });
+  const store = await openStore(S);
+  await store.write('items', { put: [{ id: 'r1', text: 'Fake cached', updatedAt: T0 - 1000 + 100 }, { id: 'r2', text: 'Fake kept', updatedAt: T0 - 1000 + 100 }], meta: { syncAt: T0 - 60e3, fullAt: T0 - 60e3 } });
+  /** @type {(s: any) => void} */
+  let snap = () => {};
+  const listen = (_s, _c, _p, onSnap) => { snap = onSnap; return () => {}; };
+  const e = createCollectionSync({ scope: S, coll: 'items', store, listen, now: () => T0 });  // stamps: T0 - 1000 + n
+  let shown = [];
+  e.subscribe(list => { shown = list.map(d => `${d.id}:${d.text}`).sort(); });
+  await e.ready; await settle();
+  assert.deepEqual(shown, ['r1:Fake cached', 'r2:Fake kept']);
+  await e.tombs([{ id: 'r1', deletedAt: T0 - 1000 + 100 }, { id: 'r3', deletedAt: T0 - 1000 + 300 }]);
+  assert.deepEqual(shown, ['r2:Fake kept']);
+  // the delayed first full read: r1 at the deleted version, r3 older than its tombstone, r2 unchanged
+  const docs = [{ id: 'r1', text: 'Fake cached', updatedAt: T0 - 1000 + 100 }, { id: 'r2', text: 'Fake kept', updatedAt: T0 - 1000 + 100 }, { id: 'r3', text: 'Fake older', updatedAt: T0 - 1000 + 250 }];
+  snap({ full: true, docs, changes: [], fromCache: false, hasPendingWrites: false }); await settle(); await e.flush();
+  assert.deepEqual(shown, ['r2:Fake kept'], 'a version at or before its tombstone stays out of the list');
+  let by = new Map((await store.load('items')).docs.map(d => [d.id, d.text]));
+  assert.deepEqual([...by.keys()].sort(), ['r2'], 'and out of the device copy');
+  // a restore stamped after the tombstone still shows, on the next full read and on a delta
+  snap({ full: true, docs: [...docs.slice(1), { id: 'r1', text: 'Fake restored', updatedAt: T0 - 1000 + 101 }], changes: [], fromCache: false, hasPendingWrites: false }); await settle(); await e.flush();
+  assert.deepEqual(shown, ['r1:Fake restored', 'r2:Fake kept']);
+  snap({ changes: [{ type: 'modified', id: 'r3', doc: { id: 'r3', text: 'Fake re-made', updatedAt: T0 - 1000 + 301 } }], fromCache: false, hasPendingWrites: false }); await settle(); await e.flush();
+  assert.deepEqual(shown, ['r1:Fake restored', 'r2:Fake kept', 'r3:Fake re-made']);
+  by = new Map((await store.load('items')).docs.map(d => [d.id, d.text]));
+  assert.equal(by.get('r1'), 'Fake restored'); assert.equal(by.get('r3'), 'Fake re-made');
+  // a newer copy held here (a restore landed) is not replaced by a full read still carrying the deleted version
+  await e.drop(['r2']);
+  await e.land({ id: 'r2', text: 'Fake restored here', updatedAt: T0 - 1000 + 150 });
+  snap({ full: true, docs: [{ id: 'r1', text: 'Fake restored', updatedAt: T0 - 1000 + 101 }, { id: 'r2', text: 'Fake kept', updatedAt: T0 - 1000 + 100 }, { id: 'r3', text: 'Fake re-made', updatedAt: T0 - 1000 + 301 }], changes: [], fromCache: false, hasPendingWrites: false }); await settle(); await e.flush();
+  assert.ok(shown.includes('r2:Fake restored here'), 'the newer copy stays');
+  await e.stop();
+});
