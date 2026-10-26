@@ -1,6 +1,7 @@
 # Status
 
 ## Now
+- 2026-10-27: 1.3.11 model soak found intermittent device/server view mismatches under overlapping scenarios; isolated replays passed. Diagnose the timing-dependent failures; engine unchanged.
 - 1.3.7 (26 Oct): a save done just before going offline keeps showing (`watchSaved`); no API or format change.
 - 1.2.0 (26 Oct): `kinds[kind] = { coll, path }`, `backend.unstampedColls`, `watch(..., { listen })`, `facts().inStepAt`, `sync({ reopen })`; additive, no format change.
 - 1.1.0 (26 Oct): `sync.saveMany`, `watch(..., { query, limit })`, `backend.merge["*"]` + `replaceRecord`, `backend.commitRetry`; additive, no format change.
@@ -23,7 +24,8 @@
 1. A multi-device soak test (offline devices, same-record edits, skewed clocks) in real browsers.
 
 ## Recently done
-- 2026-10-27 (SGT): 1.3.11 test sweep: auth model and cache seeds 15000-25000 passed (10001 seeded runs each). Model sweep in progress; test-only range/replay controls and bounded scenario overlap added; engine unchanged.
+- 2026-10-27 05:29 SGT: 1.3.11 sweep complete: model seeds 40000-60000 in ordinary, held-task and held-merge modes, 60003 completed seed/mode runs (59995 pass, 8 fail); auth model and cache seeds 15000-25000, 10001 runs each, all pass. Another 198 fixed model checks and 77 cache unit checks passed. Raw logs remain outside git in job TEMP; seed/range/progress controls are in NOTES.md.
+- Model failures: 42436 (all modes), 42819 and 52515 (both held modes), 44983 (held merge). A timed-out 48700-48999 block additionally observed 48913 (held tasks) and 48958 (ordinary); that partial attempt is excluded from the completed-run counts. Its 300 seeds all passed when run individually. All six observed failing seeds then passed two exclusive single-seed replays each (36 seed/mode runs); no replay timeout. Sweeps used at most four independent scenarios per Node process; isolated runs use one. Engine failures remain unexplained; no engine changes or live backend/site access.
 - 2026-10-25: 0.6.3 held conflicts by field, opt-in (`backend: { held, edits }`): different fields merge, same value asks nothing, counters add up, a same-field clash is held on the phone that sent it second with a side-by-side popup (`conflicts`, `describe`, `resolve`); report counts held saves by kind (Worker too).
 - 2026-10-25: 0.6.1 model-based multi-device tests (`test/model.test.mjs`, seeded) and the fix they found: a record deleted on this device left its list only at the weekly full read.
 - 2026-10-25: 0.6.0 `createApp` (the safe path in one call), with the unreleased 0.5.2 fixes folded in: `watchSaved` (the server's copy heard while a save was sent shows once it is done) and one report per page hide (see CHANGELOG).
