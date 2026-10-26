@@ -278,7 +278,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     /** @type {Job} */
     let job;
     if (stale && same(stale.record, record)) {
-      job = stale; if (!held) { job.state = 'pending'; job.error = ''; delete job.code; }
+      job = stale; mine.job = job; if (!held) { job.state = 'pending'; job.error = ''; delete job.code; }
       if (meta !== undefined) job.meta = copy(meta);
     } else {
       job = { v: JOB_FORMAT, key: email + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2), owner: email,

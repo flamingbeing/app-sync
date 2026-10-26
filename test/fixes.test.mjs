@@ -537,3 +537,23 @@ test('pending() counts a save the store refuses only until it fails (1.3.8)', as
   await assert.rejects(p);
   assert.equal(q.pending(), 0);
 });
+
+test('pending() counts the same save of a failed record once while it is stored again (1.3.8)', async () => {
+  const records = new Map(), gates = [];
+  let hold = false, deny = true;
+  const store = { async put(x) { if (hold) await new Promise(r => gates.push(r)); records.set(x.key, structuredClone(x)); }, async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; }, async remove(k) { records.delete(k); }, async forget() {} };
+  const backend = async (_o, _k, r) => { if (deny) throw Object.assign(new Error('denied'), { code: 'permission-denied' }); return { ...r, updatedAt: (r.updatedAt || 0) + 100 }; };
+  const q = createWriteQueue({ store, getOwner: () => 'a', backend, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const rec = { id: 'one', text: 'Fake refused', updatedAt: 1 };
+  await q.save('item', 'a', rec).catch(() => {});
+  for (let i = 0; i < 50 && q.status('item', 'one') !== 'failed'; i++) await settle(1);
+  assert.equal(q.status('item', 'one'), 'failed');
+  assert.equal(q.pending(), 1);
+  deny = false; hold = true;
+  const p = q.save('item', 'a', rec);   // the same record again: its failed job is reused
+  for (let i = 0; i < 50 && !gates.length; i++) await settle(1);
+  assert.equal(q.pending(), 1, 'one save of one record, counted once while stored');
+  hold = false; gates.shift()();
+  await p.catch(() => {});
+});
