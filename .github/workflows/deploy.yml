@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   deploy:
-    uses: flamingbeing/app-devkit/.github/workflows/deploy-worker.yml@v1
+    uses: flamingbeing/app-devkit/.github/workflows/deploy-worker.yml@v1.11.0
     with:
       build-command: git fetch --tags --force --quiet && node tools/build-sync.mjs && node tools/build-update.mjs   # dist/sync/<x.y.z>/ and dist/update/<x.y.z>/ from the release tags
       beta-env: true
