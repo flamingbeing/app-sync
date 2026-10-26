@@ -45,3 +45,6 @@
 - 2026-10-24: own repo, public, no private pair; versions are immutable and apps pin one.
 - 2026-10-24: client timestamps kept in 0.1.0 for compatibility; a server-timestamp mode comes later as opt-in.
 - 2026-10-24: Apache License 2.0.
+
+## Extended soak, 2026-10-27 02:42 SGT
+- DONE: v1.3.12, 45,006 model seed/mode runs plus 7,001 auth and 7,001 cache seeded runs, all passing; six benchmarks complete. Results: `soak/ROUND4.md`. No engine changes; no remaining requested seed coverage.
