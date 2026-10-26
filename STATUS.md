@@ -44,3 +44,6 @@
 - 2026-10-24: own repo, public, no private pair; versions are immutable and apps pin one.
 - 2026-10-24: client timestamps kept in 0.1.0 for compatibility; a server-timestamp mode comes later as opt-in.
 - 2026-10-24: Apache License 2.0.
+
+## Soak testing (2026-10-27 00:21 SGT)
+- 1.3.10 fake-backend soak complete: 20,000 model seeds, 5,000 auth seeds, 5,000 cache seeds, five regression suites repeated 200 times. Found 397 deterministic model failures (restored task hidden by a newer tombstone) and 11 timeout/retry flakes; see soak/RESULTS.md. Engine unchanged; fixes remain outstanding.
