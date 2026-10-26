@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createCollectionSync } from '../src/sync.js';
 import { createStores } from '../src/store.js';
 
-test('a repeated local drop preserves the deletion boundary for a later restore', async () => {
+for (const first of ['local drop', 'bin tombstone']) test(`${first} followed by local drop preserves the boundary for a later restore`, async () => {
   const { openStore } = createStores({ prefix: 'soak-repeat-drop:', colls: ['items'] });
   const store = await openStore('fake-scope');
   let snap;
@@ -19,7 +19,8 @@ test('a repeated local drop preserves the deletion boundary for a later restore'
   try {
     await sync.ready;
     await sync.flush();
-    await sync.drop(['fake-item']);
+    if (first === 'local drop') await sync.drop(['fake-item']);
+    else await sync.tombs([{ id: 'fake-item', deletedAt: 100 }]);
     assert.equal(sync.tomb('fake-item'), 100);
     await sync.drop(['fake-item']);
     snap({ changes: [{ type: 'added', id: 'fake-item', doc: { id: 'fake-item', updatedAt: 101, text: 'restored' } }], fromCache: false });
