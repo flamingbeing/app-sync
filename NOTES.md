@@ -7,6 +7,11 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
 - Unit: `node --test test/*.test.mjs` (fake server in `test/fake-server.mjs`, fake SDK in `test/fake-sdk.mjs`, memory
   stores in Node). The model test (`test/model.test.mjs`) runs 40 seeds; `MODEL_SEEDS=500` before a release that touches
   sync, `MODEL_SEED=<n>` to replay a printed failure.
+- Seed ranges: `MODEL_START=<first>` and `MODEL_SEEDS=<count>` select contiguous seeds in the model, auth model
+  and cache tests. `MODEL_SEED=<n>` overrides the range for one replay. The model always adds its fixed regression
+  seed unless replaying one seed, and runs ordinary, held-task and held-merge modes. In a sandbox that blocks Node
+  child processes, call `node --test --test-isolation=none test/model.test.mjs` directly from PowerShell; use the
+  corresponding test file for auth or cache. Keep soak logs outside git.
 - Emulator: `npm ci && npm run test:emulator` (demo project `demo-app-sync`, open test-only rules in
   `test/emulator.rules`; Java 11+).
 
