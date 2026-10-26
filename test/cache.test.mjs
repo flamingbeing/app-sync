@@ -73,8 +73,10 @@ test('no storage and a throwing storage: works, remembers nothing, report errors
 });
 
 // seeded: random loads and errors; the step only goes down (until reset), the stored step is what the next load runs
-const seeds = Number(process.env.MODEL_SEEDS) || 40;
-for (let seed = 1; seed <= seeds; seed++) {
+const count = Number(process.env.MODEL_SEEDS) || 40;
+const start = Number(process.env.MODEL_START) || 1;
+const seeds = process.env.MODEL_SEED ? [Number(process.env.MODEL_SEED)] : Array.from({ length: count }, (_, i) => start + i);
+for (const seed of seeds) {
   test(`seed ${seed}: the step never rises without reset`, () => {
     const rand = rng(seed), store = memStore(), order = ['multi', 'single', 'memory'];
     let floor = 0;

@@ -138,7 +138,8 @@ async function run(seed) {
 
 const one = process.env.MODEL_SEED ? [Number(process.env.MODEL_SEED)] : null;
 const count = Number(process.env.MODEL_SEEDS) || 40;
-const seeds = one || Array.from({ length: count }, (_, i) => 1000 + i);
+const start = Number(process.env.MODEL_START) || 1000;
+const seeds = one || Array.from({ length: count }, (_, i) => start + i);
 
 test(`auth model: ${seeds.length} seeded runs of sign-in, sign-out, switch, forget and reload keep the data the model says`, { timeout: 600e3 }, async () => {
   const failed = [];

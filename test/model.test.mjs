@@ -192,9 +192,10 @@ async function run(seed, { steps = 30, held = false } = {}) {
 
 const one = process.env.MODEL_SEED ? [Number(process.env.MODEL_SEED)] : null;
 const count = Number(process.env.MODEL_SEEDS) || 40;
+const start = Number(process.env.MODEL_START) || 1000;
 // (1.3.11) seeds that once failed, always run: 1158 (a restore after this device's delete stayed hidden)
 const FIXED = [1158];
-const seeds = one || [...new Set([...Array.from({ length: count }, (_, i) => 1000 + i), ...FIXED])];
+const seeds = one || [...new Set([...Array.from({ length: count }, (_, i) => start + i), ...FIXED])];
 
 for (const held of [false, true, 'merge']) test(`model${held === 'merge' ? ' (held conflicts with a merge collection, 0.7.1)' : held ? ' (held conflicts, 0.6.3)' : ''}: ${seeds.length} seeded runs of two or three devices agree with the model`, { timeout: 600e3 }, async () => {
   const failed = [];
