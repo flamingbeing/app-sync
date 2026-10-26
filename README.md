@@ -201,8 +201,9 @@ the copy this device last sent (while it is in the device history, the last 100 
 server's as last heard: when their signatures differ, someone else saved since.
 
 `save()` rejects when the server refuses the save (or a conflict comes back) within its short wait (180 ms), so an
-editor can keep its input; the save is still kept (in `queue.refused()`, or set aside by `onRefused`). Catch it where
-you call `save()` and point the person to the refused copy; a refusal that comes later only shows in the status.
+editor can keep its input; the save is still kept (a refusal in `queue.refused()`, a conflict in `app.sync.conflicts()`). Catch
+it where you call `save()` and point the person to that copy; a refusal or conflict that comes later only shows in the
+status. A refusal that `onRefused` sets aside (`'archive'`) resolves instead: the app has already handled it.
 
 Anything the facade does not cover: pass the parts' own options (`backend`, `hub`, `stores`, `queue`), replace a part
 (`adapter`, `commit`, `outbox`), or use `app.sync.parts` (hub, queue, stores, adapter, watchdog, registry). Each module
