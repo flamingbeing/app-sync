@@ -27,7 +27,7 @@ for suite in ['model','auth.model','cache','faults','held','writes','sync','fixe
                 if current is not None and (re.match(r'd\d+ (shows|save|chose|still|note|answer)',line) or "lost (server" in line):
                     group=re.sub(r'd\d+', 'DEVICE',line)
                     group=re.sub(r'([nt])\d+',r'\1ID',group)
-                    group=re.sub(r'server .*','server …',group)
+                    group=re.sub(r'server .*','server ...',group)
                     failure_groups[group].append(current)
         elif r['status'] and replays and any(p['status']==0 for p in replays): flaky+=1
     summary[suite]=dict(runs=runs,passed=runs-failures,failed=failures,flaky=flaky,unclassifiedBatches=unknown)
