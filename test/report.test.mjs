@@ -163,3 +163,16 @@ test('index.js fills in the engine version', () => {
   const r = createReportWithVersion({ app: 'demo', version: 'v1' });
   assert.equal(r.payload().sync, VERSION);
 });
+
+test('more than MAX_CODES codes: those sent as other are taken off too, never sent again by name (1.3.12)', async () => {
+  let t = 100 * HOUR;
+  const sent = [];
+  const r = createReport({ app: 'demo', version: 'v1', storage: memoryStorage(), now: () => t, send: (_url, body) => { sent.push(JSON.parse(body)); return true; } });
+  for (let i = 0; i < MAX_CODES + 5; i++) r.error('code-' + i);
+  assert.equal(await r.flush(), true);
+  const total = p => Object.values(p.errors).reduce((a, n) => a + n, 0);
+  assert.equal(total(sent[0]), MAX_CODES + 5);
+  t += HOUR;
+  assert.equal(await r.flush(), true);
+  assert.deepEqual(sent[1].errors, {}, 'each error counted once');
+});

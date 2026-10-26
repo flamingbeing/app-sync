@@ -118,7 +118,8 @@ export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOI
   /** @param {{ last: number, errors: Record<string, number> }} state */
   const keep = state => { memory = state; if (storage) { try { storage.setItem(KEY, JSON.stringify(state)); } catch { /* memory only */ } } };
   const entries = () => [...queues].flatMap(q => { try { return q.entries(); } catch { return []; } });
-  const payload = () => buildReport({ app, version: versionNow(), sync, entries: entries(), errors: load().errors, now: now(), byKind });
+  /** @param {Record<string, number>} [errors] */
+  const payload = (errors = load().errors) => buildReport({ app, version: versionNow(), sync, entries: entries(), errors, now: now(), byKind });
   const due = () => now() - load().last >= every;
   // one report at a time: page hide fires visibilitychange and pagehide together, and a second flush started before the
   // first is handed over would send the same counts again; it gets the first one's answer instead (0.5.2)
@@ -136,15 +137,17 @@ export function createReport({ app, version, sync = '', endpoint = REPORT_ENDPOI
   async function sendNow({ force = false } = {}) {
     if (!force && !due()) return false;
     let body;
-    try { body = JSON.stringify(payload()); } catch (error) { onError(error); return false; }
+    const counted = { ...load().errors };
+    try { body = JSON.stringify(payload(counted)); } catch (error) { onError(error); return false; }
     let sent = false;
     try { sent = !!(await send(endpoint, body)); } catch (error) { onError(error); }
     // the counts sent are taken off; errors counted meanwhile stay for the next report
     if (sent) {
-      const state = load(), was = JSON.parse(body).errors;
+      // (1.3.12) taken off by stored code as counted, so codes past MAX_CODES (sent as other) go too
+      const state = load();
       /** @type {Record<string, number>} */
       const left = {};
-      for (const [code, n] of Object.entries(state.errors)) { const rest = count(n) - (was[errorCode(code)] || 0); if (rest > 0) left[code] = rest; }
+      for (const [code, n] of Object.entries(state.errors)) { const rest = count(n) - count(counted[code] || 0); if (rest > 0) left[code] = rest; }
       keep({ last: now(), errors: left });
     }
     return sent;

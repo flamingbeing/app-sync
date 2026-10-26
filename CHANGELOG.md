@@ -14,6 +14,25 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.12 (2026-10-27)
+
+Fixes and speed-ups, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option
+(`jobsNow` in `src/writes.js` is internal, not in `index.js`). Lists handed, saves and their order are unchanged
+(`test/fast.test.mjs` passes on 1.3.11 too).
+
+- **A save sent again after a lost answer was a conflict with itself** in an app whose backend stamps another field
+  (`field: 'modifiedAt'`): the conflict check skipped only `updatedAt`. The Firestore adapter now compares records
+  without its own stamp field, as it already did without `updatedAt`. Merged collections no longer write such a
+  resend a second time.
+- **Error codes past the 20 a report names** (sent as `other`) were never taken off once sent, so the next report
+  sent them again by name. The counts sent are now taken off as they were counted.
+- **Faster with big lists** (`node tools/bench.mjs`, node, list of 10,000): a burst of 200 saves 17.7-19.2 s -> 7.5-9.0 s
+  (1,000: 2.3-2.6 s -> 0.8-0.9 s); first load and delta snapshots about the same. A watch stringifies each record once
+  instead of on every queue change and skips a queue change that changes none of its records; the queue's overlay
+  groups jobs once per call; createApp reads the queue's jobs without copying them all on every change; the hub
+  stringifies a list once for all its watchers; the Firestore adapter reads each record of a whole read once.
+- **Size budget:** `src/` 294500 -> 298500 bytes, for these.
+
 ## 1.3.11 (2026-10-26)
 
 Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in

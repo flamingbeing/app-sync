@@ -19,7 +19,7 @@ export function createReport({ app, version, sync, endpoint, every, storage, sen
     }): () => boolean;
     /** @param {any} [code] */
     error(code?: any): void;
-    payload: () => ReportPayload;
+    payload: (errors?: Record<string, number>) => ReportPayload;
     due: () => boolean;
     flush: (opts?: {
         force?: boolean;

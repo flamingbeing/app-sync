@@ -78,7 +78,7 @@
 // host: { load() -> the app's SDK (shared, loaded once), user() -> the account signed in (AppUser) or null }.
 // -> the api pieces both hand on, plus what each needs to sign out or switch (no promise: src/internal).
 import { createSyncHub, replanOnWake, landSaved } from './sync.js';
-import { createWriteQueue, watchSaved } from './writes.js';
+import { createWriteQueue, watchSaved, jobsNow } from './writes.js';
 import { createStores } from './store.js';
 import { createOutbox } from './outbox.js';
 import { createOutboxRegistry } from './registry.js';
@@ -89,6 +89,9 @@ import { describeConflict, mergeOf, resolvedRecord, recordSignature } from './co
 import { viewOf } from './view.js';
 import { kindMap } from './kinds.js';
 import { createFirestoreBackend } from './firestore.js';
+
+/** @template T @param {T} v @returns {T} */
+const copy = v => JSON.parse(JSON.stringify(v));
 
 // (1.3.0) scope names starting `public:` hold data read without sign-in (FORMATS.md), so read only
 /** @param {string} s */
@@ -242,7 +245,7 @@ export function createSyncCore(options, { load, user }) {
   };
   let queued = 0;
   function unsentNow() { // 1.3.10 chip+sign-out
-    const es = queue.entries(), a = es.filter(x => x.refused && /^(archiv|sync)ed$/.test(x.state)).length;
+    const es = jobsNow(queue), a = es.filter(x => x.refused && /^(archiv|sync)ed$/.test(x.state)).length;
     const w = queue.pending() + unsentOutside() + queued;
     return { waiting: w, attention: attentionCount(es) + a, unsent: w + a };
   }
@@ -407,7 +410,7 @@ export function createSyncCore(options, { load, user }) {
   /** @type {Set<string>} */
   const told = new Set(), deleting = new Set();
   queue.onChange(() => {
-    for (const x of queue.entries()) {
+    for (const x of jobsNow(queue).map(j => ({ ...j }))) {   // (1.3.12: each job as it was now, not a deep copy of all)
       if (x.record?._deleted && x.state !== 'synced' && x.state !== 'archived') deleting.add(x.key);
       else if (deleting.has(x.key) && x.state === 'synced') {
         deleting.delete(x.key);
@@ -416,7 +419,7 @@ export function createSyncCore(options, { load, user }) {
       if (x.state !== 'failed' || told.has(x.key) || !onRefused) continue;
       told.add(x.key);
       let answer;
-      try { answer = onRefused({ code: x.code || '', message: x.error }, x); } catch (e) { console.warn('onRefused', e); }
+      try { answer = onRefused({ code: x.code || '', message: x.error }, copy(x)); } catch (e) { console.warn('onRefused', e); }
       if (answer === 'archive') void queue.archive(x.key, { refused: true });   // (0.8.2: kept for queue.refused())
     }
     // a delete heard while a save was held is applied once that record's saves are done (0.6.3)

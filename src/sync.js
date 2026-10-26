@@ -337,9 +337,11 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     await store.write(coll, heal ? { replace: true, put: [...docs.values()], meta } : op);
     if (heal) dirty = false;
   }).catch(e => { dirty = true; meta = { ...meta, fullAt: 0 }; console.warn('Local store not saved', e); }));
-  /** @param {(list: Doc[], meta: SnapMeta) => void} cb */
-  const send = cb => { if (flags && subs.has(cb)) cb(copy([...docs.values()]), { ...flags }); };
-  const emit = () => { for (const cb of subs) send(cb); };
+  /** @param {(list: Doc[], meta: SnapMeta) => void} cb @param {string} [text] the list as JSON, if already made */
+  const send = (cb, text) => { if (flags && subs.has(cb)) cb(text === undefined ? copy([...docs.values()]) : JSON.parse(text), { ...flags }); };
+  // (1.3.12) the list stringified once for all subscribers, each still gets its own copy (docs change only after an
+  // await, never while emit runs: every change below waits for ready or a read first)
+  const emit = () => { if (!flags || !subs.size) return; const text = JSON.stringify([...docs.values()]); for (const cb of subs) send(cb, text); };
 
   const ready = (async () => {
     const got = await store.load(coll);
