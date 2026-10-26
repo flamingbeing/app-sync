@@ -11,7 +11,7 @@ export function createReport(options: Omit<import("./src/report.js").ReportOptio
         entries: () => any[];
     }): () => boolean;
     error(code?: any): void;
-    payload: () => import("./src/report.js").ReportPayload;
+    payload: (errors?: Record<string, number>) => import("./src/report.js").ReportPayload;
     due: () => boolean;
     flush: (opts?: {
         force?: boolean;
@@ -20,7 +20,7 @@ export function createReport(options: Omit<import("./src/report.js").ReportOptio
     stop(): void;
 };
 export const FILES: string[];
-export const VERSION: "1.3.11";
+export const VERSION: "1.3.12";
 export { createSyncHub, replanOnWake, leaveEntry, eachSettled, SKEW } from "./src/sync.js";
 export { createWriteQueue, JOB_FORMAT, JOB_STATES } from "./src/writes.js";
 export { recordSignature, checkWrite, mergeFields, mergeHeld, describeConflict, resolvedRecord, pathOf } from "./src/conflict.js";

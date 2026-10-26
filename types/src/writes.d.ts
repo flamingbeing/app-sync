@@ -1,3 +1,7 @@
+/** @param {{ entries: () => Job[] }} queue @returns {Job[]} */
+export function jobsNow(queue: {
+    entries: () => Job[];
+}): Job[];
 /** @param {QueueOptions} options */
 export function createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels, otherPending, registry, report, ignore, field, engine }: QueueOptions): {
     activate: (email: string) => Promise<void>;

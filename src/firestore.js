@@ -161,8 +161,12 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
   };
   /** @param {any} v */
   const unstampServer = v => { if (!server || !v || !Object.hasOwn(v, serverField)) return v; const { [serverField]: _s, ...rest } = v; return rest; };
+  // (1.3.12) compared without a custom stamp field too, as recordSignature already skips updatedAt: a save sent again
+  // after a lost answer was a conflict with itself in an app stamping another field
+  /** @param {any} v */
+  const unstampOwn = v => { if (stampField === 'updatedAt' || !v || !Object.hasOwn(v, stampField)) return v; const { [stampField]: _f, ...rest } = v; return rest; };
   /** @param {string} coll @param {any} v */
-  const canonical = (coll, v) => canonOf(coll, unstampServer(v));
+  const canonical = (coll, v) => canonOf(coll, unstampOwn(unstampServer(v)));
   /** @param {any} F @param {any} doc */
   const withServer = (F, doc) => server ? { ...doc, [serverField]: F.serverTimestamp() } : doc;
   // what the document holds: without the id field when writeId is false (the id stays the document's id; reads add it)
@@ -216,6 +220,13 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
       // (an unstampedColls collection is read whole: its documents have no stamp a "changed since" read could match)
       const whole = since === null || unstamped.has(coll);
       const q = whole ? (fs.length ? F.query(col, ...fs) : col) : F.query(col, ...fs, F.where(field, '>', from));
+      // (1.3.12) a whole read's list: each record already read for its change is not read again (the first answer
+      // lists every record as added; one after a cached answer, only what changed since)
+      /** @param {any} snap @param {import('./types.js').Change[]} changes */
+      const wholeList = (snap, changes) => {
+        const byId = new Map(changes.filter(c => c.doc).map(c => [c.id, c.doc]));
+        return snap.docs.map(/** @param {any} d */ d => byId.get(d.id) ?? { ...read(d.data()), id: d.id });
+      };
       stop = F.onSnapshot(q, { includeMetadataChanges: true }, /** @param {any} snap */ snap => {
         const server = !snap.metadata.fromCache, full = whole && first && server;
         // pending: this device's write is not on the server yet (if it is refused, the record leaves again: checked)
@@ -229,7 +240,7 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
           first = false;
         }
         onSnapshotMeta(coll, { fromCache: !server, hasPendingWrites: snap.metadata.hasPendingWrites });
-        onSnap({ changes, fromCache: !server, hasPendingWrites: snap.metadata.hasPendingWrites, ...(full ? { full: true, docs: snap.docs.map(/** @param {any} d */ d => ({ ...read(d.data()), id: d.id })) } : {}) });
+        onSnap({ changes, fromCache: !server, hasPendingWrites: snap.metadata.hasPendingWrites, ...(full ? { full: true, docs: wholeList(snap, changes) } : {}) });
       }, onError);
     }).catch(onError);
     return () => { stopped = true; if (stop) stop(); };

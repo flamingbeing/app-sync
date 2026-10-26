@@ -60,3 +60,14 @@ test('backend.unstampedColls (1.2.0): those collections are listened to whole, n
   assert.equal(queries[1].fs.length, 1, 'other collections still read what changed since');
   assert.equal(snaps[1].full, undefined);
 });
+
+test('a custom stamp field (field: modifiedAt): the same save sent again after a lost answer is already there, not a conflict (1.3.12)', async () => {
+  const shared = sharedSdk(), b = createFirestoreBackend({ sdk: shared.device().sdk, path, field: 'modifiedAt' });
+  const base = await b.commit(S, 'items', { id: 'm1', text: 'Fake' }, null);
+  const mine = { ...base, text: 'Fake 2' };
+  const first = await b.commit(S, 'items', mine, base);   // landed; say its answer never reached the device
+  const again = await b.commit(S, 'items', mine, base);   // the queue sends the same save again
+  assert.equal(again.text, 'Fake 2');
+  assert.equal(again.modifiedAt, first.modifiedAt, 'nothing written again');
+  await assert.rejects(b.commit(S, 'items', { ...base, text: 'Fake 3' }, base), /changed|conflict/i, 'a different edit from the old copy is still a conflict');
+});

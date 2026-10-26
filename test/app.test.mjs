@@ -233,12 +233,13 @@ test('a save the server refuses: onRefused hears it with its code; "archive" set
   const srv = fakeServer();
   const refused = [];
   const { app } = await makeApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), options: {
-    onRefused: (err, entry) => { refused.push({ code: err.code, kind: entry.kind, id: entry.record.id }); return 'archive'; },
+    onRefused: (err, entry) => { refused.push({ code: err.code, kind: entry.kind, id: entry.record.id }); entry.record.text = 'changed by the app'; return 'archive'; },
   } });
   await app.onUser(() => {}); await app.signIn(); await app.open('s1');
   await app.save('item', 's1', { id: 'r1', text: 'Fake' });
   assert.ok(await until(() => refused.length === 1));
   assert.deepEqual(refused[0], { code: 'permission-denied', kind: 'item', id: 'r1' });
+  assert.equal(app.queue.refused()[0].record.text, 'Fake', 'onRefused gets a copy (1.3.12: still)');
   assert.equal(await app.flush(500), false, 'set aside, kept by the engine: the gate stays shut until Retry or Discard (0.8.2)');
   const r = await app.signOut({ wait: 200 });
   assert.equal(r.ok, false); assert.equal(r.reason, 'refused');

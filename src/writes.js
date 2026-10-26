@@ -69,6 +69,12 @@ export const SEND_TIMEOUT = 30000;
 // shape). Mixed versions share an origin's outboxes, so states are fixed: no new state before 2.0.
 export const JOB_FORMAT = 1;
 export const JOB_STATES = Object.freeze(['pending', 'synced', 'failed', 'conflict', 'archived']);
+// (1.3.12) the engine's own read of a queue's jobs, newest first as entries() but not copied: the engine reads them on
+// every queue change, and entries() copies every job. Callers only read them (never change or hand them on).
+/** @type {WeakMap<object, () => Job[]>} */
+const readers = new WeakMap();
+/** @param {{ entries: () => Job[] }} queue @returns {Job[]} */
+export function jobsNow(queue) { const fn = readers.get(queue); return fn ? fn() : queue.entries(); }
 /** @param {QueueOptions} options */
 export function createWriteQueue({ store, backend, getOwner = () => null, normalize = (_kind, value) => value, online = () => true, delay = ms => new Promise(r => setTimeout(r, ms)), notice = () => {}, sendTimeout = SEND_TIMEOUT, labels = {}, otherPending = null, registry = null, report = null, ignore = [], field = 'updatedAt', engine = [] }) {
   if (!store) throw new Error('createWriteQueue needs a store (the outbox)');
@@ -131,6 +137,9 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   // a record's saves not yet done with, oldest first: only the first is ever sent
   /** @param {string} id */
   const chainOf = id => ordered().filter(x => keyOf(x) === id && !terminal.has(x.state));
+  // a record's newest job, any state (read from the end, without copying the list: watchSaved asks per changed record)
+  /** @param {string} kind @param {string} id */
+  const latestOf = (kind, id) => { const all = ordered(); for (let i = all.length - 1; i >= 0; i--) if (all[i].kind === kind && all[i].record.id === id) return all[i]; return undefined; };
   /** @param {Job} job */
   async function persist(job) { if (forgotten.has(job.owner)) return; const put = Promise.resolve(store.put(copy(job))); puts.add(put); try { await put; } finally { puts.delete(put); } }
   // Another window on this device (a second tab, or the home-screen app beside the browser) shares the store and may
@@ -326,8 +335,12 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (email !== owner) return list;
     const result = new Map(list.map(r => [r.id, r]));
     const early = [...inflight.values()].filter(x => x.kind === kind && x.owner === email);
+    // (1.3.12) each record's chain (as chainOf) found in one pass, not one pass over every job per record
+    /** @type {Map<string, Job[]>} */
+    const chains = new Map();
+    for (const x of ordered()) if (!terminal.has(x.state)) { const k = keyOf(x), c = chains.get(k); if (c) c.push(x); else chains.set(k, [x]); }
     for (const id of new Set([...jobs.filter(x => x.kind === kind).map(x => x.record.id), ...early.map(x => x.record.id)])) {
-      const group = chainOf(kind + ':' + id), conflicts = group.filter(x => x.state === 'conflict');
+      const group = chains.get(kind + ':' + id) || [], conflicts = group.filter(x => x.state === 'conflict');
       if (conflicts.length) {
         // The list is the server's copy (the sync engine), so an edit or delete made elsewhere since the conflict shows
         // (not the stale copy found at the conflict). That copy shows only while
@@ -440,10 +453,10 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     },
     error: () => storageError,
     /** @param {string} kind @param {string} id */
-    status(kind, id) { return [...ordered()].reverse().find(x => x.kind === kind && x.record.id === id)?.state || ''; },
+    status(kind, id) { return latestOf(kind, id)?.state || ''; },
     // one job followed through (a later save of the same record is another job): the latest job's key, and a job's state
     /** @param {string} kind @param {string} id */
-    jobKey(kind, id) { return [...ordered()].reverse().find(x => x.kind === kind && x.record.id === id)?.key || ''; },
+    jobKey(kind, id) { return latestOf(kind, id)?.key || ''; },
     /** @param {string} key */
     stateOf(key) { return jobs.find(x => x.key === key)?.state || ''; },
     // (0.8.2) the saves the server refused that wait for the user, newest first
@@ -462,6 +475,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     },
   };
   if (report) { try { report.watch(api); } catch { /* a report never stops the queue */ } }
+  readers.set(api, () => [...ordered()].reverse());
   return api;
 }
 
@@ -483,6 +497,15 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view 
   // what was handed last, by id (as text: a copy nobody can change), for changed/removed and copyOf (0.8.2)
   /** @type {Map<string, string>} */
   let last = new Map();
+  // (1.3.12) each doc's JSON by identity, and the docs handed last: the list's docs (this watch's own copy) and the
+  // queue's records are never changed in place (a change is a new object), so a doc is stringified once, not on every
+  // queue change (with a list of 10k, each save stringified it all about five times)
+  /** @type {WeakMap<object, string>} */
+  const json = new WeakMap();
+  /** @param {Doc | null} d */
+  const textOf = d => { if (d === null || typeof d !== 'object') return JSON.stringify(d); let t = json.get(d); if (t === undefined) json.set(d, t = JSON.stringify(d)); return t; };
+  /** @type {Doc[]} */
+  let handed = [];
   // (1.3.7) a save done before the listener heard anything of its record (the connection dropped between the server's
   // answer and the listener's news) shows the server's copy, not the list's, until the listener hears that record
   // change or the server answers it: it neither vanishes nor goes back to its old copy offline.
@@ -493,10 +516,15 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view 
   const laid = new Map();
   /** @type {Map<string, { doc: Doc | null, seen: string }>} */
   const landed = new Map();
+  /** @type {Doc[] | null} */
+  let wasFrom = null;
+  /** @type {Map<string, Doc>} */
+  let wasMap = new Map();
   /** @param {Doc[]} base @param {Doc[]} overlaid @returns {Doc[]} */
   const land = (base, overlaid) => {
-    const was = new Map(base.map(d => [String(d.id), d])), over = new Map(overlaid.map(d => [String(d.id), d]));
-    const text = (/** @type {string} */ id) => JSON.stringify(was.get(id) ?? null);
+    if (wasFrom !== base) { wasMap = new Map(base.map(d => [String(d.id), d])); wasFrom = base; }   // (1.3.12) once per list
+    const was = wasMap, over = new Map(overlaid.map(d => [String(d.id), d]));
+    const text = (/** @type {string} */ id) => textOf(was.get(id) ?? null);
     const now = new Set([...over.keys()].filter(id => over.get(id) !== was.get(id)));
     for (const id of was.keys()) if (!over.has(id)) now.add(id);
     for (const id of now) {
@@ -518,7 +546,11 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view 
   /** @param {boolean} force */
   const hand = force => {
     if (!live || !list) return;
-    const overlaid = land(list, queue.overlay(kind, owner, list)), shown = view ? view(overlaid) : overlaid, texts = shown.map(d => JSON.stringify(d)), sig = '[' + texts.join(',') + ']';
+    const overlaid = land(list, queue.overlay(kind, owner, list)), shown = view ? view(overlaid) : overlaid;
+    // (1.3.12) the very docs handed last time, in the same order: nothing to hand (most queue changes touch no record)
+    if (!force && shown.length === handed.length && shown.every((d, i) => d === handed[i])) return;
+    const texts = shown.map(textOf), sig = '[' + texts.join(',') + ']';
+    handed = shown;
     if (!force && sig === sent) return;
     sent = sig;
     /** @type {Map<string, string>} */
@@ -528,7 +560,7 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view 
     shown.forEach((d, i) => { const id = String(d.id); now.set(id, texts[i]); if (last.get(id) !== texts[i]) changed.push(id); });
     for (const id of last.keys()) if (!now.has(id)) removed.push(id);
     last = now;
-    cb(copy(shown), { ...meta, changed, removed });
+    cb(JSON.parse(sig), { ...meta, changed, removed });   // (a copy, as copy(shown))
   };
   const offQueue = queue.onChange(() => hand(false));
   const offHub = hub.watch(scope, coll, (l, m) => { list = l; meta = m; if (m && !m.fromCache) landed.clear(); hand(true); });
