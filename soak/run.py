@@ -38,7 +38,7 @@ def execute(suite, base, count, repeat=None, replay_index=None):
     env.pop('MODEL_SEED', None)
     log = OUT / f'{key}.log'
     with log.open('w') as f:
-        command = ['node', str(ROOT/'soak/threaded.mjs'),str(target),str(base),str(count)] if suite == 'model' and count > 1 else ['node', '--test', '--test-isolation=none', '--test-reporter=tap', str(target)]
+        command = ['node', str(ROOT/'soak/threaded.mjs'),str(target),str(base),str(count)] if suite == 'model' and count > 1 else ['node', str(target)]
         result = subprocess.run(command, cwd=ROOT, env=env, stdout=f, stderr=subprocess.STDOUT, timeout=590)
     text = log.read_text()
     seeds = sorted(set(map(int, re.findall(r'^\s*#?\s*seed (\d+)(?: \(held\))? failed', text, re.M)))) if suite != 'cache' else sorted(set(map(int, re.findall(r'not ok \d+ - seed (\d+):', text))))
