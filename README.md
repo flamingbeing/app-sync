@@ -200,6 +200,11 @@ a switch or forget() is refused (`forget({ force })` still wipes). `lastSent` is
 the copy this device last sent (while it is in the device history, the last 100 finished saves) and `lastSeen` the
 server's as last heard: when their signatures differ, someone else saved since.
 
+`save()` rejects when the server refuses the save (or a conflict comes back) within its short wait (180 ms), so an
+editor can keep its input; the save is still kept (a refusal in `queue.refused()`, a conflict in `app.sync.conflicts()`). Catch
+it where you call `save()` and point the person to that copy; a refusal or conflict that comes later only shows in the
+status. A refusal that `onRefused` sets aside (`'archive'`) resolves instead: the app has already handled it.
+
 Anything the facade does not cover: pass the parts' own options (`backend`, `hub`, `stores`, `queue`), replace a part
 (`adapter`, `commit`, `outbox`), or use `app.sync.parts` (hub, queue, stores, adapter, watchdog, registry). Each module
 also loads on its own; the full wiring by hand (0.5.x style) still works, and `src/app.sync.js` shows it in one place.
@@ -217,7 +222,9 @@ sync({ ..., backend: { merge: { '*': replaceRecord }, commitRetry: { codes: ['pe
 device shows as its base. A watch's `query` (fields equal to these values) and `limit` narrow what its callback gets,
 never the device copy. `merge['*']` is the merge of every collection not named; `replaceRecord` (from `@core/sync` or
 `index.js`) writes the save over the server's copy whole. `commitRetry` tries a commit refused with one of `codes`
-once more after `delay` ms.
+once more after `delay` ms. Recommended for an app with sign-in (the starter's setting, 1.3.10): a save kept across a
+sign-out can go out just after the next sign-in, before Firestore has the new token, and be refused `permission-denied`
+once; `commitRetry: { codes: ['permission-denied'], delay: 500 }` sends it again. The default stays refused at once.
 
 ### A kind saved elsewhere, unstamped collections, the app's own listener, inStepAt and reopen (1.2.0)
 

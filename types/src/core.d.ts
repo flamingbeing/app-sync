@@ -254,6 +254,11 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
     registry: import("./types.js").Registry | null;
     saving: Set<Promise<any>>;
     statusNow: () => import("./types.js").SyncStatus;
+    unsentNow: () => {
+        waiting: number;
+        attention: number;
+        unsent: number;
+    };
     tell: (force?: boolean) => void;
     signedIn: (u: AppUser, scopeOf: ((user: AppUser) => string) | null) => Promise<void>;
     reset: () => void;

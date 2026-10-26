@@ -237,9 +237,15 @@ export function createSyncCore(options, { load, user }) {
   const subs = new Set();
   let lastTold = '';
   const statusNow = () => {
-    const entries = queue.entries();
-    return noteInStep(syncStatus({ online: online(), pending: queue.pending() + unsentOutside(), attention: attentionCount(entries), persisted, stale: watchdog.stale(), confirmed: heard, atRiskOnlyOffline: true }));
+    const n = unsentNow();
+    return noteInStep(syncStatus({ online: online(), pending: n.waiting, attention: n.attention, persisted, stale: watchdog.stale(), confirmed: heard, atRiskOnlyOffline: true }));
   };
+  let queued = 0;
+  function unsentNow() { // 1.3.10 chip+sign-out
+    const es = queue.entries(), a = es.filter(x => x.refused && /^(archiv|sync)ed$/.test(x.state)).length;
+    const w = queue.pending() + unsentOutside() + queued;
+    return { waiting: w, attention: attentionCount(es) + a, unsent: w + a };
+  }
   /** @param {SyncStatus} st */
   const noteInStep = st => { if (st.state === 'synced') inStepAt = now(); return st; };
   const facts = () => { statusNow(); return { persisted, confirmed: heard, heardAt, inStepAt }; };
@@ -427,7 +433,8 @@ export function createSyncCore(options, { load, user }) {
   function save(kind, s, record, base = null, opts = undefined) {
     if (isPublic(s)) return Promise.reject(new Error('save: ' + s + ' is read only'));
     const k = kind + ':' + s + ':' + record.id;
-    const run = (chains.get(k) || Promise.resolve()).then(() => queue.save(kind, s, record, base, opts));
+    queued++;
+    const run = (chains.get(k) || Promise.resolve()).then(() => (queued--, queue.save(kind, s, record, base, opts)));
     const tail = run.catch(() => {}).finally(() => { if (chains.get(k) === tail) chains.delete(k); saving.delete(tail); tell(true); });   // (1.3.9: the unsent count includes saving)
     chains.set(k, tail); saving.add(tail);
     return run;
@@ -531,7 +538,7 @@ export function createSyncCore(options, { load, user }) {
       conflicts, describe, resolve, hub, queue, parts, track, unsentOutside, outsideSettled, heard: heardOf, idle, copyOf,
       lastSeen, watchDoc, reconnect,
     },
-    hub, queue, stores, adapter, outbox, registry, saving, statusNow, tell, signedIn, reset, close, addDoc, dropDoc,
+    hub, queue, stores, adapter, outbox, registry, saving, statusNow, unsentNow, tell, signedIn, reset, close, addDoc, dropDoc,
     startWatches, stopWatches, stopPublic, scope: () => scope, watching: () => watches.size + docWatches.size,
   };
 }

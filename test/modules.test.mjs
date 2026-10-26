@@ -383,3 +383,45 @@ test('sync module: once a save is done the status counts nothing unsent, with no
   assert.equal(st.state, 'synced');
   assert.equal(st.unsent, 0, 'nothing unsent once the save returned');
 });
+
+test('sync module: one count of unsent saves: the status never says synced while sign-out would count one (1.3.10)', async () => {
+  // A save the server refused and onRefused set aside (archived, refused) counted as unsent at sign-out (a switch
+  // waits for it) but as done in the status, so the chip said synced and sign-out said "1 unsent change kept". Seen in
+  // the reference app's files test (a send refused just after sign-in), about 1 in 20.
+  const srv = fakeServer();
+  const t = await modulesApp({ srv, adapter: fakeAdapter(srv, { refuse: 'permission-denied' }), more: { onRefused: () => 'archive' } });
+  const { app } = t;
+  await app.auth.signIn();
+  app.sync.watch('sp-u1', 'items', () => {});
+  await app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake refused' }).catch(() => {});
+  assert.ok(await until(() => app.sync.queue.refused().length === 1 && app.sync.queue.entries()[0].state === 'archived'), 'set aside');
+  await settle(10);
+  let st = null; app.status$(x => { st = x; })();
+  let chip = null; app.sync.status$(x => { chip = x; })();
+  assert.equal(st.unsent, 1, 'sign-out counts it (the outbox is its only copy)');
+  assert.equal(chip.state, 'attention', 'and the status says it needs the person, not synced');
+  await app.sync.queue.discard(app.sync.queue.refused()[0].key);
+  await settle(10);
+  app.status$(x => { st = x; })(); app.sync.status$(x => { chip = x; })();
+  assert.deepEqual([chip.state, st.unsent], ['synced', 0], 'discarded: nothing unsent, synced');
+});
+
+test('sync module: a second save of the same record waiting for the first keeps the status from saying synced (1.3.10)', async () => {
+  // The first save's end told the status before the second one (waiting behind it, counted at sign-out) had reached
+  // the queue: synced showed with one save still to send.
+  const t = await modulesApp();
+  const { app } = t;
+  await app.auth.signIn();
+  app.sync.watch('sp-u1', 'items', () => {});
+  await app.sync.save('item', 'sp-u1', { id: 'r0', text: 'Fake first' });
+  await settle(10);
+  const early = [];
+  const sent = () => app.sync.queue.entries().some(x => x.record.text === 'Fake two' && x.state === 'synced');
+  const off = app.sync.status$(x => { if (x.state === 'synced' && !sent()) early.push(x.state); });
+  early.length = 0;
+  const one = app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake one' });
+  const two = app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake two' }, { id: 'r1', text: 'Fake one' });
+  await Promise.all([one, two]);
+  off();
+  assert.deepEqual(early, [], 'no synced before the second save was sent');
+});

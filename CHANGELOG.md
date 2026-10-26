@@ -14,6 +14,23 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.10 (2026-10-26)
+
+Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in
+createApp's status (`src/core.js`) and the sync module's unsent count (`src/module-sync.js`).
+
+- **One count of unsent saves**: the status and the sign-out count (`ctx.status: unsent`, which a switch and forget()
+  wait for) now come from one function (`unsentNow` in core.js). Before, a save refused and set aside by
+  `onRefused: 'archive'` (archived, refused) counted as unsent at sign-out but as done in the status, so the chip said
+  synced and sign-out said "1 unsent change kept"; and a second save of a record waiting behind the first was counted
+  at sign-out only, so the first one's end told synced while it still waited. A refused save set aside now makes the
+  status `attention` (it needs the person: retry or discard) until it is retried or discarded.
+- Unchanged on purpose: `save()` still rejects when the server's answer (refused or a conflict) comes within its
+  180 ms wait ("a copy is kept in Recover", so an editor keeps its input) and resolves otherwise.
+- README: the fast refusal note under "Refused saves", and `backend.commitRetry: { codes: ['permission-denied'],
+  delay: 500 }` as the recommended setting for an app with sign-in (a save kept across a sign-out, refused once because
+  it went out before the new token); no engine default changes.
+
 ## 1.3.9 (2026-10-26)
 
 Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fixes are in

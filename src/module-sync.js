@@ -71,7 +71,7 @@ export function sync(options = {}) {
       const tell = () => {
         if (stopped) return;
         const st = c.statusNow();
-        const unsent = c.scope() ? c.queue.entries().filter(unsentJob).length + api.unsentOutside() + c.saving.size : storedUnsent;
+        const unsent = c.scope() ? c.unsentNow().unsent : storedUnsent;
         ctx.status.set({ state: st.state, count: st.count, unsent });
       };
       /** @param {string} s */
