@@ -16,8 +16,8 @@ worker and one watchdog worker use at most six Node processes. Run files directl
 child process created by `node --test`. Each process has a 180-second limit; code 124 means a timeout,
 not an assertion failure. `results.json` records completed attempts and exit codes.
 
-The recovered `run.sh` remains available for the original commands; prefer `run.py` for bounded runs,
-counts, and meaningful exit codes. The emulator mode needs Java 11+, local emulator configuration,
+The recovered `run.sh` delegates model and loop commands to `run.py`, preserving their original syntax.
+Both runners return nonzero on failures. Choose a fresh TEMP for each separate campaign to preserve evidence. The emulator mode needs Java 11+, local emulator configuration,
 and the demo project only. Do not use live backends. The mixed-version consumer spec requires its
 app-starter fixtures and an emulator; it is not standalone in this checkout.
 
