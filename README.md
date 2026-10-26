@@ -221,7 +221,9 @@ sync({ ..., backend: { merge: { '*': replaceRecord }, commitRetry: { codes: ['pe
 device shows as its base. A watch's `query` (fields equal to these values) and `limit` narrow what its callback gets,
 never the device copy. `merge['*']` is the merge of every collection not named; `replaceRecord` (from `@core/sync` or
 `index.js`) writes the save over the server's copy whole. `commitRetry` tries a commit refused with one of `codes`
-once more after `delay` ms.
+once more after `delay` ms. Recommended for an app with sign-in (the starter's setting, 1.3.10): a save kept across a
+sign-out can go out just after the next sign-in, before Firestore has the new token, and be refused `permission-denied`
+once; `commitRetry: { codes: ['permission-denied'], delay: 500 }` sends it again. The default stays refused at once.
 
 ### A kind saved elsewhere, unstamped collections, the app's own listener, inStepAt and reopen (1.2.0)
 

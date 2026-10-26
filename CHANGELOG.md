@@ -27,6 +27,9 @@ createApp's status (`src/core.js`) and the sync module's unsent count (`src/modu
   status `attention` (it needs the person: retry or discard) until it is retried or discarded.
 - Unchanged on purpose: `save()` still rejects when the server's answer (refused or a conflict) comes within its
   180 ms wait ("a copy is kept in Recover", so an editor keeps its input) and resolves otherwise.
+- README: the fast refusal note under "Refused saves", and `backend.commitRetry: { codes: ['permission-denied'],
+  delay: 500 }` as the recommended setting for an app with sign-in (a save kept across a sign-out, refused once because
+  it went out before the new token); no engine default changes.
 
 ## 1.3.9 (2026-10-26)
 
