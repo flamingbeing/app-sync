@@ -9,9 +9,9 @@ python soak/run.py
 python soak/summarize.py
 ```
 
-The full driver uses at most six Node processes, with test isolation disabled to avoid extra child processes. It runs the existing tests without changing their assertions, timing or engine code. Model seeds target 1000–20999 (all three conflict configurations), auth seeds 1000–5999, cache seeds 1–5000, and five regression files target 200 repeats each. Failures are replayed three times, one seed or repeat per process. Any mixed replay result counts as flaky.
+The full driver uses at most six Node processes. Each model host runs three isolated worker-thread realms to overlap timer waits without sharing the fake SDK�s global clock; individual failing-seed replays run alone in a fresh Node process. Other suites run in the main thread, with test isolation disabled to avoid extra child processes. It runs the existing tests without changing their assertions, timing or engine code. Model seeds target 1000–20999 (all three conflict configurations), auth seeds 1000–5999, cache seeds 1–5000, and five regression files target 200 repeats each. Failures are replayed three times, one seed or repeat per process. Any mixed replay result counts as flaky.
 
-Generated copies change only seed selection and import URLs. They, logs and JSON results live under `$env:TEMP\sync-soak`, outside git. The driver resumes batches recorded in results.json and stops admitting work after 80 minutes; already started batches finish. It prioritizes auth, cache and regression loops before model batches. Report incomplete coverage using the summary, rather than treating unfinished seeds as passing. A fresh run requires a fresh TEMP directory.
+Generated copies change only seed selection and import URLs. They, logs and JSON results live under `$env:TEMP\sync-soak`, outside git. The driver resumes batches recorded in results.json and stops admitting work after 65 minutes; already started batches finish. It prioritizes auth, cache and regression loops before model batches. Report incomplete coverage using the summary, rather than treating unfinished seeds as passing. A fresh run requires a fresh TEMP directory.
 
 Replay one model seed directly:
 
