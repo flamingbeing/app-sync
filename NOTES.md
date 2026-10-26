@@ -4,6 +4,8 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
 
 ## How to test
 
+- When Node cannot spawn child processes, run each unit file directly from PowerShell with `node --test --test-isolation=none test/<file>.test.mjs`; use a fresh process for each repetition. The fixed 40 ms recovery wait in the backend-timeout test can race a 30 ms in-flight timeout plus a 10 ms retry delay; see [1.3.11 soak](SOAK-ROUND-3.md).
+
 - Unit: `node --test test/*.test.mjs` (fake server in `test/fake-server.mjs`, fake SDK in `test/fake-sdk.mjs`, memory
   stores in Node). The model test (`test/model.test.mjs`) runs 40 seeds; `MODEL_SEEDS=500` before a release that touches
   sync, `MODEL_SEED=<n>` to replay a printed failure.

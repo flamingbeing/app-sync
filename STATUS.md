@@ -1,6 +1,7 @@
 # Status
 
 ## Now
+- 2026-10-27 01:20 SGT: 1.3.11 unit soak round 3 complete: 900 file runs; five files 150/150, fixes 113/150. Sole failure is the known timeout assertion (37/150, flaky); 111 isolated replays: 96 pass, 15 fail. See [report](SOAK-ROUND-3.md). No engine/test changes; timer-based assertion remains.
 - 1.3.7 (26 Oct): a save done just before going offline keeps showing (`watchSaved`); no API or format change.
 - 1.2.0 (26 Oct): `kinds[kind] = { coll, path }`, `backend.unstampedColls`, `watch(..., { listen })`, `facts().inStepAt`, `sync({ reopen })`; additive, no format change.
 - 1.1.0 (26 Oct): `sync.saveMany`, `watch(..., { query, limit })`, `backend.merge["*"]` + `replaceRecord`, `backend.commitRetry`; additive, no format change.
