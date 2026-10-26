@@ -368,3 +368,18 @@ test('public read: a relisten while signed out (the public watch still listening
   assert.deepEqual(heard, ['news'], 'the account\'s watch stays paused, signed out');
   await app.stop();
 });
+
+test('sync module: once a save is done the status counts nothing unsent, with no later event (1.3.9)', async () => {
+  // The unsent count also counts saves still being made, but that count was taken only on queue or status news: the
+  // last news came while the save was still returning, so "synced" showed with 1 unsent, and a sign-out said one
+  // change was kept. Seen in the reference app's files test, about 1 in 40.
+  const t = await modulesApp();
+  const { app } = t;
+  await app.auth.signIn();
+  app.sync.watch('sp-u1', 'items', () => {});
+  await app.sync.save('item', 'sp-u1', { id: 'r1', text: 'Fake sent' });
+  await settle(10);
+  let st = null; app.status$(x => { st = x; })();
+  assert.equal(st.state, 'synced');
+  assert.equal(st.unsent, 0, 'nothing unsent once the save returned');
+});

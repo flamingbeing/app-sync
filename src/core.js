@@ -77,7 +77,7 @@
 //   written outside it: for an update's canReload.
 // host: { load() -> the app's SDK (shared, loaded once), user() -> the account signed in (AppUser) or null }.
 // -> the api pieces both hand on, plus what each needs to sign out or switch (no promise: src/internal).
-import { createSyncHub, replanOnWake } from './sync.js';
+import { createSyncHub, replanOnWake, landSaved } from './sync.js';
 import { createWriteQueue, watchSaved } from './writes.js';
 import { createStores } from './store.js';
 import { createOutbox } from './outbox.js';
@@ -174,7 +174,12 @@ export function createSyncCore(options, { load, user }) {
       if (tomb > 0) extra = { ...extra, after: tomb };
       const at = kinds.pathOf(kind, owner, record);
       if (at) extra = { ...extra, path: at };
-      return commit ? commit(owner, kind, record, base, extra) : adapter.commit(owner, collOf(kind), record, base, extra);
+      const result = await (commit ? commit(owner, kind, record, base, extra) : adapter.commit(owner, collOf(kind), record, base, extra));
+      // (1.3.9) the server's copy into the device copy before the save counts as done: a reload offline right after
+      // "synced" shows it, though the listener may not have heard it (only the record's latest save; not one stored
+      // at its own path, which another watch holds)
+      if (!at && result?.id != null && String(result.id) === String(record.id) && queue.jobKey(kind, record.id) === extra?.key) await landSaved(hub, owner, collOf(kind), result);
+      return result;
     },
   });
   const hub = createSyncHub({
@@ -423,7 +428,7 @@ export function createSyncCore(options, { load, user }) {
     if (isPublic(s)) return Promise.reject(new Error('save: ' + s + ' is read only'));
     const k = kind + ':' + s + ':' + record.id;
     const run = (chains.get(k) || Promise.resolve()).then(() => queue.save(kind, s, record, base, opts));
-    const tail = run.catch(() => {}).finally(() => { if (chains.get(k) === tail) chains.delete(k); saving.delete(tail); });
+    const tail = run.catch(() => {}).finally(() => { if (chains.get(k) === tail) chains.delete(k); saving.delete(tail); tell(true); });   // (1.3.9: the unsent count includes saving)
     chains.set(k, tail); saving.add(tail);
     return run;
   }

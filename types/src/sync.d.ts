@@ -108,6 +108,8 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne, now
     replan(): boolean;
     /** @param {string[]} ids @param {number} [at] */
     drop(ids: string[], at?: number): Promise<void>;
+    /** @param {Doc} doc */
+    land(doc: Doc): Promise<void>;
     /** @param {Tomb[] | null | undefined} list */
     tombs(list: Tomb[] | null | undefined): Promise<void>;
     /** @param {string[] | null} [ids] @returns {Promise<string[]>} */
@@ -140,6 +142,8 @@ export function createTombFeed({ scope, store, listen, apply, kinds, coll, now, 
     stop(): Promise<any>;
     flush: () => Promise<any>;
 };
+/** @param {object} hub @param {string} scope @param {string} coll @param {Doc} doc @returns {Promise<void>} */
+export function landSaved(hub: object, scope: string, coll: string, doc: Doc): Promise<void>;
 /**
  * @typedef {object} SyncHubOptions
  * @property {(scope: string) => Promise<import('./types.js').Store>} openStore

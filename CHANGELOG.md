@@ -14,6 +14,25 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.9 (2026-10-26)
+
+Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fixes are in
+the collection engine (`src/sync.js`) and createApp's save (`src/core.js`).
+
+- **A save shown as synced is still there after a reload offline**: the server's answer reached the device copy only
+  once the listener heard it, and 1.3.7's copy laid over the list was in memory only, so a reload while offline right
+  after "synced" showed the list without a record just added (an edit went back, a delete came back): about 1 in 6
+  runs of the reference app's offline test. Now the server's answer goes into the running engine's list and the device
+  copy before the save counts as done (a delete leaves both), as the listener would write it: never over a newer copy
+  held, nor at or before a tombstone; only the record's latest save; a server stamp not resolved yet is left out (until
+  the listener brings it, the next start reads that collection in full). Limits: a collection no page watches
+  gets the save at its next listen online, as before; so does a kind stored at its own path.
+- **A sign-out right after "synced" no longer says a change is unsent**: the status's unsent count includes saves
+  still being made, but it was taken only on queue or status news, and the last news came while the save was still
+  returning; so "synced" showed with 1 unsent until the next news, and a sign-out then said one change was kept (the
+  reference app's files test, about 1 in 40). The status is now told again when a save returns.
+- **Size budget:** `src/` 291500 -> 294000 bytes, for these fixes.
+
 ## 1.3.8 (2026-10-26)
 
 Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in
@@ -38,7 +57,7 @@ Fix, no API, module-contract or stored-format change; modular: yes, shaken: no n
   again. Seen in a real browser with an item's edit sheet open: added, then offline at once (about half the runs). Now
   the copy the server stored shows in its place until the listener hears that record change or the server answers the
   listener (then the listener's list is the truth again, a delete elsewhere included). Only in memory: a reload while
-  still offline shows the device copy as before (the record comes back with the next server answer).
+  still offline showed the device copy as before, without the save (fixed in 1.3.9: the answer is in the device copy).
   Only a save still being sent when it was laid over the list takes its place: a later save the store refuses does
   not bring an earlier, already heard save back over a newer server copy.
 - **Size budget:** `src/` 290000 -> 291000 bytes, for this fix.
