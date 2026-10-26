@@ -52,5 +52,5 @@ lines+=['','Repeat with six workers (intermittent; a single invocation may pass)
 '## Run notes','',
 '`npm ci` failed at lifecycle-script spawning in the restricted Windows environment. `npm ci --ignore-scripts --cache "$env:TEMP\\npm-cache" --no-audit --no-fund` completed. These suites use fake backends and do not need the skipped install scripts.','',
 'At most six Node host processes. Model batches use three isolated worker-thread realms per host; the fake SDK modifies Date.now, so model scenarios never share one realm concurrently. Individual failing-seed replays use fresh Node processes. Generated tests, raw logs and traces remain outside git in TEMP. Only soak tooling and this derived report are committed. Engine code was not changed.','']
-(root/'soak/RESULTS.md').write_text('\n'.join(lines),encoding='utf-8')
+(root/'soak/RESULTS.md').write_text('\n'.join(lines),encoding='utf-8',newline='\n')
 print('Wrote soak/RESULTS.md')
