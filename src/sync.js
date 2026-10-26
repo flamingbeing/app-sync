@@ -384,7 +384,11 @@ export function createCollectionSync({ scope, coll, store, listen, fetchOne = nu
     // server stamps: the anchor moves only on what the server confirmed, never on this device's pending writes
     const pending = new Set((s.changes || []).filter(c => c.pending).map(c => c.id));
     if (s.full) {
-      const list = s.docs || [], there = new Set(list.map(d => d.id));
+      // (1.3.13) a copy at or before a known deletion stays out (the bin's tombstone can land before this first full
+      // read), as on the delta path; a newer copy held here stays
+      const gone = meta.gone || {}, stale = (/** @type {Doc} */ d) => gone[d.id] != null && stamp(d) <= gone[d.id];
+      const list = /** @type {Doc[]} */ ((s.docs || []).map(d => stale(d) ? docs.get(d.id) : d).filter(d => d && !stale(d)));
+      const there = new Set(list.map(d => d.id));
       const kept = [...docs.keys()].filter(id => !there.has(id) && holding(id));
       const r = replaceAll(docs, [...list, .../** @type {Doc[]} */ (kept.map(id => docs.get(id)))]);
       for (const id of kept) left(id);

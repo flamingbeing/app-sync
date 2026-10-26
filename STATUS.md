@@ -1,6 +1,7 @@
 # Status
 
 ## Now
+- 1.3.13 (27 Oct): a full read arriving after a record's tombstone (bin heard first) no longer brings the deleted version back to the list and device copy; a newer restore still shows. No API or format change.
 - 1.3.12 (27 Oct): speed-ups for big lists (`tools/bench.mjs`: 200 saves on a list of 10k about 18 s -> 8 s), a custom stamp field no longer turns a resend into a conflict, report codes past 20 counted once; no API or format change. Open: a stopped app keeps its watchdog interval and wake listeners (no teardown; not a data risk).
 - 1.3.7 (26 Oct): a save done just before going offline keeps showing (`watchSaved`); no API or format change.
 - 1.2.0 (26 Oct): `kinds[kind] = { coll, path }`, `backend.unstampedColls`, `watch(..., { listen })`, `facts().inStepAt`, `sync({ reopen })`; additive, no format change.

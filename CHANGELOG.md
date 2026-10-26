@@ -14,6 +14,17 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.13 (2026-10-27)
+
+Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in
+the collection engine (`src/sync.js`).
+
+- **A deleted record came back when a full read arrived after its tombstone**: the items and bin listeners are
+  separate, so the bin's tombstone can land first; the items listener's full read then put the deleted version back
+  in the list and the device copy (the device showed it as synced while the server had it deleted). The delta path
+  already skipped a copy at or before a known deletion; the full path now does too, and keeps a newer copy held here
+  over such a stale one. A restore stamped after the tombstone still shows.
+
 ## 1.3.12 (2026-10-27)
 
 Fixes and speed-ups, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option
