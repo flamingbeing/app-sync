@@ -6,7 +6,9 @@ import json, os, pathlib, re, subprocess, sys, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = pathlib.Path(os.environ['TEMP']) / ('sync-soak-' + time.strftime('%Y%m%d-%H%M%S') if '--fresh' in sys.argv else 'sync-soak')
 OUT.mkdir(exist_ok=True)
-DEADLINE = time.time() + 65 * 60
+minutes = float(sys.argv[sys.argv.index('--minutes')+1]) if '--minutes' in sys.argv else 65
+if minutes <= 0: raise SystemExit('minutes must be positive')
+DEADLINE = time.time() + minutes * 60
 (OUT/'driver.pid').write_text(str(os.getpid()))
 QUICK = '--quick' in sys.argv
 
@@ -64,6 +66,7 @@ if __name__ == '__main__':
     prior = json.loads((OUT/'results.json').read_text()) if (OUT/'results.json').exists() and not QUICK else []
     done = {(r.get('suite'),r.get('base'),r.get('count'),r.get('repeat')) for r in prior}
     jobs = [j for j in jobs if j not in done]
+    prior_count=len(prior)
     results=prior
     with cf.ThreadPoolExecutor(max_workers=6) as pool:
         pending={pool.submit(task,*job):job for job in jobs}
@@ -73,5 +76,5 @@ if __name__ == '__main__':
             if row.get('skipped'): continue
             results.append(row)
             (OUT/'results.json').write_text(json.dumps(results,indent=2))
-            if len(results)%10==0 or 'error' in row: print(f'{len(results)}/{len(jobs)} elapsed={time.time()-start:.1f}s last={row}',flush=True)
+            if len(results)%10==0 or 'error' in row: print(f'{len(results)-prior_count}/{len(jobs)} elapsed={time.time()-start:.1f}s last={row}',flush=True)
     print('COMPLETE',len(results),'elapsed',time.time()-start,flush=True)
