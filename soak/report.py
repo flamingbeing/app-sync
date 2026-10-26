@@ -27,12 +27,20 @@ for suite,target in [('model',20000),('auth.model',5000),('cache',5000),('faults
             flaky+=any(p['status']==0 for p in replay)
     assert not seeded or not any(r['status'] and not r['failedSeeds'] for r in rr), 'unclassified batch failure'
     lines.append(f'| {suite} | {runs}/{target} | {runs-failures} | {failures} | {flaky} |')
+covered={seed for r in rows if r.get('suite')=='model' for seed in range(r['base'],r['base']+r['count'])}
+missing=sorted(set(range(1000,21000))-covered)
+ranges=[]
+for seed in missing:
+    if ranges and seed==ranges[-1][1]+1: ranges[-1][1]=seed
+    else: ranges.append([seed,seed])
+lines+=['','Unfinished model seed ranges: '+(', '.join(f'{a}-{b}' for a,b in ranges) if ranges else 'none')+'.']
 errors=[r for r in rows if 'error' in r]
 lines+=['',f'Infrastructure errors in recorded runs: {len(errors)}.','',
 '## Restored task missing from another device','',
 'Tests: `model (held conflicts, 0.6.3)` and `model (held conflicts with a merge collection, 0.7.1)`. Representative seed: 1158. Assertion: d1 shows tasks/t1 missing although the server holds the restored task after convergence polling. All three individual replays of 1158 failed.','',
 'Hypothesis: restoring an edit after a delete may leave its stamp below a tombstone retained by another device. The listener then suppresses the restored record. This is a hypothesis, not a confirmed code-level diagnosis.','',
 '```powershell',"$env:MODEL_SEED='1158'; node --test --test-isolation=none test/model.test.mjs",'```','',
+'A read-only diagnostic of seed 1158 found that the missing device retained a tombstone about 66 seconds newer than the restored server record, in both held modes. Raw diagnostic output remains in TEMP.','',
 'Failing model seeds: '+', '.join(map(str,sorted(failed_seeds)))+'.','',
 '## Timeout/retry timing flake','',
 'Test: `a backend call that never settles times out and the save is sent again` in `test/fixes.test.mjs`. Assertion: expected queue status `synced`, observed `pending` after the 40 ms wait following retry.','',

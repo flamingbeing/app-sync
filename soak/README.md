@@ -68,3 +68,9 @@ The recovered JavaScript runners are also available, but the Python driver suppo
 
 
 To continue a bounded run without repeating completed batches, use `python soak/run.py --minutes 5`. The minutes limit controls admission; the current batch and its three replays finish before exit.
+
+Read-only timestamp diagnostics for one seed (expected failure exit status if the seed fails):
+
+```powershell
+node soak/inspect-seed.mjs 1158 > "$env:TEMP\sync-soak\inspect-1158.log"
+```
