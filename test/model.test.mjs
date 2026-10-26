@@ -204,7 +204,10 @@ for (const held of [false, true, 'merge']) test(`model${held === 'merge' ? ' (he
   const failed = [];
   for (let offset = 0; offset < seeds.length; offset += concurrency) {
     await Promise.all(seeds.slice(offset, offset + concurrency).map(async seed => {
+      const mode = held === 'merge' ? 'held merge' : held ? 'held tasks' : 'ordinary';
+      if (process.env.MODEL_PROGRESS) process.stderr.write(`start ${seed} ${mode}\n`);
       const { problems, log, n } = await run(seed, { held });
+      if (process.env.MODEL_PROGRESS) process.stderr.write(`done ${seed} ${mode}\n`);
       if (problems.length) {
         failed.push(seed);
         console.log(`mode: ${held === 'merge' ? 'held merge' : held ? 'held tasks' : 'ordinary'}`);

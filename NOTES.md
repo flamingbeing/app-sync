@@ -11,7 +11,8 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
   and cache tests. `MODEL_SEED=<n>` overrides the range for one replay. The model always adds its fixed regression
   seed unless replaying one seed, and runs ordinary, held-task and held-merge modes. Independent scenarios overlap
   four at a time within one process; `MODEL_CONCURRENCY=1` restores serial scheduling (single-seed replay is always
-  isolated). Servers, SDKs, outboxes and device state remain separate. In a sandbox that blocks Node
+  isolated). `MODEL_PROGRESS=1` writes per-seed start/done markers to stderr to locate a stalled scenario.
+  Servers, SDKs, outboxes and device state remain separate. In a sandbox that blocks Node
   child processes, call `node --test --test-isolation=none test/model.test.mjs` directly from PowerShell; use the
   corresponding test file for auth or cache. Keep soak logs outside git.
 - Emulator: `npm ci && npm run test:emulator` (demo project `demo-app-sync`, open test-only rules in
