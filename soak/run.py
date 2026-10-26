@@ -12,6 +12,8 @@ if not 1 <= a.workers <= 4 or a.count < 1:
     p.error('use 1..4 workers and a positive count')
 root = pathlib.Path(__file__).resolve().parent.parent
 logs = pathlib.Path(os.environ['TEMP']) / 'soak' / a.suite
+if logs.exists() and any(logs.iterdir()):
+    p.error('result directory already exists; choose a fresh TEMP to preserve prior evidence')
 logs.mkdir(parents=True, exist_ok=True)
 end = time.monotonic() + a.minutes * 60
 results = []
