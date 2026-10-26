@@ -200,6 +200,10 @@ a switch or forget() is refused (`forget({ force })` still wipes). `lastSent` is
 the copy this device last sent (while it is in the device history, the last 100 finished saves) and `lastSeen` the
 server's as last heard: when their signatures differ, someone else saved since.
 
+`save()` rejects when the server refuses the save (or a conflict comes back) within its short wait (180 ms), so an
+editor can keep its input; the save is still kept (in `queue.refused()`, or set aside by `onRefused`). Catch it where
+you call `save()` and point the person to the refused copy; a refusal that comes later only shows in the status.
+
 Anything the facade does not cover: pass the parts' own options (`backend`, `hub`, `stores`, `queue`), replace a part
 (`adapter`, `commit`, `outbox`), or use `app.sync.parts` (hub, queue, stores, adapter, watchdog, registry). Each module
 also loads on its own; the full wiring by hand (0.5.x style) still works, and `src/app.sync.js` shows it in one place.
