@@ -5,6 +5,8 @@ import concurrent.futures as cf
 import json, os, pathlib, re, subprocess, sys, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = pathlib.Path(os.environ['TEMP']) / ('sync-soak-' + time.strftime('%Y%m%d-%H%M%S') if '--fresh' in sys.argv else 'sync-soak')
+if '--out' in sys.argv:
+    OUT = pathlib.Path(sys.argv[sys.argv.index('--out')+1])
 OUT.mkdir(exist_ok=True)
 minutes = float(sys.argv[sys.argv.index('--minutes')+1]) if '--minutes' in sys.argv else 65
 if minutes <= 0: raise SystemExit('minutes must be positive')
