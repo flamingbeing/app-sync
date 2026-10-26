@@ -14,6 +14,19 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.8 (2026-10-26)
+
+Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in
+the write queue's `pending()` (`src/writes.js`).
+
+- **The status no longer says synced while a save is still being stored**: a save shows at once (0.7.2), but
+  `pending()` counted only stored jobs, and not a job sent while its save still stored that it was taken. So the
+  status read synced while a save was still being stored: a reload offline then lost a record just added, and an app
+  waiting on the save (a files module marking its upload done) still held its own job, so a sign-out right after
+  "synced" said one change was unsent. `pending()` now counts each save from the moment it is made until it returns
+  (once: not again while its job counts), and the queue tells its listeners when a save returns.
+- **Size budget:** `src/` 291000 -> 291500 bytes, for this fix.
+
 ## 1.3.7 (2026-10-26)
 
 Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in

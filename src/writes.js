@@ -113,6 +113,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   /** @type {Set<string>} */
   const forgotten = new Set();
   let storing = 0;   // saves called and not finished (flush waits for all of them, however many are for one record)
+  /** @type {Set<{ job: Job | null }>} */
+  const saves = new Set();   // the same, with each one's job once stored (pending(): 1.3.8)
   /** @param {string | null} email @param {number} gen */
   const current = (email, gen) => owner === email && generation === gen && getOwner() === email;
   // sorted again only when the list changes (a job's at and key never do; callers never change it in place): overlay
@@ -251,13 +253,14 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     if (getOwner() !== email) throw new Error('Account changed; the editor has not been saved');
     // shown at once (0.7.2): the lists have this save from now, before it is stored, until its job takes over
     const early = { kind, owner: email, record: copy(record) }, earlyKey = kind + ':' + record.id;
-    storing++;
+    const mine = { job: /** @type {Job | null} */ (null) };
+    storing++; saves.add(mine);
     const unshow = () => { if (inflight.get(earlyKey) !== early) return false; inflight.delete(earlyKey); return true; };
-    try { inflight.set(earlyKey, early); notify(); return await saveNow(kind, email, record, base, ops, meta, unshow); }
-    finally { storing--; if (unshow()) notify(); }
+    try { inflight.set(earlyKey, early); notify(); return await saveNow(kind, email, record, base, ops, meta, unshow, mine); }
+    finally { storing--; saves.delete(mine); unshow(); notify(); }
   }
-  /** @param {string} kind @param {string} email @param {Doc} record @param {Doc | null} base @param {any} ops @param {any} meta @param {() => boolean} unshow @returns {Promise<Doc>} */
-  async function saveNow(kind, email, record, base, ops, meta, unshow) {
+  /** @param {string} kind @param {string} email @param {Doc} record @param {Doc | null} base @param {any} ops @param {any} meta @param {() => boolean} unshow @param {{ job: Job | null }} mine @returns {Promise<Doc>} */
+  async function saveNow(kind, email, record, base, ops, meta, unshow, mine) {
     await activate(email); const gen = generation, id = kind + ':' + record.id;
     let moved = false;
     for (const x of chainOf(id)) moved = await refresh(x) || moved;
@@ -293,7 +296,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     for (const x of over ? chain : stale && stale !== job ? [stale] : []) { x.state = 'archived'; if (over) x.kept = true; await persist(x); }
     const at = jobs.findIndex(x => x.key === job.key);   // (a rescan may have read it from the store first)
     if (at < 0) jobs.push(job); else jobs[at] = job;
-    unshow(); notify();
+    mine.job = job; unshow(); notify();
     if (over && !same(/** @type {Job} */ (previous).record, record)) notice('Your version from this device is kept in ' + recover);
     if (held) throw failure(job);
     await Promise.race([drain(keyOf(job)), delay(180)]);
@@ -398,7 +401,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     /** @param {() => void} fn */
     onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     entries: () => copy(ordered()).reverse(),
-    pending: () => jobs.filter(x => !terminal.has(x.state)).length,
+    // (1.3.8) and saves not returned whose job doesn't count (not stored yet, or sent): synced is said once they return
+    pending: () => jobs.filter(x => !terminal.has(x.state)).length + [...saves].filter(x => !x.job || terminal.has(x.job.state)).length,
     // a save needs the user (failed, or met a change made elsewhere), without copying every entry as entries() does
     /** @param {string} [kind] */
     attention: kind => jobs.some(x => (!kind || x.kind === kind) && (x.state === 'failed' || x.state === 'conflict')),

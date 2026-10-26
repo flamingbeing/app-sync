@@ -497,3 +497,43 @@ test('a save the store refuses does not bring back an earlier save over a newer 
   assert.deepEqual(texts(), ['Fake theirs'], 'and still after the next cached snapshot');
   off();
 });
+
+test('pending() counts a save from the moment it is made until it returns, once (1.3.8)', async () => {
+  // A save shows at once (0.7.2) but was counted only once its job was stored, and not after the job was sent while
+  // the save still stored that it was taken: the status read synced while a save was still being stored (an offline
+  // reload then lost it; an app waiting on the save, as the starter's files module does, still held its own job).
+  const records = new Map(), gates = [];
+  let hold = false;
+  const put = x => { records.set(x.key, structuredClone(x)); };
+  const store = { async put(x) { if (hold) await new Promise(r => gates.push(r)); put(x); }, async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); }, async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; }, async remove(k) { records.delete(k); }, async forget() {} };
+  const backend = async (_o, _k, r) => ({ ...r, updatedAt: (r.updatedAt || 0) + 100 });
+  const q = createWriteQueue({ store, getOwner: () => 'a', backend, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const seen = [];
+  q.onChange(() => seen.push(q.pending()));
+  const release = async () => { for (let i = 0; i < 50 && !gates.length; i++) await settle(1); gates.shift()?.(); };
+
+  hold = true;
+  const p = q.save('item', 'a', { id: 'one', text: 'Fake first', updatedAt: 1 });
+  assert.equal(q.pending(), 1, 'counted while its job is being stored');
+  await release();                                   // the job is stored, then sent
+  for (let i = 0; i < 50 && q.status('item', 'one') !== 'synced'; i++) await settle(1);
+  assert.equal(q.status('item', 'one'), 'synced');
+  assert.equal(q.pending(), 1, 'still counted while the save stores that it was taken');
+  await release();                                   // the job's last write (accepted)
+  hold = false;
+  await p;
+  assert.equal(q.pending(), 0, 'not counted once the save returns');
+  assert.equal(seen.at(-1), 0, 'and the queue says so (the status is told)');
+  assert.ok(seen.every(n => n <= 1), 'one save counts once, never as two: ' + seen.join(','));
+});
+
+test('pending() counts a save the store refuses only until it fails (1.3.8)', async () => {
+  const store = { async put() { throw new Error('quota'); }, async list() { return []; }, async get() { return null; }, async remove() {}, async forget() {} };
+  const q = createWriteQueue({ store, getOwner: () => 'a', backend: async (_o, _k, r) => r, delay: ms => new Promise(r => setTimeout(r, Math.min(ms, 5))) });
+  await q.activate('a');
+  const p = q.save('item', 'a', { id: 'one', text: 'Fake refused', updatedAt: 1 });
+  assert.equal(q.pending(), 1);
+  await assert.rejects(p);
+  assert.equal(q.pending(), 0);
+});
