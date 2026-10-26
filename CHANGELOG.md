@@ -14,6 +14,20 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.3.7 (2026-10-26)
+
+Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in
+`watchSaved` (`src/writes.js`).
+
+- **A save done just before going offline keeps showing**: when the server answered a save but the connection dropped
+  before the listener heard that record, the queue stopped laying the save over the list while the list still lacked
+  it, so a new record vanished from the list (and an edit went back to its old copy) until the device was online
+  again. Seen in a real browser with an item's edit sheet open: added, then offline at once (about half the runs). Now
+  the copy the server stored shows in its place until the listener hears that record change or the server answers the
+  listener (then the listener's list is the truth again, a delete elsewhere included). Only in memory: a reload while
+  still offline shows the device copy as before (the record comes back with the next server answer).
+- **Size budget:** `src/` 290000 -> 291000 bytes, for this fix.
+
 ## 1.3.6 (2026-10-26)
 
 Fix, no API or stored-format change (one module-contract clarification, below); modular: yes, shaken: no new export or option, the fixes are a

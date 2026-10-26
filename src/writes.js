@@ -479,10 +479,40 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view 
   // what was handed last, by id (as text: a copy nobody can change), for changed/removed and copyOf (0.8.2)
   /** @type {Map<string, string>} */
   let last = new Map();
+  // (1.3.7) a save done before the listener heard anything of its record (the connection dropped between the server's
+  // answer and the listener's news) shows the server's copy, not the list's, until the listener hears that record
+  // change or the server answers it: it neither vanishes nor goes back to its old copy offline.
+  // laid: ids the queue lays over the list -> { job key, list copy, heard since }; landed: id -> { doc, list copy }
+  /** @type {Map<string, { key: string, seen: string, heard: boolean }>} */
+  const laid = new Map();
+  /** @type {Map<string, { doc: Doc | null, seen: string }>} */
+  const landed = new Map();
+  /** @param {Doc[]} base @param {Doc[]} overlaid @returns {Doc[]} */
+  const land = (base, overlaid) => {
+    const was = new Map(base.map(d => [String(d.id), d])), over = new Map(overlaid.map(d => [String(d.id), d]));
+    const text = (/** @type {string} */ id) => JSON.stringify(was.get(id) ?? null);
+    const now = new Set([...over.keys()].filter(id => over.get(id) !== was.get(id)));
+    for (const id of was.keys()) if (!over.has(id)) now.add(id);
+    for (const id of now) {
+      const key = queue.jobKey(kind, id), seen = text(id), w = laid.get(id);
+      if (w?.key !== key) laid.set(id, { key, seen, heard: false }); else if (w.seen !== seen) Object.assign(w, { seen, heard: true });
+      landed.delete(id);
+    }
+    for (const [id, w] of laid) {
+      if (now.has(id)) continue;
+      laid.delete(id);
+      const job = queue.finished(w.key), doc = job?.result?.id != null ? job.result : job?.record;
+      if (!w.heard && text(id) === w.seen && job?.state === 'synced' && job.owner === owner && doc) landed.set(id, { doc: doc._deleted ? null : doc, seen: w.seen });
+    }
+    for (const [id, l] of landed) {
+      if (text(id) !== l.seen) landed.delete(id); else if (l.doc) over.set(id, l.doc); else over.delete(id);
+    }
+    return landed.size ? [...over.values()] : overlaid;
+  };
   /** @param {boolean} force */
   const hand = force => {
     if (!live || !list) return;
-    const overlaid = queue.overlay(kind, owner, list), shown = view ? view(overlaid) : overlaid, texts = shown.map(d => JSON.stringify(d)), sig = '[' + texts.join(',') + ']';
+    const overlaid = land(list, queue.overlay(kind, owner, list)), shown = view ? view(overlaid) : overlaid, texts = shown.map(d => JSON.stringify(d)), sig = '[' + texts.join(',') + ']';
     if (!force && sig === sent) return;
     sent = sig;
     /** @type {Map<string, string>} */
@@ -495,7 +525,7 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner = scope, view 
     cb(copy(shown), { ...meta, changed, removed });
   };
   const offQueue = queue.onChange(() => hand(false));
-  const offHub = hub.watch(scope, coll, (l, m) => { list = l; meta = m; hand(true); });
+  const offHub = hub.watch(scope, coll, (l, m) => { list = l; meta = m; if (m && !m.fromCache) landed.clear(); hand(true); });
   return Object.assign(() => { live = false; offQueue(); offHub(); }, {
     /** @param {string} id */
     copyOf: id => { const t = last.get(String(id)); return t === undefined ? null : JSON.parse(t); },
