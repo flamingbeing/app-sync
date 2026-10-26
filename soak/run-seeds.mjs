@@ -31,7 +31,7 @@ writeFileSync(gen, relocated);
 mkdirSync(logDir, { recursive: true });
 const env = { ...process.env, MODEL_SEEDS: String(count) };
 delete env.MODEL_SEED;
-const r = spawnSync(process.execPath, ['--test', '--test-isolation=none', gen], { env, cwd: root, encoding: 'utf8', maxBuffer: 1 << 30 });
+const r = spawnSync(process.execPath, ['--test', '--test-isolation=none', '--test-reporter=tap', gen], { env, cwd: root, encoding: 'utf8', maxBuffer: 1 << 30 });
 const out = (r.stdout || '') + (r.stderr || '') + (r.error ? String(r.error) : '');
 writeFileSync(join(logDir, `soak-${suite}-${base}.log`), out);
 const failedSeeds = suite === 'cache'
@@ -45,7 +45,7 @@ if (true) {
     for (let i = 0; i < 3; i++) {
       if (suite === 'cache') writeFileSync(gen, relocated.replace(`for (let seed = ${base}; seed < ${base} + seeds; seed++)`, `for (let seed = ${seed}; seed < ${seed} + seeds; seed++)`));
       const replayFile = suite === 'cache' ? gen : join(root, 'test', `${suite}.test.mjs`);
-      const rr = spawnSync(process.execPath, ['--test', '--test-isolation=none', replayFile], { env: { ...process.env, MODEL_SEED: String(seed), MODEL_SEEDS: '1' }, cwd: root, encoding: 'utf8' });
+      const rr = spawnSync(process.execPath, ['--test', '--test-isolation=none', '--test-reporter=tap', replayFile], { env: { ...process.env, MODEL_SEED: String(seed), MODEL_SEEDS: '1' }, cwd: root, encoding: 'utf8' });
       writeFileSync(join(logDir, `replay-${suite}-${seed}-${i+1}.log`), (rr.stdout || '') + (rr.stderr || ''));
       if (rr.status !== 0) bad++;
     }
