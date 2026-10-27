@@ -14,6 +14,16 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.4.0 (2026-10-27)
+
+Base 1: the code of `1.4.0-rc.1` (and of 1.3.13) under its final version; only the version strings differ. No API,
+module-contract or stored-format change; modular: yes, shaken: no new export or option.
+
+- **Soaked in Chromium only**: model seeds, unit loops, the app-starter and sandbox-app browser tests and a chaos run
+  (reloads, offline, a closed tab) on the release candidate, with no unexplained failure. Firefox and WebKit were
+  not soaked; the app-starter browser tests run in all three. A pilot app is still running on the candidate; bugs it
+  finds go in as 1.4.x.
+
 ## 1.4.0-rc.1 (2026-10-27)
 
 Release candidate for the first app base (base 1): the code of 1.3.13 under a new minor, no API, module-contract or
