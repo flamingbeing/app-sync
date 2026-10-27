@@ -14,6 +14,12 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.4.0-rc.1 (2026-10-27)
+
+Release candidate for the first app base (base 1): the code of 1.3.13 under a new minor, no API, module-contract or
+stored-format change; modular: yes, shaken: no new export or option. It is soaked (model seeds, unit loops, e2e in
+three browsers); `1.4.0` follows on the same code, or a fix goes in as `1.4.0-rc.2` first.
+
 ## 1.3.13 (2026-10-27)
 
 Fix, no API, module-contract or stored-format change; modular: yes, shaken: no new export or option, the fix is in
