@@ -82,5 +82,9 @@
   "1.3.13": {
     "sw-core.js": "43ab8c978b368c4da6a2f72a65aa37635a80f2ec6fcb6c6899d6a879bc3f5c3d",
     "register.js": "fbcc2a3acde43c24d1a42abf50b761758272de9cfe8741f7b8d47e749237faf9"
+  },
+  "1.4.0-rc.1": {
+    "sw-core.js": "8349e7a84ad368b6d371fd49f0ba4ce3355071d9bfa38510effdc2901414face",
+    "register.js": "628b06332a12b1727df3ec96bd0bcf1967fbd721368ae96333715ecf4be2e866"
   }
 }
