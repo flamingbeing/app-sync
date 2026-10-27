@@ -86,5 +86,9 @@
   "1.4.0-rc.1": {
     "sw-core.js": "8349e7a84ad368b6d371fd49f0ba4ce3355071d9bfa38510effdc2901414face",
     "register.js": "628b06332a12b1727df3ec96bd0bcf1967fbd721368ae96333715ecf4be2e866"
+  },
+  "1.4.0": {
+    "sw-core.js": "13157fe02d49fb75405865b20847a989f881e9089b08f3ed9d9b91f057f05fda",
+    "register.js": "6b9bb1c0ff52fd6953906a801527772b4a56c740cc6a5904e2a8a68fce022735"
   }
 }
