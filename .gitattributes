@@ -1,0 +1,5 @@
+# Checked-out text files are LF on every OS: the tests hash FORMATS.md sections and the build locks hash file bytes.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.woff2 binary
