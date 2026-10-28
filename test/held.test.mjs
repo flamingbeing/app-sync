@@ -261,6 +261,36 @@ test('fix 0.7.1: a save queued behind one that is then held is part of the answe
   assert.deepEqual([doc.title, doc.place], ['Fake A', 'Box'], 'theirs for the title; the later place change still lands');
 });
 
+for (const [label, opts] of [['whole record', undefined], ['merge collection', { held: { notes: true }, merge: { notes: true } }]]) test(`fix 1.5.3 (${label}): a later held save made on a copy that heard the other phone's newer value never claims that value as mine`, async () => {
+  const { srv, shared, a, b } = await twoPhones(opts);
+  const base = strip(a.shown('n1'));
+  // phone B's title clashes with phone A's and is held
+  b.offline();
+  await b.app.save('note', S, { ...base, title: 'Fake B' }, base).catch(() => {});
+  await a.app.save('note', S, { ...base, title: 'Fake A' }, base);
+  b.onlineAgain(); await b.app.flush(2000);
+  assert.ok(await until(() => b.state() === 'attention'));
+  // phone B opens the record in an editor (count 2, heard from phone A), phone A changes the count again, phone B hears
+  // that too, then saves the editor's copy with its place (and its title): one more held save, on a base of its own
+  b.offline();
+  const a1 = strip(a.shown('n1'));
+  await a.app.save('note', S, { ...a1, count: 2 }, a1);
+  for (const s of b.subs) s.off = srv.listen(...s.args);
+  assert.ok(await until(() => b.shown('n1')?.count === 2));
+  const editor = strip(b.shown('n1'));
+  const a2 = strip(a.shown('n1'));
+  await a.app.save('note', S, { ...a2, count: 3 }, a2);
+  assert.ok(await until(() => b.shown('n1')?.count === 3));
+  await b.app.save('note', S, { ...editor, title: 'Fake B', place: 'Box' }, editor).catch(() => {});
+  b.onlineAgain(); await b.app.flush(2000);
+  const [c] = b.app.conflicts();
+  assert.deepEqual(b.app.describe(c.key).fields.map(f => f.path), ['title'], 'the count was phone A\'s change, not this phone\'s');
+  await b.app.resolve(c.key, 'mine');
+  await b.app.flush(2000);
+  const doc = shared.docs.get(pathOf('notes', 'n1'));
+  assert.deepEqual([doc.title, doc.place, doc.count], ['Fake B', 'Box', 3], 'mine keeps phone A\'s newer count');
+});
+
 // ---- held conflicts for merge collections (0.7.1): the app's merge function applies ops ----
 
 // A made-up merge function like an app's: ops are [{ set: { path: value } } | { inc: { path: n } } | { put: true }],
