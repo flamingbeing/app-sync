@@ -21,6 +21,10 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
   sorted copy the sends read kept the rescan's: that one was sent and marked synced, the save's own stayed pending
   (`pending()` 1, the chip on "saving", `flush()` false so sign-out waited, and after a reload a second send). The sorted
   copy is now rebuilt on that swap (`src/writes.js`; test `test/rescan-replace.test.mjs`).
+- Fix: a restore (or "keep mine") sent while its collection wasn't running (made offline, screen closed before it
+  went) was stamped by this device's clock alone, not above the delete's tombstone, so a clock behind the deleter's left
+  it hidden on other devices. The hub now reads the tombstone from the stored copy when no engine runs (`hub.tomb` is
+  async; `src/sync.js`, `src/core.js`; test in `test/fixes.test.mjs`).
 
 ## 1.5.0 (2026-10-28)
 

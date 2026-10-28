@@ -758,9 +758,18 @@ export function createSyncHub({ openStore, listen, fetchOne = null, now = Date.n
       }
       await Promise.all(runs.map(p => p.catch((/** @type {any} */ err) => console.warn('Local store not updated', err))));
     },
-    // the highest tombstone known on this device for a record (ms; 0: none), from its running engine
-    /** @param {string} scope @param {string} coll @param {any} id */
-    tomb(scope, coll, id) { const e = engines.get(key(scope, coll)); return e ? e.tomb(String(id)) : 0; },
+    // the highest tombstone known on this device for a record (ms; 0: none), from its running engine, or else from the
+    // collection's stored copy (a save sent after its screen closed, a restore made offline, still needs it)
+    /** @param {string} scope @param {string} coll @param {any} id @returns {Promise<number>} */
+    async tomb(scope, coll, id) {
+      const k = key(scope, coll), e = engines.get(k);
+      if (e) return e.tomb(String(id));
+      try {
+        await (tombing.get(k) || Promise.resolve()).catch(() => {});
+        const meta = (await (await storeFor(scope)).load(coll)).meta || {};
+        return Math.max(Number((meta.gone || {})[id]) || 0, Number((meta.later || {})[id]) || 0);
+      } catch { return 0; }
+    },
     // stop everything and forget open stores (sign-out); resolves when pending local writes are done
     async stopAll() {
       for (const t of timers.values()) clearTimeout(t);

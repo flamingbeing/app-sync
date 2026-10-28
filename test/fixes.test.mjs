@@ -656,3 +656,20 @@ test('a full read that arrives after a tombstone does not bring the deleted vers
   assert.ok(shown.includes('r2:Fake restored here'), 'the newer copy stays');
   await e.stop();
 });
+
+test('a record\'s tombstone is known with no engine running, from the stored copy (1.5.1)', async () => {
+  // A restore made offline is sent after its screen closed: no engine runs for the collection. Before, tomb() said 0
+  // and the save was stamped by this device's clock alone, so a clock behind the deleter's left it hidden elsewhere.
+  const { openStore, wipeStores } = createStores({ prefix: 'fix-t1:', colls: ['items'] });
+  const srv = fakeServer();
+  srv.set('items', { id: 'a', updatedAt: T0 - DAY });
+  const st = await openStore(S);
+  await st.write('items', { put: [srv.get('items', 'a')], meta: { syncAt: T0 - H, fullAt: T0 - DAY } });
+  const hub = createSyncHub({ openStore, listen: srv.listen, fetchOne: srv.fetchOne, now: () => T0, grace: 0, bin: null });
+  await hub.drop(S, 'items', ['a']);   // no engine: straight into the store
+  const at = (await (await openStore(S)).load('items')).meta.gone.a;
+  assert.ok(at > 0);
+  assert.equal(await hub.tomb(S, 'items', 'a'), at, 'the stored tombstone');
+  assert.equal(await hub.tomb(S, 'items', 'b'), 0, 'none for another record');
+  await hub.stopAll(); await wipeStores();
+});
