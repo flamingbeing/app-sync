@@ -54,16 +54,17 @@ jobs:
       pull-requests: read
     steps:
       # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
-      # check cannot hang). Renames count by both names. Pushes, tags and manual runs always run everything; any doubt
+      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
       # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
       - name: Only .md files changed?
         id: docs
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           docs=false
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
             n="$(printf '%s\n' "$files" | wc -l)"
             if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
           fi
@@ -102,16 +103,17 @@ jobs:
       pull-requests: read
     steps:
       # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
-      # check cannot hang). Renames count by both names. Pushes, tags and manual runs always run everything; any doubt
+      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
       # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
       - name: Only .md files changed?
         id: docs
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           docs=false
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
             n="$(printf '%s\n' "$files" | wc -l)"
             if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
           fi
@@ -138,16 +140,17 @@ jobs:
       pull-requests: read
     steps:
       # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
-      # check cannot hang). Renames count by both names. Pushes, tags and manual runs always run everything; any doubt
+      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
       # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
       - name: Only .md files changed?
         id: docs
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           docs=false
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
             n="$(printf '%s\n' "$files" | wc -l)"
             if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
           fi
@@ -195,16 +198,17 @@ jobs:
       pull-requests: read
     steps:
       # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
-      # check cannot hang). Renames count by both names. Pushes, tags and manual runs always run everything; any doubt
+      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
       # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
       - name: Only .md files changed?
         id: docs
         env:
           GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           docs=false
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
             n="$(printf '%s\n' "$files" | wc -l)"
             if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
           fi
