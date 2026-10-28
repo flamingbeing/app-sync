@@ -14,6 +14,15 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.5.4 (2026-10-29)
+
+- Fix: a second save of a record made in the same millisecond as one still being stored (its store write slow, so not
+  in the list yet) got the same time, and the random part of the job key decided which was sent first: about half the
+  time the older value was sent last and the server kept it. Each job's time is now later than the last one handed
+  out. Seen as a rare `rescan-replace` test failure on a loaded Windows runner; pinned with a frozen clock in
+  `test/fixes.test.mjs`.
+- **Size budget:** `src/` 301400 -> 301600 bytes, for this fix.
+
 ## 1.5.3 (2026-10-29)
 
 - Fix: a held conflict whose record had more held saves behind it showed the newest save over the first save's base,

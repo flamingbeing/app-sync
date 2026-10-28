@@ -118,6 +118,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
   // accounts forgotten and not opened again: a save still running for one of them stores nothing more
   /** @type {Set<string>} */
   const forgotten = new Set();
+  let lastAt = 0;   // last job time handed out: a save comes after one still being stored, same ms too (1.5.4)
   let storing = 0;   // saves called and not finished (flush waits for all of them, however many are for one record)
   /** @type {Set<{ job: Job | null }>} */
   const saves = new Set();   // the same, with each one's job once stored (pending(): 1.3.8)
@@ -291,7 +292,7 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
       if (meta !== undefined) job.meta = copy(meta);
     } else {
       job = { v: JOB_FORMAT, key: email + ':' + Date.now().toString(36) + ':' + Math.random().toString(36).slice(2), owner: email,
-        kind, record: copy(record), base: copy(stale?.state === 'failed' ? stale.base : base), state: held ? 'conflict' : 'pending', accepted: false, at: Math.max(Date.now(), ...jobs.map(x => x.at + 1)) };
+        kind, record: copy(record), base: copy(stale?.state === 'failed' ? stale.base : base), state: held ? 'conflict' : 'pending', accepted: false, at: lastAt = Math.max(Date.now(), lastAt + 1, ...jobs.map(x => x.at + 1)) };
       if (held) { job.remote = copy(conflict.remote ?? null); job.error = conflict.error; }
       const carried = stale && (stale.state === 'failed' || held) ? stale.ops || [] : [];   // (a held copy's ops too: 0.7.1)
       if (ops !== undefined || carried.length) job.ops = [...carried, ...(ops !== undefined ? [copy(ops)] : [])];

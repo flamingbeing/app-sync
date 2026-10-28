@@ -691,3 +691,30 @@ test('an outbox whose IndexedDB stops reading is not read as empty, so the sign-
     assert.equal(await q.flush(50), false);
   } finally { Object.assign(globalThis, had); }
 });
+test('two saves of one record in the same millisecond, the first still being stored, are sent in order (1.5.4)', async () => {
+  // B is made while A's store write is still running, so A is not in the list yet: B used to get A's time and the
+  // random part of the key decided which went first (here B's key sorts first, so A was sent last and won)
+  const records = new Map(), remote = new Map();
+  let online = false, gate = null;
+  const store = {
+    async put(x) { records.set(x.key, structuredClone(x)); if (x.record.v === 'A' && !gate) { await new Promise(r => { gate = r; }); } },
+    async list(o) { return [...records.values()].filter(x => x.owner === o).map(x => structuredClone(x)); },
+    async get(k) { return records.has(k) ? structuredClone(records.get(k)) : null; },
+    async remove(k) { records.delete(k); }, async forget() { records.clear(); },
+  };
+  const realNow = Date.now, realRandom = Math.random, randoms = [0.9, 0.1];
+  Date.now = () => 1700000000000; Math.random = () => randoms.shift() ?? realRandom();
+  try {
+    const q = createWriteQueue({ store, getOwner: () => 'a', online: () => online, delay: () => new Promise(r => setTimeout(r, 5)),
+      backend: async (_o, _k, record) => { remote.set(record.id, structuredClone(record)); return record; } });
+    await q.activate('a');
+    const pA = q.save('item', 'a', { id: '1', v: 'A' });
+    while (!gate) await new Promise(r => setTimeout(r, 1));
+    await q.save('item', 'a', { id: '1', v: 'B' }, { id: '1', v: 'A' });
+    await q.kick();
+    gate(); await pA;
+    online = true;
+    assert.equal(await q.flush(500), true);
+    assert.equal(remote.get('1').v, 'B', 'the later save is the one the server keeps');
+  } finally { Date.now = realNow; Math.random = realRandom; }
+});
