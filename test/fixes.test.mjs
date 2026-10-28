@@ -7,6 +7,8 @@ import { createWriteQueue, watchSaved } from '../src/writes.js';
 import { checkWrite } from '../src/conflict.js';
 import { createStores } from '../src/store.js';
 import { fakeServer } from './fake-server.mjs';
+import { fakeIdb, fakeLocalStorage } from './fake-idb.mjs';
+import { createOutbox } from '../src/outbox.js';
 
 const DAY = 864e5, H = 3600e3, T0 = Date.parse('2026-01-05T08:00:00Z');
 const settle = (ms = 5) => new Promise(r => setTimeout(r, ms));
@@ -672,4 +674,20 @@ test('a record\'s tombstone is known with no engine running, from the stored cop
   assert.equal(await hub.tomb(S, 'items', 'a'), at, 'the stored tombstone');
   assert.equal(await hub.tomb(S, 'items', 'b'), 0, 'none for another record');
   await hub.stopAll(); await wipeStores();
+});
+
+test('an outbox whose IndexedDB stops reading is not read as empty, so the sign-out gate stays shut (1.5.2)', async () => {
+  const had = { indexedDB: globalThis.indexedDB, localStorage: globalThis.localStorage };
+  const idb = fakeIdb();
+  Object.assign(globalThis, { indexedDB: idb.indexedDB, localStorage: fakeLocalStorage() });
+  try {
+    const outbox = createOutbox({ name: 'fake-outbox' });
+    await outbox.put({ v: 1, key: 'a:1', owner: 'a', kind: 'item', record: { id: 'r1', text: 'Fake' }, base: null, state: 'pending', at: 1 });
+    assert.equal((await outbox.list('a')).length, 1);
+    idb.state.broken = true;   // the connection is lost (Safari: "Connection to Indexed Database server lost")
+    await assert.rejects(outbox.list('a'));
+    const q = createWriteQueue({ store: outbox, getOwner: () => 'a', online: () => false, backend: async () => ({}) });
+    await q.activate('a');
+    assert.equal(await q.flush(50), false);
+  } finally { Object.assign(globalThis, had); }
 });

@@ -19,7 +19,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
 const fail = msg => errors.push(msg);
 
-const BUDGET = { 'index.js': 2600, 'src/': 301000 };   // src/ 301000: 1.5.0 (the Firestore adapter's own entry)
+const BUDGET = { 'index.js': 2600, 'src/': 301200 };   // src/ 301200: 1.5.2 (the outbox read fix)
 const bytesOf = rel => {
   const abs = path.join(ROOT, rel);
   return fs.statSync(abs).isDirectory() ? fs.readdirSync(abs).reduce((n, f) => n + bytesOf(path.posix.join(rel, f)), 0) : fs.statSync(abs).size;
