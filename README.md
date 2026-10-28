@@ -364,3 +364,5 @@ lands with a test that failed before it.
 ## Licence
 
 Apache License 2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+<!-- docs-only proof, not merged -->
