@@ -16,6 +16,26 @@ export function createFirestoreBackend({ sdk, path, field: stampField, time, sta
         timeout?: number;
     }) => Promise<any>;
 };
+/** @param {Partial<FirestoreBackendOptions>} [options] */
+export function firestore(options?: Partial<FirestoreBackendOptions>): ((ctx: FirestoreBackendOptions) => {
+    listen: (scope: string, coll: string, { since, field }: ListenPlan | undefined, onSnap: (s: Snapshot) => void, onError: (e: any) => void) => () => void;
+    listenDoc: (segments: (string | number)[], onSnap: (s: {
+        doc: Doc | null;
+        fromCache: boolean;
+        hasPendingWrites: boolean;
+    }) => void, onError: (e: any) => void) => () => void;
+    fetchOne: (scope: string, coll: string, id: string) => Promise<Doc | null>;
+    commit: (scope: string, coll: string, record: Doc, base: Doc | null, { key, ops, after, path: to }?: CommitExtra) => Promise<Doc>;
+    create: (scope: string, coll: string, record: Doc) => Promise<Doc>;
+    existing: (scope: string, coll: string, ids: any[]) => Promise<Set<string>>;
+    stamp: (prev?: any) => string | number;
+    stampFields: (prev?: any) => Promise<any>;
+    clearCache: ({ timeout }?: {
+        timeout?: number;
+    }) => Promise<any>;
+}) & {
+    options: Partial<FirestoreBackendOptions>;
+};
 export const CLEAR_TIMEOUT: 3000;
 export type Doc = import("./types.js").Doc;
 export type CodedError = import("./types.js").CodedError;

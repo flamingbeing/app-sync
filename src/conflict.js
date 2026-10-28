@@ -226,9 +226,10 @@ export function clashingFields(current, record, base, options = {}) {
   catch (e) { const error = /** @type {CodedError} */ (e); if (error.code === 'write-conflict') return /** @type {string[]} */ (error.fields); throw error; }
 }
 
-// A time as people read it, in a time zone (default Singapore): 'Sun 25 Oct, 14:05'. '' for no time.
+// A time as people read it, in a time zone (default: the device's, 1.5.0; Singapore until 1.4.x): 'Sun 25 Oct, 14:05'.
+// '' for no time.
 /** @param {number | string} ms @param {string} [timeZone] @returns {string} */
-export function whenText(ms, timeZone = 'Asia/Singapore') {
+export function whenText(ms, timeZone) {
   const t = typeof ms === 'string' ? Date.parse(ms) : Number(ms);
   if (!Number.isFinite(t) || t <= 0) return '';
   const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t)).map(x => [x.type, x.value]));

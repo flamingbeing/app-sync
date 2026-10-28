@@ -22,6 +22,6 @@ export { REPORT_ENDPOINT } from './src/report.js';
 export const createReport = options => createReportOf({ sync: VERSION, ...options });
 // the files this version loads (index.js and what it imports), for a service worker's list; also sync/<v>/files.json
 export const FILES = ['index.js', 'src/cache.js', 'src/conflict.js', 'src/firestore.js', 'src/forget.js',
-  'src/outbox.js', 'src/persist.js', 'src/registry.js', 'src/replace.js', 'src/report.js', 'src/status.js', 'src/store.js',
-  'src/sync.js', 'src/user.js', 'src/watchdog.js', 'src/writes.js'];
-export const VERSION = '1.4.0';
+  'src/outbox.js', 'src/persist.js', 'src/registry.js', 'src/replace.js', 'src/report.js', 'src/status.js',
+  'src/store.js', 'src/sync.js', 'src/user.js', 'src/watchdog.js', 'src/writes.js'];
+export const VERSION = '1.5.0';

@@ -11,7 +11,9 @@
 //   kinds: { [kind]: coll } for saves (default: each coll is its own kind); 1.2.0: { [kind]: { coll, path } } saves
 //   that kind to path(scope, coll, record) instead of the scope's (kinds.js; the same queue, outbox and report).
 //   outbox: the queue's durable store instead of createOutbox's (same shape: name, realm, put, list, get, remove, forget).
-//   adapter: { listen, fetchOne, commit, clearCache } instead of the Firestore adapter (firestore.js); backend: its
+//   adapter: { listen, fetchOne, commit, clearCache } instead of the Firestore adapter (firestore.js), or (1.5.0) a
+//   factory such as firestore(options) from @core/sync/firestore, called here with { sdk, path, onSnapshotMeta, editor,
+//   ...backend } (no adapter: sync() loads firestore() itself, the 1.x default; the core never imports firestore.js); backend: its
 //   options (time, mark, stampMode, serverField, merge, where, writeId, onCommit, ...). commit(scope, kind, record,
 //   base, extra): the app's own write instead of adapter.commit (its own transactions; the queue, the outbox and the
 //   switch and forget() gate stay as they are).
@@ -88,7 +90,6 @@ import { syncStatus, attentionCount } from './status.js';
 import { describeConflict, mergeOf, resolvedRecord, recordSignature } from './conflict.js';
 import { viewOf } from './view.js';
 import { kindMap } from './kinds.js';
-import { createFirestoreBackend } from './firestore.js';
 
 /** @template T @param {T} v @returns {T} */
 const copy = v => JSON.parse(JSON.stringify(v));
@@ -114,7 +115,7 @@ const isPublic = s => String(s).startsWith('public:');
  * @property {() => Promise<AppSdk> | AppSdk} sdk the app's Firebase SDK, loaded once
  * @property {Record<string, import('./kinds.js').KindOption>} [kinds] save kinds -> collection, or { coll, path } (default: each coll is its own kind)
  * @property {Outbox} [outbox] the queue's durable store instead of createOutbox's
- * @property {any} [adapter] { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
+ * @property {any} [adapter] { listen, fetchOne, commit, clearCache }, or a factory such as firestore() that makes one (1.5.0)
  * @property {(owner: string, kind: string, record: Doc, base: Doc | null, extra?: CommitExtra) => Promise<Doc>} [commit] the app's own write instead of adapter.commit
  * @property {Partial<import('./firestore.js').FirestoreBackendOptions> & Record<string, any>} [backend] the Firestore adapter's options
  * @property {Record<string, any>} [hub] more options for createSyncHub
@@ -141,10 +142,12 @@ export function createSyncCore(options, { load, user }) {
   const { name, colls, path } = options;
   const publicColls = new Set(options.public || []);
   const {
-    backend: backendOptions = {}, commit = null,
+    backend: ownBackend = {}, commit = null,
     onRefused = null, report = null, nav = globalThis.navigator, now = Date.now, watchEvery = 3000,
     win = typeof window !== 'undefined' ? window : null, wake = false,
   } = options;
+  // (1.5.0) a factory's own options (firestore({ field, held, ... })) count as backend options; backend's win
+  const backendOptions = { ...(typeof options.adapter === 'function' ? options.adapter.options : null), ...ownBackend };
   const storage = 'storage' in options ? options.storage : (() => { try { return globalThis.localStorage || null; } catch { return null; } })();
   const kinds = kindMap(options.kinds, colls), { collOf, kindOf } = kinds;
   const online = () => nav?.onLine !== false;
@@ -157,11 +160,16 @@ export function createSyncCore(options, { load, user }) {
   // the parts
   /** @type {Set<(coll: string, m: import('./types.js').SnapMeta) => void>} */
   const meta = new Set();
-  const adapter = options.adapter || createFirestoreBackend({
+  // (1.5.0) a factory (firestore() from @core/sync/firestore, or sync()'s default) is given what the core knows; its
+  // snapshots feed the watchdog, as the built-in Firestore adapter's did
+  const made = typeof options.adapter === 'function';
+  if (!options.adapter) throw new Error('sync needs an adapter');
+  /** @type {any} */
+  const adapter = made ? options.adapter({
     sdk: async () => { const { F, db } = await load(); return { F, db }; }, path,
-    onSnapshotMeta: (coll, m) => { for (const fn of meta) fn(coll, m); },
+    onSnapshotMeta: (/** @type {string} */ coll, /** @type {import('./types.js').SnapMeta} */ m) => { for (const fn of meta) fn(coll, m); },
     editor: () => ({ by: user()?.name || user()?.email || '', device }), ...backendOptions,
-  });
+  }) : options.adapter;
   const stores = createStores({ prefix: name + '-sync:', colls, ...options.stores });
   /** @type {import('./types.js').Registry | null} */
   let registry = null;
@@ -265,7 +273,7 @@ export function createSyncCore(options, { load, user }) {
   const status$ = fn => { subs.add(fn); const st = statusNow(); lastTold = st.state + ':' + st.count; fn(st); return () => subs.delete(fn); };
   /** @param {import('./types.js').SnapMeta} m */
   const onSnap = m => { watchdog.heard(m); if (!m?.fromCache) { heard = true; heardAt = now(); } tell(); };
-  if (!options.adapter) meta.add((_coll, m) => watchdog.heard(m));
+  if (made) meta.add((_coll, m) => watchdog.heard(m));
 
   // watches: each one's list (device copy, then the server) with this device's unsent saves laid over it, again when
   // either changes (watchSaved); only what the listener hears feeds the status and the watchdog

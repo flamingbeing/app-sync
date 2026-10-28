@@ -59,8 +59,10 @@ export function sync(options = {}) {
     async start(ctx, { auth }) {
       const store = ctx.storage();
       const config = ctx.config;
+      // (1.5.0) no adapter: the Firestore one, loaded here (the 1.x default), so a page with its own never loads it
+      const adapter = options.adapter || (await import('./firestore.js')).firestore();
       const c = core = createSyncCore(/** @type {any} */ ({
-        ...options, name: ctx.name, sdk: ctx.sdk, win,
+        ...options, adapter, name: ctx.name, sdk: ctx.sdk, win,
         storage: 'storage' in config ? config.storage : (() => { try { return globalThis.localStorage || null; } catch { return null; } })(),
       }), { load: ctx.sdk, user: () => auth.user() });
       const api = c.api;

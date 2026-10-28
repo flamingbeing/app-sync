@@ -33,6 +33,13 @@ saves across the move. What 1.1-1.3 added (CHANGELOG has the detail); adopt only
   a lost answer is no longer a conflict with itself (Firestore adapter compares without its stamp field); faster with
   big lists. An app test that asserted the old behaviour (e.g. a sign-out check counting saves twice) will need its
   expected number changed.
+- **1.5 (optional, additive):** the Firestore adapter is its own entry: add `"@core/sync/firestore":
+  "https://core.anawj.com/sync/1.5.0/sync/firestore.js"` to the import map (and `sync\/firestore` to a Vite alias)
+  only to pass `sync({ adapter: firestore({ ... }) })`; with no `adapter` nothing changes. Two things to check on the
+  move: a service worker's precache list built by following only static imports misses `src/firestore.js` (now loaded
+  by `import()`): follow `import()` too or read `entries.json`; and an import of an `app-sync/src/<file>.js` path
+  outside `files.json` (internals such as `core.js`, `runner.js`) no longer resolves; the public modules
+  (`app-sync/store.js` and the rest) still do. `whenText` with no `timeZone` now uses the device's.
 
 ## B. The Worker, rules and members (apps with their own Worker and roles; app-starter #48)
 

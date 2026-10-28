@@ -10,7 +10,8 @@
     "test:emulator": "firebase emulators:exec --only firestore,auth --project demo-app-sync \"node test/firestore.emulator.mjs && node test/app.emulator.mjs && node test/signin.emulator.mjs\"",
     "types": "tsc -p tsconfig.types.json",
     "modularity": "node tools/modularity.mjs",
-    "vite": "node test/vite/build.mjs external && node test/vite/build.mjs source"
+    "vite": "node test/vite/build.mjs external && node test/vite/build.mjs source && node test/vite/package.mjs",
+    "generate": "node tools/generate.mjs"
   },
   "devDependencies": {
     "firebase": "11.10.0",
@@ -19,8 +20,8 @@
     "vite": "6.3.5"
   },
   "name": "app-sync",
-  "version": "1.4.0",
-  "description": "Offline-first sync engine for web apps: delta listeners, a durable outbox, tombstones, conflict checks; backend injected (Firestore adapter included).",
+  "version": "1.5.0",
+  "description": "Offline-first sync engine for web apps: delta listeners, a durable outbox, tombstones, conflict checks; backend injected (Firestore adapter as its own entry).",
   "license": "Apache-2.0",
   "exports": {
     ".": {
@@ -43,16 +44,47 @@
       "types": "./types/update.d.ts",
       "default": "./update.js"
     },
-    "./*": "./src/*"
+    "./sync/firestore": {
+      "types": "./types/sync/firestore.d.ts",
+      "default": "./sync/firestore.js"
+    },
+    "./update/register": "./update/register.js",
+    "./update/sw-core": "./update/sw-core.js",
+    "./files.json": "./files.json",
+    "./entries.json": "./entries.json",
+    "./package.json": "./package.json",
+    "./cache.js": "./src/cache.js",
+    "./conflict.js": "./src/conflict.js",
+    "./firestore.js": "./src/firestore.js",
+    "./forget.js": "./src/forget.js",
+    "./outbox.js": "./src/outbox.js",
+    "./persist.js": "./src/persist.js",
+    "./registry.js": "./src/registry.js",
+    "./replace.js": "./src/replace.js",
+    "./report.js": "./src/report.js",
+    "./status.js": "./src/status.js",
+    "./store.js": "./src/store.js",
+    "./sync.js": "./src/sync.js",
+    "./user.js": "./src/user.js",
+    "./watchdog.js": "./src/watchdog.js",
+    "./writes.js": "./src/writes.js"
   },
+  "sideEffects": [
+    "./update/sw-core.js"
+  ],
   "files": [
     "index.js",
     "app.js",
     "auth.js",
     "sync.js",
     "update.js",
+    "sync/",
     "src/",
     "types/",
+    "update/register.js",
+    "update/sw-core.js",
+    "files.json",
+    "entries.json",
     "LICENSE",
     "NOTICE",
     "README.md",

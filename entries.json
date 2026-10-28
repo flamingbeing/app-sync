@@ -34,5 +34,11 @@
   "update": [
     "src/module-update.js",
     "update.js"
+  ],
+  "sync/firestore": [
+    "src/conflict.js",
+    "src/firestore.js",
+    "src/module-firestore.js",
+    "sync/firestore.js"
   ]
 }

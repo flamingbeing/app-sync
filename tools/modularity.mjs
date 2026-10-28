@@ -6,6 +6,8 @@
 //      code under src/ is fine
 //   4. new URL(x, import.meta.url) and import(x) only with a literal x (bundlers can follow them)
 //   5. every relative import (static or a literal import()) names its `.js` file; import() targets are checked too
+//   (1.5.0) and every other .js file package.json exports, unless its "sideEffects" lists it (update/sw-core.js, a
+//   service worker script)
 //   node tools/modularity.mjs            check this checkout (exits 1 on a problem)
 // Needs TypeScript (a dev dependency) for the parse.
 import fs from 'node:fs';
@@ -14,8 +16,19 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
-// entry -> that module's main file
-export const ENTRIES = { 'app.js': 'src/runner.js', 'auth.js': 'src/auth.js', 'sync.js': 'src/module-sync.js', 'update.js': 'src/module-update.js' };
+// entry -> that module's main file (1.5.0: read from package.json's exports, the one list: every export but '.' that is
+// a .js file outside update/ and src/; its main file is the first file it imports). No exports: the four classic entries.
+/** @param {string} root @returns {Record<string, string>} */
+export function entriesOf(root) {
+  const pkg = path.join(root, 'package.json');
+  const exports = fs.existsSync(pkg) ? JSON.parse(fs.readFileSync(pkg, 'utf8')).exports : null;
+  const files = exports
+    ? Object.entries(exports)
+      .map(([k, v]) => [k, typeof v === 'string' ? v : v.default]).filter(([k, v]) => k !== '.' && /\.js$/.test(v) && !/^\.\/(update|src)\//.test(v))
+      .map(([, v]) => v.slice(2))
+    : ['app.js', 'auth.js', 'sync.js', 'update.js'];
+  return Object.fromEntries(files.map(f => [f, scan(root, f).imports[0]]));
+}
 const GLOBALS = ['window', 'document', 'self', 'location', 'navigator', 'indexedDB', 'localStorage', 'sessionStorage', 'caches',
   'fetch', 'XMLHttpRequest', 'BroadcastChannel', 'addEventListener', 'setTimeout', 'setInterval', 'queueMicrotask', 'requestAnimationFrame'];
 
@@ -57,7 +70,8 @@ function scan(root, file) {
   return { imports, problems };
 }
 
-function graph(root, entry, problems) {
+/** @param {string} root @param {string} entry @param {string[]} [problems] @returns {string[]} */
+export function graph(root, entry, problems = []) {
   const seen = new Set(), todo = [entry];
   while (todo.length) {
     const f = todo.pop();
@@ -83,7 +97,7 @@ process.stdout.write(JSON.stringify([...hit]));`;
 
 /** @param {string} root @returns {Promise<string[]>} */
 export async function checkModularity(root) {
-  const problems = [];
+  const problems = [], ENTRIES = entriesOf(root);
   const mains = new Set(Object.values(ENTRIES));
   for (const [entry, main] of Object.entries(ENTRIES)) {
     const files = graph(root, entry, problems);
@@ -97,6 +111,16 @@ export async function checkModularity(root) {
     for (const g of touched(root, entry)) problems.push(`${entry} touches ${g} on import`);
   }
   graph(root, 'index.js', problems);   // the one-object API: rules 2, 4, 5 too
+  // (1.5.0) package.json's "sideEffects" is true: every .js file it exports and does not list there touches nothing on import
+  const pkg = path.join(root, 'package.json');
+  const { exports, sideEffects = true } = fs.existsSync(pkg) ? JSON.parse(fs.readFileSync(pkg, 'utf8')) : {};
+  if (exports) {
+    if (sideEffects === true) problems.push('package.json has no "sideEffects" (false, or the files that have them)');
+    const listed = Array.isArray(sideEffects) ? sideEffects.map(f => f.replace(/^\.\//, '')) : [];
+    const files = Object.values(exports).map(v => (typeof v === 'string' ? v : v.default).slice(2)).filter(f => /\.js$/.test(f));
+    for (const f of files.filter(f => !listed.includes(f) && !(f in ENTRIES)))
+      for (const g of touched(root, f)) problems.push(`${f} touches ${g} on import (not in package.json "sideEffects")`);
+  }
   return [...new Set(problems)];
 }
 
@@ -104,5 +128,5 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const problems = await checkModularity(root);
   if (problems.length) { console.error(`modularity: ${problems.length} problem(s)\n- ${problems.join('\n- ')}`); process.exit(1); }
-  console.log(`modularity: ok (${Object.keys(ENTRIES).join(', ')})`);
+  console.log(`modularity: ok (${Object.keys(entriesOf(root)).join(', ')})`);
 }

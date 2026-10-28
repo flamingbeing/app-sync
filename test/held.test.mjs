@@ -56,8 +56,10 @@ test('mergeHeld: counters add each side\'s change; skipped fields keep the serve
   assert.deepEqual(clashingFields({ id: 'r1', a: 1, b: 2 }, { id: 'r1', a: 1, b: 3 }, null), ['b']);
 });
 
-test('whenText: SGT by default', () => {
-  assert.equal(whenText(Date.UTC(2026, 9, 25, 6, 5)), 'Sun 25 Oct, 14:05');
+test("whenText: the device's time zone by default (1.5.0; Singapore until 1.4.x)", () => {
+  const here = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  assert.equal(whenText(Date.UTC(2026, 9, 25, 6, 5)), whenText(Date.UTC(2026, 9, 25, 6, 5), here));
+  assert.equal(whenText(Date.UTC(2026, 9, 25, 6, 5), 'Asia/Singapore'), 'Sun 25 Oct, 14:05');
   assert.equal(whenText('2026-10-25T06:05:00Z', 'UTC'), 'Sun 25 Oct, 06:05');
   assert.equal(whenText(0), '');
 });
@@ -67,7 +69,7 @@ test('describeConflict and resolvedRecord: both versions side by side; my other 
   const remote = { ...base, title: 'Theirs', place: 'y', updatedAt: 5, _edits: { title: { by: 'Fake Other', device: 'Phone B', at: Date.UTC(2026, 9, 25, 6, 0) }, place: { by: 'Fake Other', device: 'Phone B', at: 1 } } };
   const record = { ...base, title: 'Mine', note: 'b' };
   const held = { record, base, remote, at: Date.UTC(2026, 9, 25, 6, 2) };
-  const d = describeConflict(held, { edits: '_edits', me: { by: 'Fake Me', device: 'Phone A' } });
+  const d = describeConflict(held, { edits: '_edits', me: { by: 'Fake Me', device: 'Phone A' }, timeZone: 'Asia/Singapore' });
   assert.deepEqual(d.deleted, { mine: false, theirs: false });
   assert.equal(d.fields.length, 1);
   const [f] = d.fields;

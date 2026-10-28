@@ -35,6 +35,8 @@ jobs:
         run: npx tsc -p test/types
       - name: Modularity rules (side-effect-free entries, no cross-entry imports, literal URLs, .js)
         run: node tools/modularity.mjs
+      - name: Generated parts are current (version, file lists, src/ exports; from package.json + the import graph)
+        run: node tools/generate.mjs --check
       - name: Repo check (with the Worker tests)
         run: node tools/check.mjs
       - name: Unit tests

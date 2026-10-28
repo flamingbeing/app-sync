@@ -14,7 +14,7 @@ const mk = () => {
   git('init', '-q');
   const put = (f, s) => { fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true }); fs.writeFileSync(path.join(dir, f), s); };
   const run = (...a) => spawnSync(process.execPath, [TOOL, ...a], { cwd: dir, env: { ...process.env, SYNC_ROOT: dir }, encoding: 'utf8' });
-  const release = v => { put('package.json', JSON.stringify({ version: v })); put('index.js', `export const VERSION = '${v}';`); put('src/a.js', `// ${v}`);
+  const release = v => { put('package.json', JSON.stringify({ version: v, files: ['index.js', 'src/', 'README.md'] })); put('index.js', `export const VERSION = '${v}';`); put('src/a.js', `// ${v}`);
     assert.equal(run('--lock').status, 0); git('add', '-A'); git('commit', '-qm', v); git('tag', `v${v}`); };
   return { dir, git, put, run, release };
 };
@@ -40,7 +40,7 @@ test('--lock and --check refuse to relock a released version, and require the lo
   const t = mk(); t.release('0.1.0');
   t.put('src/a.js', '// edited'); 
   assert.match(t.run('--lock').stderr, /bump the version/);
-  t.put('package.json', JSON.stringify({ version: '0.2.0' }));
+  t.put('package.json', JSON.stringify({ version: '0.2.0', files: ['index.js', 'src/', 'README.md'] }));
   assert.match(t.run('--check').stderr, /not in versions.lock.json/);
   assert.equal(t.run('--lock').status, 0);
   assert.equal(t.run('--check').status, 0);

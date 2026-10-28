@@ -68,9 +68,10 @@ watchDoc, save, flush, conflicts, status and the rest) and the same stored forma
 
 ### Entries, the import map, types and Vite (0.9.2)
 
-Each version serves four entries at `/sync/<x.y.z>/`: `app.js` (the runner), `auth.js`, `sync.js`, `update.js`,
-plus `files.json` and the types under `types/` (`types/app.d.ts` and the rest, generated from the JSDoc). A page names
-them once, in one import map; the version appears only there:
+Each version serves four entries at `/sync/<x.y.z>/`: `app.js` (the runner), `auth.js`, `sync.js`, `update.js`
+(and `sync/firestore.js` from 1.5.0, import-map name `@core/sync/firestore`), plus `files.json`, `entries.json` and
+the types under `types/` (`types/app.d.ts` and the rest, generated from the JSDoc). A page names them once,
+in one import map; the version appears only there:
 
 ```html
 <script type="importmap">
@@ -93,13 +94,20 @@ yet: `@core/files`, `@core/ui`, `@core/theme`, `@core/settings`, `@core/sw`, `@c
 - **Types:** `strict` JSDoc, TS-erasable style (`@typedef`, `@import`; no enums or namespaces), checked by
   `tsc -p .`. `npm run types` writes `types/`; Checks fail when it is stale. In a TypeScript or `checkJs` app, point
   the names at the version's types: `"paths": { "@core/*": ["<app-sync>/types/*.d.ts"] }`.
-- **Package:** `package.json` `exports` has `.`, `./app`, `./auth`, `./sync`, `./update`, each with its `types`, so
-  `npm install github:flamingbeing/app-sync#v0.9.4` works (no build step, nothing to run on install).
+- **Package:** `package.json` `exports` has `.`, `./app`, `./auth`, `./sync`, `./update`, `./sync/firestore`, each with
+  its `types`, `./update/register` and `./update/sw-core` (1.5.0), `./files.json`, `./entries.json` and the public
+  `src/` modules by name (`app-sync/store.js` and the rest of `files.json`; 1.5.0 dropped the `"./*"` wildcard, so the
+  internals no longer resolve). `"sideEffects"` names only `update/sw-core.js` (a service-worker script); the
+  modularity check enforces it for every other export. `npm install github:flamingbeing/app-sync#v1.5.0` works (no
+  build step, nothing to run on install).
+- **The Firestore adapter** (1.5.0) is its own entry, `@core/sync/firestore` (`sync/firestore.js`):
+  `sync({ adapter: firestore({ field: 'modifiedAt' }) })`. Core no longer imports it; with no `adapter`, `sync` loads
+  it at `start()` (as before 1.5.0), so a page bundled with its own adapter carries no Firestore code.
 - **Vite** is never needed to run app-sync, and a page built with `vite build` works (Checks, `test/vite/`): (a) with
   `@core/*` and `https://` imports left external (the import map loads them), and (b) with `@core/*` bundled, from
   source or from the installed package, where a page that uses only `auth` and `sync` carries no `update` code. The
   bare `@core/*` names do not resolve in a bundler by themselves; one alias maps them to the package's exports:
-  `resolve: { alias: [{ find: /^@core\/(app|auth|sync|update)$/, replacement: 'app-sync/$1' }] }`.
+  `resolve: { alias: [{ find: /^@core\/(app|auth|sync|update|sync\/firestore)$/, replacement: 'app-sync/$1' }] }`.
 
 ## Modules
 
