@@ -304,7 +304,8 @@ export function createWriteQueue({ store, backend, getOwner = () => null, normal
     // kept in the history for good, and the user told
     for (const x of over ? chain : stale && stale !== job ? [stale] : []) { x.state = 'archived'; if (over) x.kept = true; await persist(x); }
     const at = jobs.findIndex(x => x.key === job.key);   // (a rescan may have read it from the store first)
-    if (at < 0) jobs.push(job); else jobs[at] = job;
+    // (in place: the sorted copy would keep the rescan's job, which the sends then mark done while this one stays pending)
+    if (at < 0) jobs.push(job); else { jobs[at] = job; sortedFrom = null; }
     mine.job = job; unshow(); notify();
     if (over && !same(/** @type {Job} */ (previous).record, record)) notice('Your version from this device is kept in ' + recover);
     if (held) throw failure(job);

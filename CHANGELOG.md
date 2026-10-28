@@ -14,6 +14,14 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.5.1 (2026-10-28)
+
+- Fix: a save could stay "pending" for good after it reached the server. When a rescan (back online, tab shown) read
+  a save's job from the store before that save finished, the save swapped its own job into the list in place, and the
+  sorted copy the sends read kept the rescan's: that one was sent and marked synced, the save's own stayed pending
+  (`pending()` 1, the chip on "saving", `flush()` false so sign-out waited, and after a reload a second send). The sorted
+  copy is now rebuilt on that swap (`src/writes.js`; test `test/rescan-replace.test.mjs`).
+
 ## 1.5.0 (2026-10-28)
 
 Additive: no stored-format change and no removed public name; modular: yes, shaken: yes (a page bundled with its own
