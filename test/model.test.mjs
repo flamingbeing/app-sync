@@ -197,7 +197,7 @@ const count = Number(process.env.MODEL_SEEDS) || 40;
 const start = Number(process.env.MODEL_SEED_START) || 1000;   // the nightly soak (app-devkit) runs a new range each night
 // (1.3.11) seeds that once failed, always run: 1158 (a restore after this device's delete stayed hidden)
 // 24920890 (held): a field the other device's whole-record answer removed shows as removed in the popup, not as a bug
-const FIXED = start === 1000 ? [1158, 24920890] : [];
+const FIXED = start === 1000 ? [1158, 24920890, 500044467, 500092174] : [];
 const seeds = one || [...new Set([...Array.from({ length: count }, (_, i) => start + i), ...FIXED])];
 
 for (const held of [false, true, 'merge']) test(`model${held === 'merge' ? ' (held conflicts with a merge collection, 0.7.1)' : held ? ' (held conflicts, 0.6.3)' : ''}: ${seeds.length} seeded runs of two or three devices agree with the model`, { timeout: 600e3 }, async () => {

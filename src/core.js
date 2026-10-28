@@ -87,7 +87,7 @@ import { createOutboxRegistry } from './registry.js';
 import { createWatchdog } from './watchdog.js';
 import { persistGuard } from './persist.js';
 import { syncStatus, attentionCount } from './status.js';
-import { describeConflict, mergeOf, resolvedRecord, recordSignature } from './conflict.js';
+import { describeConflict, mergeFields, mergeOf, resolvedRecord, recordSignature } from './conflict.js';
 import { viewOf } from './view.js';
 import { kindMap } from './kinds.js';
 
@@ -472,7 +472,9 @@ export function createSyncCore(options, { load, user }) {
     // (0.7.1: also the saves queued behind it before it was held, so the answer carries them; a merge collection's
     // ops of the whole chain, in order, so the merge function replays every change of this device's)
     const chain = all.filter(x => x.kind === first.kind && x.record.id === first.record.id && (x.state === 'conflict' || x.state === 'pending' && x.at > first.at));
-    return { first, held: { record: /** @type {Job} */ (chain.at(-1)).record, base: first.base ?? null, remote: first.remote ?? null, at: /** @type {Job} */ (chain.at(-1)).at, ...(chain.every(x => x.ops) ? { ops: chain.flatMap(x => x.ops) } : {}) } };
+    // (1.5.3: the first base plus each save's own change, so another device's value heard later is never mine)
+    const own = first.base && chain.every(x => x.base && !x.record._deleted) ? chain.reduce((acc, x) => mergeFields(acc, x.record, x.base), /** @type {Doc} */ (first.base)) : /** @type {Job} */ (chain.at(-1)).record;
+    return { first, held: { record: own, base: first.base ?? null, remote: first.remote ?? null, at: /** @type {Job} */ (chain.at(-1)).at, ...(chain.every(x => x.ops) ? { ops: chain.flatMap(x => x.ops) } : {}) } };
   };
   // the merge function of a merge collection named in held (0.7.1: its clashes are found and answered through it)
   /** @param {string} kind */

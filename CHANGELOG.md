@@ -14,6 +14,15 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.5.3 (2026-10-29)
+
+- Fix: a held conflict whose record had more held saves behind it showed the newest save over the first save's base,
+  so a later save made on a copy that had heard another device's newer value made that value look like this device's
+  own change: the popup clashed on the other device's field, and answering mine would have written over its newer
+  value (the default, theirs, lost nothing). Mine is now the first base with each held save's own change applied; a
+  save with no base, or a delete, keeps the newest record whole as before. Model seeds 500044467 and 500092174 pinned.
+- **Size budget:** `src/` 301200 -> 301400 bytes, for this fix.
+
 ## 1.5.2 (2026-10-28)
 
 - Fix: an outbox whose IndexedDB stopped reading (a lost connection, as Safari reports) was read as empty whenever
