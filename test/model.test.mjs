@@ -1,4 +1,4 @@
-// Run with: node --test test/model.test.mjs     (one seed: MODEL_SEED=123; more seeds: MODEL_SEEDS=500)
+// Run with: node --test test/model.test.mjs     (one seed: MODEL_SEED=123; more seeds: MODEL_SEEDS=500; another range: MODEL_SEED_START=50000)
 // Model-based multi-device tests: for each seed, a random run of saves, deletes, going offline and back, wakes and
 // reloads on two or three devices (createApp, the real Firestore adapter on a fake SDK, clocks a few minutes apart),
 // then everything back online and checked against a simple model of what must be true:
@@ -192,9 +192,10 @@ async function run(seed, { steps = 30, held = false } = {}) {
 
 const one = process.env.MODEL_SEED ? [Number(process.env.MODEL_SEED)] : null;
 const count = Number(process.env.MODEL_SEEDS) || 40;
+const start = Number(process.env.MODEL_SEED_START) || 1000;   // the nightly soak (app-devkit) runs a new range each night
 // (1.3.11) seeds that once failed, always run: 1158 (a restore after this device's delete stayed hidden)
-const FIXED = [1158];
-const seeds = one || [...new Set([...Array.from({ length: count }, (_, i) => 1000 + i), ...FIXED])];
+const FIXED = start === 1000 ? [1158] : [];
+const seeds = one || [...new Set([...Array.from({ length: count }, (_, i) => start + i), ...FIXED])];
 
 for (const held of [false, true, 'merge']) test(`model${held === 'merge' ? ' (held conflicts with a merge collection, 0.7.1)' : held ? ' (held conflicts, 0.6.3)' : ''}: ${seeds.length} seeded runs of two or three devices agree with the model`, { timeout: 600e3 }, async () => {
   const failed = [];
