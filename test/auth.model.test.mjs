@@ -1,4 +1,4 @@
-// Run with: node --test test/auth.model.test.mjs     (one seed: MODEL_SEED=123; more seeds: MODEL_SEEDS=500)
+// Run with: node --test test/auth.model.test.mjs     (one seed: MODEL_SEED=123; more seeds: MODEL_SEEDS=500; another range: MODEL_SEED_START=50000)
 // Model-based test of the auth module (0.9.0) on the runner: for each seed, a random run of sign-ins (here and from
 // another tab), sign-outs, saves, sends, forget() (forced or not) and page reloads (another account maybe signed in meanwhile) on one device with three accounts,
 // checked after every step against a simple model:
@@ -138,7 +138,8 @@ async function run(seed) {
 
 const one = process.env.MODEL_SEED ? [Number(process.env.MODEL_SEED)] : null;
 const count = Number(process.env.MODEL_SEEDS) || 40;
-const seeds = one || Array.from({ length: count }, (_, i) => 1000 + i);
+const start = Number(process.env.MODEL_SEED_START) || 1000;   // the nightly soak (app-devkit) runs a new range each night
+const seeds = one || Array.from({ length: count }, (_, i) => start + i);
 
 test(`auth model: ${seeds.length} seeded runs of sign-in, sign-out, switch, forget and reload keep the data the model says`, { timeout: 600e3 }, async () => {
   const failed = [];
