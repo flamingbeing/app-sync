@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createStores } from '../src/store.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const formats = fs.readFileSync(path.join(ROOT, 'FORMATS.md'), 'utf8');
+const formats = fs.readFileSync(path.join(ROOT, 'FORMATS.md'), 'utf8').replace(/\r\n/g, '\n');
 const section = title => {
   const at = formats.indexOf(`\n${title}\n`);
   assert.ok(at >= 0, `FORMATS.md has "${title}"`);
