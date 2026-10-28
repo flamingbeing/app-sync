@@ -131,7 +131,9 @@ async function run(seed, { steps = 30, held = false } = {}) {
           /** @param {{ path: string }} f */
           const sideOf = f => typeof choice === 'string' ? choice : choice[f.path] || 'theirs';
           // the popup shows each side's value of a clashing field (a name or a note's number, never a missing one)
-          for (const f of desc.fields) for (const sd of ['mine', 'theirs']) if (f[sd].value === undefined) problems.push(`${d.name} ${c.id}.${f.path} ${sd} shows nothing`);
+          // (a side that removed the field shows nothing there: the server's copy lacking it, or the other device's whole-record answer dropping it)
+          const onServer = shared.docs.get(`spaces/${S}/${c.kind}s/${c.id}`);
+          for (const f of desc.fields) for (const sd of ['mine', 'theirs']) if (f[sd].value === undefined && (sd === 'mine' || f.keys.reduce((o, k) => o && typeof o === 'object' ? o[k] : undefined, onServer) !== undefined)) problems.push(`${d.name} ${c.id}.${f.path} ${sd} shows nothing`);
           log.push(`${d.name} answers ${c.kind} ${c.id} ${JSON.stringify(choice)} (${desc.fields.map(f => f.path).join(',') || 'whole record'})`);
           // a note (merge collection, held 'merge') clashes only on this device's own field: a later save of it made on
           // a copy from before its earlier save landed (the same as a task's); theirs then keeps that earlier value
@@ -194,7 +196,8 @@ const one = process.env.MODEL_SEED ? [Number(process.env.MODEL_SEED)] : null;
 const count = Number(process.env.MODEL_SEEDS) || 40;
 const start = Number(process.env.MODEL_SEED_START) || 1000;   // the nightly soak (app-devkit) runs a new range each night
 // (1.3.11) seeds that once failed, always run: 1158 (a restore after this device's delete stayed hidden)
-const FIXED = start === 1000 ? [1158] : [];
+// 24920890 (held): a field the other device's whole-record answer removed shows as removed in the popup, not as a bug
+const FIXED = start === 1000 ? [1158, 24920890] : [];
 const seeds = one || [...new Set([...Array.from({ length: count }, (_, i) => start + i), ...FIXED])];
 
 for (const held of [false, true, 'merge']) test(`model${held === 'merge' ? ' (held conflicts with a merge collection, 0.7.1)' : held ? ' (held conflicts, 0.6.3)' : ''}: ${seeds.length} seeded runs of two or three devices agree with the model`, { timeout: 600e3 }, async () => {
