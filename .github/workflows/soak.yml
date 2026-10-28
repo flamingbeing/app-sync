@@ -11,7 +11,7 @@ permissions:
   issues: write
 jobs:
   soak:
-    uses: flamingbeing/app-devkit/.github/workflows/soak.yml@v1.13.5
+    uses: flamingbeing/app-devkit/.github/workflows/soak.yml@v1.13.7
     with:
       repeat: 0
       slow-repeat: 0
