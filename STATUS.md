@@ -1,6 +1,7 @@
 # Status
 
 ## Now
+- 1.5.0 (28 Oct): Firestore adapter as its own entry `@core/sync/firestore` (core loads it lazily when no `adapter`), version and file lists generated from `package.json` (`tools/generate.mjs --check` in Checks), explicit package exports + `sideEffects`, `whenText` uses the device time zone; additive, no format change.
 - 1.3.13 (27 Oct): a full read arriving after a record's tombstone (bin heard first) no longer brings the deleted version back to the list and device copy; a newer restore still shows. No API or format change.
 - 1.3.12 (27 Oct): speed-ups for big lists (`tools/bench.mjs`: 200 saves on a list of 10k about 18 s -> 8 s), a custom stamp field no longer turns a resend into a conflict, report codes past 20 counted once; no API or format change. Open: a stopped app keeps its watchdog interval and wake listeners (no teardown; not a data risk).
 - 1.3.7 (26 Oct): a save done just before going offline keeps showing (`watchSaved`); no API or format change.

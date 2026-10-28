@@ -12,7 +12,11 @@ import { execFileSync } from 'node:child_process';
 import { VERSION_RE, byVersion, listing } from './semver.mjs';
 
 export const ROOT = process.env.SYNC_ROOT || path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const PUBLISHED = ['index.js', 'app.js', 'auth.js', 'sync.js', 'update.js', 'files.json', 'entries.json', 'src', 'types', 'LICENSE', 'NOTICE'];   // what a version contains (files.json from 0.8.0; app.js, auth.js from 0.9.0; sync.js, update.js from 0.9.1; types/ from 0.9.2; entries.json from 0.9.4)
+// what a version contains: package.json's "files" (1.5.0: the one list), less the docs and the update core (served from
+// update/<v>/, tools/build-update.mjs). Older tags simply lack the newer paths (files.json from 0.8.0; app.js, auth.js
+// from 0.9.0; sync.js, update.js from 0.9.1; types/ from 0.9.2; entries.json from 0.9.4; sync/ from 1.5.0).
+const PUBLISHED = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).files
+  .map(f => f.replace(/\/$/, '')).filter(f => !/\.md$/.test(f) && !f.startsWith('update/'));
 const LOCK = path.join(ROOT, 'versions.lock.json');
 const git = (args, opts = {}) => execFileSync('git', args, { cwd: ROOT, maxBuffer: 1 << 26, ...opts });
 const sha = buf => crypto.createHash('sha256').update(buf).digest('hex');

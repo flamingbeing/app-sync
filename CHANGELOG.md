@@ -14,6 +14,31 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.5.0 (2026-10-28)
+
+Additive: no stored-format change and no removed public name; modular: yes, shaken: yes (a page bundled with its own
+adapter carries no Firestore code).
+
+- **`@core/sync/firestore`**, a new entry (`sync/firestore.js`, package export `app-sync/sync/firestore`):
+  `firestore(options)` makes the Firestore adapter, `sync({ adapter: firestore({ field: 'modifiedAt' }) })`; its
+  options sit under `backend`, which wins. `adapter` takes such a factory or an adapter object as before.
+  `src/core.js` no longer imports `src/firestore.js`: with no `adapter`, `sync` loads it at `start()`, so existing
+  apps run unchanged. `entries.json`'s `sync` list still names `src/firestore.js` (the graph follows `import()`).
+- **One source of truth:** the version is only in `package.json`; `node tools/generate.mjs` writes `VERSION`,
+  `CORE_VERSION`, `FILES`, `files.json`, `entries.json` and the `src/` exports from it and the import graph, and
+  `--check` (in Checks) fails on drift. The modularity check's entries are `package.json`'s exports;
+  `tools/build-sync.mjs` publishes `package.json`'s `files`.
+- **Package:** explicit `exports` replace the `"./*"` wildcard: the entries, `./update/register`, `./update/sw-core`,
+  `./files.json`, `./entries.json` and the public `src/` modules by name (`app-sync/store.js` and the rest of
+  `files.json`). Internals (`src/core.js`, `src/runner.js`, `src/internal.js` and the like) no longer resolve through
+  the package; serving at `core.anawj.com` is unchanged. `"sideEffects": ["./update/sw-core.js"]`, enforced for every
+  other export by the modularity check. `files` now ships `sync/`, `update/register.js`, `update/sw-core.js`,
+  `entries.json`, so a `github:` tag install is complete. `npm run vite` also builds from the packed package.
+- **`whenText(ms)`** with no time zone uses the device's (Intl's); Singapore was the default until 1.4.x. Pass
+  `timeZone` to keep a fixed one.
+- Checks: the per-app `*/sw.js` check is gone (no app lives in this repo); the `src/` size budget is 301000 bytes
+  (was 298500) for the adapter's own entry.
+
 ## 1.4.0 (2026-10-27)
 
 Base 1: the code of `1.4.0-rc.1` (and of 1.3.13) under its final version; only the version strings differ. No API,

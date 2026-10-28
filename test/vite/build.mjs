@@ -4,6 +4,8 @@
 //                                           and no update code or replaceRecord (the unused imports are shaken out);
 //                                           of the sign-in methods (1.3.0) only the one named is in the entry chunk,
 //                                           the others only in the chunks their SHAPES.md string names load
+//                                           (1.5.0) and the Firestore adapter only in a chunk of its own: main.js
+//                                           gives no adapter, so sync() loads it at start; a page with its own never does
 //   node test/vite/build.mjs package    (c) @core/* aliased to the installed package's exports (app-sync/<entry>,
 //                                           installed from a git ref in node_modules); same rule as (b)
 // Needs vite (dev dependency only). Exits 1 on a failed build or a broken rule.
@@ -16,14 +18,14 @@ const HERE = path.dirname(fileURLToPath(import.meta.url)), ROOT = path.resolve(H
 const mode = process.argv[2] || 'external';
 const out = path.join(HERE, 'dist-' + mode);
 // a line from each module's code, to find it in a bundle
-const MARK = { auth: 'createApp needs config.sdk', sync: 'sync needs', update: 'update needs register' };
+const MARK = { auth: 'createApp needs config.sdk', sync: 'sync needs', update: 'update needs register', firestore: 'The offline cache could not be cleared in time' };
 // a line from each sign-in method (src/signin/); main.js names password() only
 const METHOD = { password: 'password needs the email', emailLink: 'emailLink needs the email', passcode: 'passcode needs its url', anonymous: 'signInAnonymously' };
 
 const alias = {
   external: [],
-  source: [{ find: /^@core\/(app|auth|sync|update)$/, replacement: path.join(ROOT, '$1.js') }],
-  package: [{ find: /^@core\/(app|auth|sync|update)$/, replacement: 'app-sync/$1' }],
+  source: [{ find: /^@core\/(app|auth|sync|update|sync\/firestore)$/, replacement: path.join(ROOT, '$1.js') }],
+  package: [{ find: /^@core\/(app|auth|sync|update|sync\/firestore)$/, replacement: 'app-sync/$1' }],
 }[mode];
 if (!alias) { console.error(`vite: unknown mode ${mode}`); process.exit(1); }
 
@@ -53,6 +55,8 @@ if (mode === 'external') {
   if (js.includes(MARK.update)) problems.push('update code is in a page that never uses it (not shaken out)');
   if (js.includes('replaceRecord')) problems.push('replaceRecord is in a page that never uses it (not shaken out)');
   if (/@core\//.test(js)) problems.push('an @core/ name was left unresolved');
+  if (entry.includes(MARK.firestore)) problems.push('the Firestore adapter is in the entry chunk (it loads only when no adapter is given)');
+  if (!js.includes(MARK.firestore)) problems.push('the Firestore adapter has no chunk (sync() without an adapter loads it)');
   if (!entry.includes(METHOD.password)) problems.push('the sign-in method the page names is not in its entry chunk');
   for (const m of ['emailLink', 'passcode', 'anonymous']) {
     if (entry.includes(METHOD[m])) problems.push(`sign-in method ${m} is in the entry chunk of a page that never names it`);

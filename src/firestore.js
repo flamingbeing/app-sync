@@ -479,3 +479,13 @@ export function createFirestoreBackend({ sdk, path, field: stampField = 'updated
 
   return { listen, listenDoc, fetchOne, commit: commitRetry ? retriedOnce(commit, commitRetry) : commit, create, existing, stamp: /** @param {any} [prev] */ prev => next(prev), stampFields, clearCache };
 }
+
+// (1.5.0) the adapter as a factory for sync({ adapter: firestore(options) }) (@core/sync/firestore): the sync core
+// calls it with what it knows (sdk, path, onSnapshotMeta, editor, and the backend options); options are
+// createFirestoreBackend's, the same as sync()'s backend. sync() without an adapter loads this itself.
+/** @param {Partial<FirestoreBackendOptions>} [options] */
+export function firestore(options = {}) {
+  /** @param {FirestoreBackendOptions} ctx */
+  const make = ctx => createFirestoreBackend({ ...options, ...ctx });
+  return Object.assign(make, { options });
+}

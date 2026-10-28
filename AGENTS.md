@@ -45,9 +45,10 @@ NODE_OPTIONS="--import <app-devkit>/serve-candidate/patch.mjs" npx playwright te
 
 ## Releasing
 
-1. Bump `version` in `package.json`, `VERSION` in `index.js` and `app.js`, and `CORE_VERSION` in `update/sw-core.js` and
-   `update/register.js` (one version for both from 1.0.0-rc.1); add the CHANGELOG entry.
-   A new or removed `src/` import: update `FILES` in `index.js` and `files.json` (`test/freeze.test.mjs` checks both).
+1. Bump `version` in `package.json` only, then run `node tools/generate.mjs` (1.5.0): it writes `VERSION` (`index.js`,
+   `app.js`), `CORE_VERSION` (`update/sw-core.js`, `update/register.js`), `FILES`, `files.json`, `entries.json` and the
+   `src/` exports from `package.json` and the import graph; CI's `--check` fails on drift. Add the CHANGELOG entry. A new
+   entry: add its export to `package.json` (and `files`), then generate.
 2. Run `node tools/build-sync.mjs --lock` and `node tools/build-update.mjs --lock`; commit `versions.lock.json` and
    `update.lock.json` (checks fail without them).
 3. Merge with Checks green: `release.yml` then tags that commit `vX.Y.Z` (only if the tag doesn't exist yet).

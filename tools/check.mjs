@@ -1,13 +1,12 @@
 // Repo checks for mistakes tests don't catch. Run before merging: node tools/check.mjs
-// 1. Each app's sw.js has a plain VERSION starting with its folder name (no deploy stamp) and deletes only caches with
-//    its own prefix (apps can share an origin).
-// 2. Every file in an app's SHELL list exists.
-// 3. wrangler.jsonc keeps preview links and the workers.dev address off.
-// 4. The package.json version is locked in versions.lock.json (a released version never changes).
-// 5. The Worker's tests pass (node --test 'worker/test/*.test.mjs').
-// 6. The update module's version (package.json's from 1.0.0-rc.1; update/VERSION before) is locked in update.lock.json
+// (1.5.0: the per-app sw.js checks are gone, no app lives in this repo any more.)
+// 1. The generated parts are current (node tools/generate.mjs --check: versions, file lists, src/ exports).
+// 2. wrangler.jsonc keeps preview links and the workers.dev address off.
+// 3. The package.json version is locked in versions.lock.json (a released version never changes).
+// 4. The Worker's tests pass (node --test 'worker/test/*.test.mjs').
+// 5. The update module's version (package.json's from 1.0.0-rc.1; update/VERSION before) is locked in update.lock.json
 //    and matches its files.
-// 7. Size budget (core admission rule, README "Stability"): the public index and src/ stay under BUDGET bytes.
+// 6. Size budget (core admission rule, README "Stability"): the public index and src/ stay under BUDGET bytes.
 //    Raising a budget is a CHANGELOG line.
 // Exits 1 on any failure.
 
@@ -20,30 +19,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
 const fail = msg => errors.push(msg);
 
-const apps = fs.readdirSync(ROOT).filter(d => fs.existsSync(path.join(ROOT, d, 'sw.js')));
-for (const app of apps) {
-  const swPath = `${app}/sw.js`;
-  const sw = fs.readFileSync(path.join(ROOT, swPath), 'utf8');
-  const prefix = `${app}-`;
-
-  const version = sw.match(/const VERSION = '([^']+)'/)?.[1];
-  if (!version) fail(`${swPath}: no VERSION constant`);
-  else if (!version.startsWith(prefix)) fail(`${swPath}: VERSION '${version}' should start with '${prefix}'`);
-  // a stamped VERSION (from a deploy build) committed by mistake
-  else if (/-[0-9a-f]{8}$/.test(version)) fail(`${swPath}: VERSION '${version}' carries a deploy stamp; put back the plain '${version.replace(/-(\d{4}-\d{2}-\d{2}-)?[0-9a-f]{8}$/, '')}'`);
-
-  for (const line of sw.split('\n').filter(l => l.includes('caches.delete'))) {
-    if (!line.includes(`startsWith('${prefix}')`)) fail(`${swPath}: caches.delete without a startsWith('${prefix}') guard deletes other apps' caches:\n    ${line.trim()}`);
-  }
-
-  const shellSrc = sw.match(/const SHELL = \[([\s\S]*?)\];/)?.[1];
-  if (!shellSrc) { fail(`${swPath}: no SHELL list`); continue; }
-  const shell = [...shellSrc.matchAll(/'([^']+)'/g)].map(m => m[1]).filter(f => f !== './')
-    .map(f => path.posix.normalize(`${app}/${f}`));
-  for (const f of shell) if (!fs.existsSync(path.join(ROOT, f))) fail(`${swPath}: SHELL lists ${f}, which doesn't exist`);
-}
-
-const BUDGET = { 'index.js': 2600, 'src/': 298500 };
+const BUDGET = { 'index.js': 2600, 'src/': 301000 };   // src/ 301000: 1.5.0 (the Firestore adapter's own entry)
 const bytesOf = rel => {
   const abs = path.join(ROOT, rel);
   return fs.statSync(abs).isDirectory() ? fs.readdirSync(abs).reduce((n, f) => n + bytesOf(path.posix.join(rel, f)), 0) : fs.statSync(abs).size;
@@ -59,6 +35,9 @@ if (fs.existsSync(wrangler)) {
   if (!/"preview_urls"\s*:\s*false/.test(w)) fail('wrangler.jsonc: "preview_urls" should be false (no preview links)');
   if (!/"workers_dev"\s*:\s*false/.test(w)) fail('wrangler.jsonc: "workers_dev" should be false (real addresses only)');
 }
+
+try { execFileSync(process.execPath, ['tools/generate.mjs', '--check'], { cwd: ROOT, stdio: 'pipe' }); }
+catch (e) { fail(String(e.stderr || e.message).trim()); }
 
 // the package.json version must be in versions.lock.json with the working tree's hashes (tools/build-sync.mjs --lock)
 try { execFileSync(process.execPath, ['tools/build-sync.mjs', '--check'], { cwd: ROOT, stdio: 'pipe' }); }
@@ -76,4 +55,4 @@ if (errors.length) {
   console.error(`check: ${errors.length} problem(s)\n- ` + errors.join('\n- '));
   process.exit(1);
 }
-console.log(`check: ok (${apps.join(', ') || 'no apps'}; worker tests pass)`);
+console.log('check: ok (worker tests pass)');

@@ -15,7 +15,7 @@
  * @property {() => Promise<AppSdk> | AppSdk} sdk the app's Firebase SDK, loaded once
  * @property {Record<string, import('./kinds.js').KindOption>} [kinds] save kinds -> collection, or { coll, path } (default: each coll is its own kind)
  * @property {Outbox} [outbox] the queue's durable store instead of createOutbox's
- * @property {any} [adapter] { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
+ * @property {any} [adapter] { listen, fetchOne, commit, clearCache }, or a factory such as firestore() that makes one (1.5.0)
  * @property {(owner: string, kind: string, record: Doc, base: Doc | null, extra?: CommitExtra) => Promise<Doc>} [commit] the app's own write instead of adapter.commit
  * @property {Partial<import('./firestore.js').FirestoreBackendOptions> & Record<string, any>} [backend] the Firestore adapter's options
  * @property {Record<string, any>} [hub] more options for createSyncHub
@@ -343,7 +343,7 @@ export type SyncCoreOptions = {
      */
     outbox?: import("./types.js").Outbox | undefined;
     /**
-     * { listen, fetchOne, commit, clearCache } instead of the Firestore adapter
+     * { listen, fetchOne, commit, clearCache }, or a factory such as firestore() that makes one (1.5.0)
      */
     adapter?: any;
     /**

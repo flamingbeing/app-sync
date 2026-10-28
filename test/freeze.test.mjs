@@ -10,6 +10,7 @@ import * as index from '../index.js';
 import * as internal from '../src/internal.js';
 import { createWriteQueue } from '../src/writes.js';
 import { leaveEntry } from '../src/sync.js';
+import { graph } from '../tools/modularity.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8');
@@ -36,8 +37,13 @@ const PUBLIC = ['userOf', 'claimsBehind', 'createReport', 'REPORT_ENDPOINT', 'cr
 
 test('entries.json lists the files each entry loads (0.9.4), and files.json is unchanged', () => {
   const entries = JSON.parse(read('entries.json'));
-  assert.deepEqual(Object.keys(entries), ['app', 'auth', 'sync', 'update']);
-  for (const [name, list] of Object.entries(entries)) assert.deepEqual(list, importGraph(name + '.js'), name);
+  // 1.5.0: sync/firestore (the Firestore adapter's own entry); the lists follow literal import() too (tools/modularity.mjs)
+  assert.deepEqual(Object.keys(entries), ['app', 'auth', 'sync', 'update', 'sync/firestore']);
+  for (const [name, list] of Object.entries(entries)) assert.deepEqual(list, graph(ROOT, name + '.js'), name);
+  for (const [name, list] of Object.entries(entries)) for (const f of importGraph(name + '.js')) assert.ok(list.includes(f), `${name}: ${f}`);
+  // the sync module still lists the Firestore adapter it loads when no adapter is given (a service worker caches it)
+  assert.ok(entries.sync.includes('src/firestore.js'));
+  assert.ok(!importGraph('sync.js').includes('src/firestore.js'), 'the sync module no longer loads firestore.js on import');
   assert.deepEqual(JSON.parse(read('files.json')), index.FILES, 'the top-level list does not change');
 });
 
