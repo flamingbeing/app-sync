@@ -75,7 +75,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
             watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void, own?: Listen | null): () => void;
             drop(scope: string, coll: string, ids: string[]): Promise<void>;
             settle(scope: string): Promise<void>;
-            tomb(scope: string, coll: string, id: any): any;
+            tomb(scope: string, coll: string, id: any): Promise<number>;
             stopAll(): Promise<void>;
             stopScope(scope: string): Promise<void>;
             replan(): number;
@@ -121,7 +121,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
                 watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void, own?: Listen | null): () => void;
                 drop(scope: string, coll: string, ids: string[]): Promise<void>;
                 settle(scope: string): Promise<void>;
-                tomb(scope: string, coll: string, id: any): any;
+                tomb(scope: string, coll: string, id: any): Promise<number>;
                 stopAll(): Promise<void>;
                 stopScope(scope: string): Promise<void>;
                 replan(): number;
@@ -203,7 +203,7 @@ export function createSyncCore(options: SyncCoreOptions, { load, user }: {
         watch(scope: string, coll: string, cb: (list: import("./sync.js").Doc[], meta: SnapMeta) => void, own?: Listen | null): () => void;
         drop(scope: string, coll: string, ids: string[]): Promise<void>;
         settle(scope: string): Promise<void>;
-        tomb(scope: string, coll: string, id: any): any;
+        tomb(scope: string, coll: string, id: any): Promise<number>;
         stopAll(): Promise<void>;
         stopScope(scope: string): Promise<void>;
         replan(): number;

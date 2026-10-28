@@ -171,8 +171,8 @@ export function createSyncHub({ openStore, listen, fetchOne, now, onError, grace
     drop(scope: string, coll: string, ids: string[]): Promise<void>;
     /** @param {string} scope */
     settle(scope: string): Promise<void>;
-    /** @param {string} scope @param {string} coll @param {any} id */
-    tomb(scope: string, coll: string, id: any): any;
+    /** @param {string} scope @param {string} coll @param {any} id @returns {Promise<number>} */
+    tomb(scope: string, coll: string, id: any): Promise<number>;
     stopAll(): Promise<void>;
     /** @param {string} scope @returns {Promise<void>} */
     stopScope(scope: string): Promise<void>;

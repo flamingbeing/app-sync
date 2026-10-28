@@ -181,7 +181,7 @@ export function createSyncCore(options, { load, user }) {
     backend: async (owner, kind, record, base, extra) => {
       // a record deleted elsewhere and saved again here (a restore, "keep mine"): stamped above the delete's tombstone,
       // which other devices hold, or a clock behind the deleter's would leave it hidden there (0.6.3)
-      const tomb = record && !record._deleted ? hub.tomb(owner, collOf(kind), record.id) : 0;
+      const tomb = record && !record._deleted ? await hub.tomb(owner, collOf(kind), record.id) : 0;
       if (tomb > 0) extra = { ...extra, after: tomb };
       const at = kinds.pathOf(kind, owner, record);
       if (at) extra = { ...extra, path: at };
