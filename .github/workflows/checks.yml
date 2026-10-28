@@ -49,18 +49,44 @@ jobs:
     # with the unused update module shaken out, (c) the same from the package installed from this commit's git ref.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
+      # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
+      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
+      # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
+      - name: Only .md files changed?
+        id: docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docs=false
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
+            n="$(printf '%s\n' "$files" | wc -l)"
+            if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
+          fi
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          echo "docs-only: $docs"
       - uses: actions/checkout@v4
+        if: steps.docs.outputs.docs != 'true'
       - uses: flamingbeing/app-devkit/setup-node@v1.11.0
+        if: steps.docs.outputs.docs != 'true'
         with:
           install: 'false'
       - name: Vite (dev dependency, not saved)
+        if: steps.docs.outputs.docs != 'true'
         run: npm install --no-save --no-package-lock vite@6.3.5
       - name: (a) core external by URL
+        if: steps.docs.outputs.docs != 'true'
         run: node test/vite/build.mjs external
       - name: (b) core aliased to source, update shaken out
+        if: steps.docs.outputs.docs != 'true'
         run: node test/vite/build.mjs source
       - name: (c) installed from the git ref (package exports)
+        if: steps.docs.outputs.docs != 'true'
         env:
           REF: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
@@ -72,27 +98,75 @@ jobs:
   emulator:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
+      # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
+      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
+      # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
+      - name: Only .md files changed?
+        id: docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docs=false
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
+            n="$(printf '%s\n' "$files" | wc -l)"
+            if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
+          fi
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          echo "docs-only: $docs"
       - uses: actions/checkout@v4
+        if: steps.docs.outputs.docs != 'true'
       - uses: flamingbeing/app-devkit/setup-node@v1.11.0
+        if: steps.docs.outputs.docs != 'true'
       - uses: flamingbeing/app-devkit/setup-emulators@v1.11.0
+        if: steps.docs.outputs.docs != 'true'
         with:
           firebase-tools-version: '13.35.1'   # same as package.json
           devkit-dir: ''
       - name: Firestore adapter (local emulator)
+        if: steps.docs.outputs.docs != 'true'
         run: npm run test:emulator
 
   update-browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
+      # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
+      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
+      # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
+      - name: Only .md files changed?
+        id: docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docs=false
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
+            n="$(printf '%s\n' "$files" | wc -l)"
+            if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
+          fi
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          echo "docs-only: $docs"
       - uses: actions/checkout@v4
+        if: steps.docs.outputs.docs != 'true'
       - uses: flamingbeing/app-devkit/setup-node@v1.11.0
+        if: steps.docs.outputs.docs != 'true'
         with:
           install: 'false'
       - name: Playwright with Chromium (not saved in package.json)
-        run: npm install --no-save --no-package-lock playwright@1.63.0 && npx playwright install --with-deps chromium
+        if: steps.docs.outputs.docs != 'true'
+        run: npm install --no-save --no-package-lock playwright@1.63.0 && npx playwright install chromium
       - name: Update module in a real browser
+        if: steps.docs.outputs.docs != 'true'
         run: node update/test/e2e.mjs
 
   # The consumer matrix: each app's own browser tests with this commit's engine (and update module) served in place of
@@ -119,45 +193,71 @@ jobs:
           - { row: apmes ccc, repo: apmes, blocking: false, pw: global, port: 8110, cmd: 'node ccc/test/e2e.mjs' }
           - { row: prewarm, repo: prewarm, blocking: false, pw: global, port: 8080, cmd: 'node prewarm/test/gaps.e2e.mjs' }
           - { row: residencyapps, repo: residencyapps, blocking: false, pw: global, cmd: 'node test/e2e.mjs' }
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
+      # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
+      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
+      # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
+      - name: Only .md files changed?
+        id: docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          docs=false
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
+            n="$(printf '%s\n' "$files" | wc -l)"
+            if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
+          fi
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          echo "docs-only: $docs"
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: steps.docs.outputs.docs != 'true'
         with:
           path: candidate
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: steps.docs.outputs.docs != 'true'
         with:
           repository: flamingbeing/${{ matrix.repo }}
           ref: main
           path: app
       - uses: flamingbeing/app-devkit/setup-node@v1.11.0
+        if: steps.docs.outputs.docs != 'true'
         with:
           working-directory: app
           install: ${{ matrix.pw == 'project' }}
       - name: Playwright 1.56.1 and axe (the apps' plain browser scripts)
-        if: matrix.pw == 'global'
+        if: steps.docs.outputs.docs != 'true' && (matrix.pw == 'global')
         run: npm install -g playwright@1.56.1 axe-core@4
       - name: The app's own Playwright version (setup-browser installs that browser build)
+        if: steps.docs.outputs.docs != 'true'
         id: pw
         run: |
           if [ "${{ matrix.pw }}" = global ]; then echo "version=1.56.1" >> "$GITHUB_OUTPUT"
           else echo "version=$(node -p "require('./app/package-lock.json').packages['node_modules/playwright-core'].version")" >> "$GITHUB_OUTPUT"; fi
       - uses: flamingbeing/app-devkit/setup-browser@v1.11.0
+        if: steps.docs.outputs.docs != 'true'
         with:
           playwright-version: ${{ steps.pw.outputs.version }}
           devkit-dir: ${{ matrix.repo == 'app-starter' && 'app/.devkit' || '' }}
       - uses: flamingbeing/app-devkit/setup-emulators@v1.11.0
-        if: matrix.emulators
+        if: steps.docs.outputs.docs != 'true' && (matrix.emulators)
         with:
           emulators: ${{ matrix.emulators }}
           firebase-tools-version: ${{ matrix.firebase || '13.35.1' }}
           devkit-dir: ''
       - uses: flamingbeing/app-devkit/serve-candidate@v1.11.0
+        if: steps.docs.outputs.docs != 'true'
         id: candidate
         with:
           origin: https://core.anawj.com
           sync-dir: candidate
           update-dir: candidate/update
       - name: The starter's pinned engine, for the mixed-version spec
-        if: matrix.repo == 'app-starter'
+        if: steps.docs.outputs.docs != 'true' && (matrix.repo == 'app-starter')
         run: |
           # the pin: the import map in index.html or public/sw.js (the starter keeps them under app/, 0.9.x; earlier a root layout), else app/sw.js (0.x layout)
           for f in app/app/index.html app/app/public/sw.js app/index.html app/public/sw.js app/app/sw.js; do
@@ -167,6 +267,7 @@ jobs:
           if [ -z "$v" ]; then echo "::error::no core.anawj.com/sync/<version>/ pin in index.html, public/sw.js or app/sw.js"; exit 1; fi
           git clone --quiet --depth 1 --branch "v$v" https://github.com/flamingbeing/app-sync pinned
       - name: ${{ matrix.row }} browser tests on this engine
+        if: steps.docs.outputs.docs != 'true'
         id: tests
         working-directory: app
         env:
@@ -180,7 +281,7 @@ jobs:
           ${{ matrix.cmd }}
       # its own log: its pinned phone runs the pinned engine on purpose (the spec checks both phones' VERSION itself)
       - name: Mixed versions (a phone on the starter's pinned tag, a phone on this commit)
-        if: matrix.repo == 'app-starter'
+        if: steps.docs.outputs.docs != 'true' && (matrix.repo == 'app-starter')
         working-directory: app
         env:
           NODE_OPTIONS: ${{ steps.candidate.outputs.node-options }}
@@ -216,3 +317,7 @@ jobs:
           name: consumer-results
           path: app/test-results
           if-no-files-found: ignore
+# proof 1
+# proof 2
+# proof 3
+# proof 4
