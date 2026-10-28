@@ -2,7 +2,7 @@
    pinned address, then call AppUpdate.init({ app, version, shell, manifest, ... }). See update/README.md. */
 (function (self) {
   'use strict';
-  const CORE_VERSION = '1.5.3';
+  const CORE_VERSION = '1.5.4';
   const MANIFEST_PATH = './.app-update-manifest';
   // never cached, whatever the app says: Firebase auth pages, Cloudflare Access, and its return pages
   const NEVER = [/^\/__\//, /^\/cdn-cgi\//];
