@@ -14,6 +14,14 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.5.2 (2026-10-28)
+
+- Fix: an outbox whose IndexedDB stopped reading (a lost connection, as Safari reports) was read as empty whenever
+  localStorage worked, so the write queue loaded no jobs and `flush()` (the sign-out and wipe gate) said all was sent
+  with unsent saves still stored. Once the database has opened, an unreadable one now makes `list()` throw, as `get()`
+  already did.
+- **Size budget:** `src/` 301000 -> 301200 bytes, for this fix.
+
 ## 1.5.1 (2026-10-28)
 
 - Fix: a save could stay "pending" for good after it reached the server. When a rescan (back online, tab shown) read

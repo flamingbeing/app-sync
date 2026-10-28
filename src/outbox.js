@@ -17,6 +17,8 @@ export function createOutbox({ name, realm = 'default' }) {
   /** @type {Promise<IDBDatabase> | null} */
   let opened = null;
   /** @returns {Promise<IDBDatabase>} */
+  // opened once: unreadable is an error, not empty
+  let everOpened = false;
   async function database() {
     if (!opened) opened = new Promise((resolve, reject) => {
       const request = indexedDB.open(name, 1);
@@ -28,6 +30,7 @@ export function createOutbox({ name, realm = 'default' }) {
       request.onblocked = () => reject(new Error('Close older tabs of this app to enable its local outbox'));
       request.onsuccess = () => {
         const db = request.result;
+        everOpened = true;
         db.onversionchange = () => { db.close(); opened = null; };
         resolve(db);
       };
@@ -72,10 +75,10 @@ export function createOutbox({ name, realm = 'default' }) {
     async list(owner) {
       /** @type {Job[]} */
       let records = [];
-      let succeeded = false;
-      try { records = await transaction('readonly', store => store.index('owner').getAll(owner)); succeeded = true; } catch { /* try fallback */ }
+      let succeeded = false, unreadable = false;
+      try { records = await transaction('readonly', store => store.index('owner').getAll(owner)); succeeded = true; } catch { unreadable = everOpened; }
       try { records.push(...fallbackRecords(owner)); succeeded = true; } catch { /* storage blocked */ }
-      if (!succeeded) throw new Error('The local outbox is unavailable; keep your text in the editor');
+      if (!succeeded || unreadable) throw new Error('The local outbox is unavailable; keep your text in the editor');
       return [...new Map(records.filter(x => x.realm === realm).map(x => [x.key, x])).values()];
     },
     // one change by key: the write queue reads it again before sending (another tab may have sent it). A fallback copy
