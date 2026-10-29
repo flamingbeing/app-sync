@@ -110,5 +110,9 @@
   "1.5.4": {
     "sw-core.js": "3093f02bec36717cecf0bc832b0173965cf8a2e7c8907107372aae1039dadaf3",
     "register.js": "e27e8c47d697f4fd459270865f1d9a99a54f41ec983ae83131c64cac5b8eae02"
+  },
+  "1.5.5": {
+    "sw-core.js": "30575f18113e2e4db22adc655e64fdf1afa146a0c991c91d1f71512588023e98",
+    "register.js": "ba3af063d65a856e8c9716ffb1378ac533ca48af61a7c07b6669fbc6a0858dca"
   }
 }

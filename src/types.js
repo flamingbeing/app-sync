@@ -131,6 +131,7 @@
  * @property {(ms: number) => Promise<void>} [delay]
  * @property {(message: string) => void} [notice]
  * @property {number} [sendTimeout]
+ * @property {number} [maxSending] (1.5.5) records sent at once (default 6)
  * @property {string} [field] the stamp field of a backend answer, for lastSent (0.8.2; default updatedAt)
  * @property {string[]} [engine] fields left out of lastSent's signature (0.8.2; createApp: the backend's engine fields)
  * @property {{ recover?: string }} [labels]

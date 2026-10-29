@@ -377,3 +377,16 @@ test('lastSent signs what the server stored (a merge), without the engine fields
   await q.save('item', 'a', { id: '1', text: 'Fake' }); assert.equal(await q.flush(), true);
   assert.deepEqual(q.lastSent('item', '1'), { stamp: 9, signature: recordSignature({ id: '1', text: 'Fake', other: 'merged elsewhere' }) });
 });
+test('a bulk import is sent a few records at a time, each within its send timeout (1.5.5)', async () => {
+  // a server that answers more slowly the more it is sent at once: 20 at once would all miss the 200 ms timeout
+  const f=fixture();let inFlight=0,most=0,calls=0;const store=f.config.store;
+  const queue=createWriteQueue({ ...f.config, store, sendTimeout: 200, backend: async (_, kind, record) => {
+    calls++;inFlight++;most=Math.max(most,inFlight);await new Promise(r=>setTimeout(r,30*inFlight));inFlight--;f.remote.set(record.id,clone(record));return record;
+  } });
+  await queue.activate('a');
+  await Promise.all(Array.from({length:20},(_,i)=>queue.save('item','a',{id:'r'+i,details:'x'})));
+  // (the fixture's delay makes flush wait only 100 ms: wait for the queue itself)
+  for (const t=Date.now();queue.pending()&&Date.now()-t<5000;) await new Promise(r=>setTimeout(r,20));
+  assert.equal(queue.pending(),0);
+  assert.ok(most<=6,'at most 6 in flight, saw '+most);assert.equal(calls,20,'none timed out and was sent again');assert.equal(f.remote.size,20);
+});

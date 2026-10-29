@@ -20,7 +20,7 @@
     "vite": "6.3.5"
   },
   "name": "app-sync",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "description": "Offline-first sync engine for web apps: delta listeners, a durable outbox, tombstones, conflict checks; backend injected (Firestore adapter as its own entry).",
   "license": "Apache-2.0",
   "exports": {

@@ -202,6 +202,10 @@ export type QueueOptions = {
     notice?: ((message: string) => void) | undefined;
     sendTimeout?: number | undefined;
     /**
+     * (1.5.5) records sent at once (default 6)
+     */
+    maxSending?: number | undefined;
+    /**
      * the stamp field of a backend answer, for lastSent (0.8.2; default updatedAt)
      */
     field?: string | undefined;

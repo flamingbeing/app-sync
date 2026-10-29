@@ -19,7 +19,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
 const fail = msg => errors.push(msg);
 
-const BUDGET = { 'index.js': 2600, 'src/': 301600 };   // src/ 301600: 1.5.4 (saves in one ms keep their order)
+const BUDGET = { 'index.js': 2600, 'src/': 302900 };   // src/ 302900: 1.5.5 (sends a few at a time)
 const bytesOf = rel => {
   const abs = path.join(ROOT, rel);
   return fs.statSync(abs).isDirectory() ? fs.readdirSync(abs).reduce((n, f) => n + bytesOf(path.posix.join(rel, f)), 0) : fs.statSync(abs).size;

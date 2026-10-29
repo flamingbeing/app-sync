@@ -3,7 +3,7 @@ export function jobsNow(queue: {
     entries: () => Job[];
 }): Job[];
 /** @param {QueueOptions} options */
-export function createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels, otherPending, registry, report, ignore, field, engine }: QueueOptions): {
+export function createWriteQueue({ store, backend, getOwner, normalize, online, delay, notice, sendTimeout, labels, otherPending, registry, report, ignore, field, engine, maxSending }: QueueOptions): {
     activate: (email: string) => Promise<void>;
     save: (kind: string, email: string, record: Doc, base?: Doc | null, { ops, meta }?: {
         ops?: any;
@@ -72,6 +72,7 @@ export function watchSaved({ hub, queue, scope, coll, kind, owner, view }: {
     seen: (id: string) => Doc | null;
 };
 export const SEND_TIMEOUT: 30000;
+export const MAX_SENDING: 6;
 export const JOB_FORMAT: 1;
 export const JOB_STATES: readonly string[];
 export type Doc = import("./types.js").Doc;
