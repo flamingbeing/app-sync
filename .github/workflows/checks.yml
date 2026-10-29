@@ -1,6 +1,9 @@
-# Every PR and push to main: the repo checks and unit tests, the Firestore adapter against the local emulator (demo
-# project, nothing reaches a real Firebase project), the update module in a browser, and the apps' browser tests on
-# this engine (consumer matrix: app-starter blocks, the others report). Jobs side by side.
+# Quick checks on every PR and push to main: the repo checks and unit tests, the Firestore adapter against the local
+# emulator (demo project, nothing reaches a real Firebase project), the update module in a browser, the Vite builds,
+# and app-starter's browser tests on this engine (consumer.yml, 2 shards; blocks). Jobs side by side.
+# The report-only consumer rows (the other apps on this engine) are in full-checks.yml ("Full checks": nightly with
+# the soak, and by hand with a PR number or ref). Repo variable FULL_CHECKS_ON_PRS=true (Settings, Secrets and
+# variables, Actions, Variables) makes PRs run them too.
 name: Checks
 
 on:
@@ -169,155 +172,23 @@ jobs:
         if: steps.docs.outputs.docs != 'true'
         run: node update/test/e2e.mjs
 
-  # The consumer matrix: each app's own browser tests with this commit's engine (and update module) served in place of
-  # whatever version the app pins (app-devkit serve-candidate; no app change). Every row checks the engine VERSION each
-  # page really ran. app-starter (the reference app) blocks; the other rows only report: red = that app's migration
-  # to-do, written to the job summary. app-starter also runs test/consumer/mixed.spec.mjs: a phone on the version it
-  # pins and a phone on this commit, one account, one emulator.
+  # app-starter (the reference app) on this engine, split so no shard runs much over a minute; it blocks
   consumer:
-    name: consumer (${{ matrix.row }})
-    runs-on: ubuntu-24.04
-    # report-only rows pass in <= 5 min or fail fast; the ones that hang used to hold the whole run to the 20 min cap
-    timeout-minutes: ${{ matrix.blocking && 20 || 8 }}
-    continue-on-error: ${{ !matrix.blocking }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { row: app-starter, repo: app-starter, blocking: true, pw: project, emulators: 'firestore,auth', cmd: 'npx playwright test' }
-          - { row: pantry, repo: pantry, blocking: false, pw: project, emulators: firestore, firebase: 13.29.1, cmd: 'npx playwright test' }
-          - { row: kakihome, repo: kakihome, blocking: false, pw: project, emulators: 'firestore,auth', cmd: 'npx playwright test' }
-          - { row: rosters, repo: rosters, blocking: false, pw: global, port: 8080, cmd: 'node nuh-roster/test/e2e.mjs && node ntf-roster/test/e2e.mjs && node nuh-junior-monthly/test/e2e.mjs' }
-          - { row: apmes logbook, repo: apmes, blocking: false, pw: global, port: 8080, cmd: 'node logbook/test/e2e/sync-engine.mjs' }
-          - { row: apmes evals, repo: apmes, blocking: false, pw: global, port: 8110, cmd: 'node evals/test/e2e.spec.mjs && node evals/test/edge.e2e.mjs' }
-          - { row: apmes ccc, repo: apmes, blocking: false, pw: global, port: 8110, cmd: 'node ccc/test/e2e.mjs' }
-          - { row: prewarm, repo: prewarm, blocking: false, pw: global, port: 8080, cmd: 'node prewarm/test/gaps.e2e.mjs' }
-          - { row: residencyapps, repo: residencyapps, blocking: false, pw: global, cmd: 'node test/e2e.mjs' }
+    uses: ./.github/workflows/consumer.yml
     permissions:
       contents: read
       pull-requests: read
-    steps:
-      # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
-      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
-      # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
-      - name: Only .md files changed?
-        id: docs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          docs=false
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
-            n="$(printf '%s\n' "$files" | wc -l)"
-            if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
-          fi
-          echo "docs=$docs" >> "$GITHUB_OUTPUT"
-          echo "docs-only: $docs"
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        if: steps.docs.outputs.docs != 'true'
-        with:
-          path: candidate
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        if: steps.docs.outputs.docs != 'true'
-        with:
-          repository: flamingbeing/${{ matrix.repo }}
-          ref: main
-          path: app
-      - uses: flamingbeing/app-devkit/setup-node@v1.11.0
-        if: steps.docs.outputs.docs != 'true'
-        with:
-          working-directory: app
-          install: ${{ matrix.pw == 'project' }}
-      - name: Playwright 1.56.1 and axe (the apps' plain browser scripts)
-        if: steps.docs.outputs.docs != 'true' && (matrix.pw == 'global')
-        run: npm install -g playwright@1.56.1 axe-core@4
-      - name: The app's own Playwright version (setup-browser installs that browser build)
-        if: steps.docs.outputs.docs != 'true'
-        id: pw
-        run: |
-          if [ "${{ matrix.pw }}" = global ]; then echo "version=1.56.1" >> "$GITHUB_OUTPUT"
-          else echo "version=$(node -p "require('./app/package-lock.json').packages['node_modules/playwright-core'].version")" >> "$GITHUB_OUTPUT"; fi
-      - uses: flamingbeing/app-devkit/setup-browser@v1.11.0
-        if: steps.docs.outputs.docs != 'true'
-        with:
-          playwright-version: ${{ steps.pw.outputs.version }}
-          devkit-dir: ${{ matrix.repo == 'app-starter' && 'app/.devkit' || '' }}
-      - uses: flamingbeing/app-devkit/setup-emulators@v1.11.0
-        if: steps.docs.outputs.docs != 'true' && (matrix.emulators)
-        with:
-          emulators: ${{ matrix.emulators }}
-          firebase-tools-version: ${{ matrix.firebase || '13.35.1' }}
-          devkit-dir: ''
-      - uses: flamingbeing/app-devkit/serve-candidate@v1.11.0
-        if: steps.docs.outputs.docs != 'true'
-        id: candidate
-        with:
-          origin: https://core.anawj.com
-          sync-dir: candidate
-          update-dir: candidate/update
-      - name: The starter's pinned engine, for the mixed-version spec
-        if: steps.docs.outputs.docs != 'true' && (matrix.repo == 'app-starter')
-        run: |
-          # the pin: the import map in index.html or public/sw.js (the starter keeps them under app/, 0.9.x; earlier a root layout), else app/sw.js (0.x layout)
-          for f in app/app/index.html app/app/public/sw.js app/index.html app/public/sw.js app/app/sw.js; do
-            v="$(grep -o 'core\.anawj\.com/sync/[0-9][^/]*/' "$f" 2>/dev/null | head -1 | cut -d/ -f3)"
-            if [ -n "$v" ]; then echo "pinned $v (from ${f#app/})"; break; fi
-          done
-          if [ -z "$v" ]; then echo "::error::no core.anawj.com/sync/<version>/ pin in index.html, public/sw.js or app/sw.js"; exit 1; fi
-          git clone --quiet --depth 1 --branch "v$v" https://github.com/flamingbeing/app-sync pinned
-      - name: ${{ matrix.row }} browser tests on this engine
-        if: steps.docs.outputs.docs != 'true'
-        id: tests
-        working-directory: app
-        env:
-          NODE_OPTIONS: ${{ steps.candidate.outputs.node-options }}
-          PORT: ${{ matrix.port }}
-        run: |
-          if [ "${{ matrix.pw }}" = global ]; then
-            export PLAYWRIGHT_PATH="$(npm root -g)/playwright/index.mjs" PW_PATH="$(npm root -g)/playwright" AXE_PATH="$(npm root -g)/axe-core/axe.min.js"
-          fi
-          if [ -n "$PORT" ]; then (python3 -m http.server "$PORT" >/dev/null 2>&1 &); sleep 1; fi
-          ${{ matrix.cmd }}
-      # its own log: its pinned phone runs the pinned engine on purpose (the spec checks both phones' VERSION itself)
-      - name: Mixed versions (a phone on the starter's pinned tag, a phone on this commit)
-        if: steps.docs.outputs.docs != 'true' && (matrix.repo == 'app-starter')
-        working-directory: app
-        env:
-          NODE_OPTIONS: ${{ steps.candidate.outputs.node-options }}
-          PINNED_SYNC_DIR: ${{ github.workspace }}/pinned
-        run: |
-          cp ../candidate/test/consumer/mixed.spec.mjs e2e/
-          SERVE_CANDIDATE_LOG="$RUNNER_TEMP/mixed.jsonl" npx playwright test e2e/mixed.spec.mjs
-      - name: Engine VERSION each page ran, and the service worker file lists
-        if: always() && steps.candidate.outcome == 'success'
-        env:
-          KIT: ${{ steps.candidate.outputs.kit }}
-          ROW: ${{ matrix.row }}
-          TESTS: ${{ steps.tests.outcome }}
-        run: |
-          {
-            echo "### ${ROW}: tests ${TESTS}"
-            echo
-            echo '| row | engine | expected | pinned | note |'
-            echo '|---|---|---|---|---|'
-          } >> "$GITHUB_STEP_SUMMARY"
-          ok=0
-          log="${{ steps.candidate.outputs.log }}"
-          node "$KIT/report.mjs" "$log" --row "$ROW" --expect "${{ steps.candidate.outputs.version }}" || ok=1
-          # a matching VERSION alone could be a live copy of the same version: the candidate must have served the engine
-          served="$(node -e 'let n=0;for(const l of require("fs").readFileSync(process.argv[1],"utf8").split("\n"))if(l)n+=JSON.parse(l).served.sync;console.log(n)' "$log")"
-          if [ "$served" = 0 ]; then echo "| $ROW | fail | | | no engine file served from this checkout |" >> "$GITHUB_STEP_SUMMARY"; ok=1; fi
-          { echo; echo '| row | service worker | pins | engine files | |'; echo '|---|---|---|---|---|'; } >> "$GITHUB_STEP_SUMMARY"
-          node "$KIT/shell.mjs" --files candidate/files.json --origin https://core.anawj.com --row "$ROW" app
-          exit "$ok"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: failure() && matrix.blocking
-        with:
-          name: consumer-results
-          path: app/test-results
-          if-no-files-found: ignore
-# proof 1
-# proof 2
-# proof 3
-# proof 4
+    with:
+      rows: >-
+        [{"row": "app-starter 1 of 2", "key": "app-starter-1", "repo": "app-starter", "blocking": true, "pw": "project",
+          "emulators": "firestore,auth", "cmd": "npx playwright test --shard=1/2"},
+         {"row": "app-starter 2 of 2", "key": "app-starter-2", "repo": "app-starter", "blocking": true, "pw": "project",
+          "emulators": "firestore,auth", "cmd": "npx playwright test --shard=2/2", "mixed": true}]
+
+  full:
+    # the repo variable FULL_CHECKS_ON_PRS=true runs Full checks on PRs as well
+    if: github.event_name == 'pull_request' && vars.FULL_CHECKS_ON_PRS == 'true'
+    uses: ./.github/workflows/full-checks.yml
+    permissions:
+      contents: read
+      pull-requests: read

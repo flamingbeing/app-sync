@@ -1,0 +1,34 @@
+# Full checks: everything slower than the quick Checks (checks.yml): the report-only consumer rows, each app's own
+# browser tests on this engine (consumer.yml; red = that app's migration to-do in the job summary, never a red run).
+# Runs nightly from soak.yml, by hand (Actions, "Full checks", Run workflow; `ref` = a PR number, branch, tag or SHA,
+# empty = main), and on PRs when the repo variable FULL_CHECKS_ON_PRS is true. Never after merges or releases.
+name: Full checks
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: PR number, branch, tag or SHA (empty = main)
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  consumer:
+    uses: ./.github/workflows/consumer.yml
+    with:
+      ref: ${{ inputs.ref }}
+      rows: >-
+        [{"row": "pantry", "repo": "pantry", "blocking": false, "pw": "project", "emulators": "firestore", "firebase": "13.29.1", "cmd": "npx playwright test"},
+         {"row": "kakihome", "repo": "kakihome", "blocking": false, "pw": "project", "emulators": "firestore,auth", "cmd": "npx playwright test"},
+         {"row": "rosters", "repo": "rosters", "blocking": false, "pw": "global", "port": 8080, "cmd": "node nuh-roster/test/e2e.mjs && node ntf-roster/test/e2e.mjs && node nuh-junior-monthly/test/e2e.mjs"},
+         {"row": "apmes logbook", "repo": "apmes", "blocking": false, "pw": "global", "port": 8080, "cmd": "node logbook/test/e2e/sync-engine.mjs"},
+         {"row": "apmes evals", "repo": "apmes", "blocking": false, "pw": "global", "port": 8110, "cmd": "node evals/test/e2e.spec.mjs && node evals/test/edge.e2e.mjs"},
+         {"row": "apmes ccc", "repo": "apmes", "blocking": false, "pw": "global", "port": 8110, "cmd": "node ccc/test/e2e.mjs"},
+         {"row": "prewarm", "repo": "prewarm", "blocking": false, "pw": "global", "port": 8080, "cmd": "node prewarm/test/gaps.e2e.mjs"},
+         {"row": "residencyapps", "repo": "residencyapps", "blocking": false, "pw": "global", "cmd": "node test/e2e.mjs"}]
