@@ -17,7 +17,8 @@ import { memOutbox, sharedSdk } from './fake-sdk.mjs';
 
 const S = 'fake-space';
 const settle = (ms = 5) => new Promise(r => setTimeout(r, ms));
-const until = async (ok, ms = 3000) => { const end = Date.now() + ms; while (!ok()) { if (Date.now() > end) return false; await settle(10); } return true; };
+// (timed on performance.now(): inside a transaction Date.now is that device's clock, fake-sdk.mjs)
+const until = async (ok, ms = 3000) => { const end = performance.now() + ms; while (!ok()) { if (performance.now() > end) return false; await settle(10); } return true; };
 const unavailable = () => Object.assign(new Error('offline'), { code: 'unavailable' });
 const BACKOFF = new Set([2000, 4000, 8000, 16000, 32000, 60000]);
 const quick = ms => settle(ms === 180 ? 5 : BACKOFF.has(ms) ? 10 : ms);
@@ -165,7 +166,7 @@ async function run(seed, { steps = 30, held = false } = {}) {
     const shown = d.views[coll].filter(x => !held.has(coll + ':' + x.id));
     return want.length === shown.length && want.every(x => shown.some(y => y.id === x.id && sig(y) === sig(x)));
   }));
-  await until(agreed, 3000);
+  const settled = await until(agreed, 3000);
   for (const d of devs) {
     const held = attention(d);
     for (const coll of ['notes', 'tasks']) {
@@ -188,6 +189,7 @@ async function run(seed, { steps = 30, held = false } = {}) {
   // (0.7.4) an answer never splits an email key into nested keys
   for (const doc of server('notes')) for (const d of devs) if (d.name in doc) problems.push(`note ${doc.id} has ${d.name}: ${JSON.stringify(doc[d.name])}`);
   for (const doc of server('tasks')) for (const k of Object.keys(doc.names || {})) if (!EMAILS.includes(k)) problems.push(`task ${doc.id} has names.${k}: ${JSON.stringify(doc.names[k])}`);
+  if (problems.length && !settled) problems.push('(the devices had not agreed after 3 s of waiting)');
   for (const d of devs) await d.stop();
   return { problems, log, n };
 }

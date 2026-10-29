@@ -1,6 +1,20 @@
 // Fakes shared by the fault and model tests: an in-memory outbox and a small fake of the modular Firestore SDK on one
 // shared set of documents, as several devices see it. Made-up data only.
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 const clone = x => structuredClone(x);
+// A device's clock while its transaction function runs: Date.now() reads the real time plus the offset of the
+// transaction it is called from. (It used to be swapped and put back around each transaction: two devices'
+// transactions overlapping put back the wrong one, so the shared clock drifted by minutes per model run, and flush
+// and settle deadlines read it.)
+const offset = new AsyncLocalStorage();
+/** @type {(() => number) | null} */
+let wrapped = null;
+/** @template T @param {number} clock @param {() => Promise<T>} fn @returns {Promise<T>} */
+const onClock = (clock, fn) => {
+  if (Date.now !== wrapped) { const outer = Date.now; wrapped = () => outer() + (offset.getStore() || 0); Date.now = wrapped; }
+  return offset.run(clock, fn);
+};
 const err = (code, message = code) => Object.assign(new Error(message), { code });
 
 // the write queue's outbox, in memory (one device; two queues on it share it like two tabs)
@@ -47,10 +61,7 @@ export function sharedSdk({ srv = null, attempts = 5 } = {}) {
             set(ref, data) { writes.push({ path: ref.path, data: clone(data) }); return tx; },
             delete(ref) { writes.push({ path: ref.path, delete: true }); return tx; },
           };
-          const real = Date.now, now = () => real() + clock;
-          Date.now = now;
-          let out;
-          try { out = await fn(tx); } finally { Date.now = real; }
+          const out = await onClock(clock, () => fn(tx));
           // another device committed to what this one read: run again, or give up as aborted
           if ([...read].some(([p, v]) => (versions.get(p) || 0) !== v)) { if (n >= attempts) throw err('aborted', 'Transaction lost the race'); continue; }
           for (const w of writes) {
