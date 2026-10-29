@@ -14,6 +14,13 @@ README ("Stability") and [FORMATS.md](FORMATS.md). The 0.8.x releases prepare it
 - 1.0.0-rc.1: one version for the engine and the update module (`/sync/<v>/` and `/update/<v>/`), and the deprecated
   `index.js` aliases of `src/internal.js` removed. Then 1.0.0 on the same commit once the reference app runs on it.
 
+## 1.5.5 (2026-10-29)
+
+- Fix: the write queue sent every record's save at once, so a bulk import (500 cases) put 500 transactions in flight;
+  only about 100 answered inside the 30 s send timeout and the rest retried with backoff for minutes, though their
+  data was already on the server. Now at most `maxSending` (default 6) records are sent at once and the others wait
+  their turn before their timeout starts. Turns go first come first served. No API or stored-format change.
+
 ## 1.5.4 (2026-10-29)
 
 - Fix: a second save of a record made in the same millisecond as one still being stored (its store write slow, so not
