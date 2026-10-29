@@ -26,6 +26,7 @@
 1. A multi-device soak test (offline devices, same-record edits, skewed clocks) in real browsers.
 
 ## Recently done
+- 2026-10-29: CI: the pantry consumer row (the longest, ~3 min of tests) runs as two shards, `pantry 1 of 2` and `2 of 2`.
 - 2026-10-25: 0.6.3 held conflicts by field, opt-in (`backend: { held, edits }`): different fields merge, same value asks nothing, counters add up, a same-field clash is held on the phone that sent it second with a side-by-side popup (`conflicts`, `describe`, `resolve`); report counts held saves by kind (Worker too).
 - 2026-10-25: 0.6.1 model-based multi-device tests (`test/model.test.mjs`, seeded) and the fix they found: a record deleted on this device left its list only at the weekly full read.
 - 2026-10-25: 0.6.0 `createApp` (the safe path in one call), with the unreleased 0.5.2 fixes folded in: `watchSaved` (the server's copy heard while a save was sent shows once it is done) and one report per page hide (see CHANGELOG).

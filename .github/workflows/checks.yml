@@ -185,7 +185,9 @@ jobs:
       matrix:
         include:
           - { row: app-starter, repo: app-starter, blocking: true, pw: project, emulators: 'firestore,auth', cmd: 'npx playwright test' }
-          - { row: pantry, repo: pantry, blocking: false, pw: project, emulators: firestore, firebase: 13.29.1, cmd: 'npx playwright test' }
+          # pantry is the longest row (~3 min of tests), so its specs are split over two runners
+          - { row: pantry 1 of 2, repo: pantry, blocking: false, pw: project, emulators: firestore, firebase: 13.29.1, cmd: 'npx playwright test --shard=1/2' }
+          - { row: pantry 2 of 2, repo: pantry, blocking: false, pw: project, emulators: firestore, firebase: 13.29.1, cmd: 'npx playwright test --shard=2/2' }
           - { row: kakihome, repo: kakihome, blocking: false, pw: project, emulators: 'firestore,auth', cmd: 'npx playwright test' }
           - { row: rosters, repo: rosters, blocking: false, pw: global, port: 8080, cmd: 'node nuh-roster/test/e2e.mjs && node ntf-roster/test/e2e.mjs && node nuh-junior-monthly/test/e2e.mjs' }
           - { row: apmes logbook, repo: apmes, blocking: false, pw: global, port: 8080, cmd: 'node logbook/test/e2e/sync-engine.mjs' }
