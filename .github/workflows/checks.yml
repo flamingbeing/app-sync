@@ -1,6 +1,6 @@
 # Quick checks on every PR and push to main: the repo checks and unit tests, the Firestore adapter against the local
 # emulator (demo project, nothing reaches a real Firebase project), the update module in a browser, the Vite builds,
-# and app-starter's browser tests on this engine (consumer.yml, 2 shards; blocks). Jobs side by side.
+# and app-starter's browser tests on this engine (consumer.yml, 4 shards; blocks). Jobs side by side.
 # The report-only consumer rows (the other apps on this engine) are in full-checks.yml ("Full checks": nightly with
 # the soak, and by hand with a PR number or ref). Repo variable FULL_CHECKS_ON_PRS=true (Settings, Secrets and
 # variables, Actions, Variables) makes PRs run them too.
@@ -180,10 +180,10 @@ jobs:
       pull-requests: read
     with:
       rows: >-
-        [{"row": "app-starter 1 of 2", "key": "app-starter-1", "repo": "app-starter", "blocking": true, "pw": "project",
-          "emulators": "firestore,auth", "cmd": "npx playwright test --shard=1/2"},
-         {"row": "app-starter 2 of 2", "key": "app-starter-2", "repo": "app-starter", "blocking": true, "pw": "project",
-          "emulators": "firestore,auth", "cmd": "npx playwright test --shard=2/2", "mixed": true}]
+        [{"row": "app-starter 1 of 4", "key": "app-starter-1", "repo": "app-starter", "blocking": true, "pw": "project", "emulators": "firestore,auth", "cmd": "npx playwright test --shard=1/4"},
+         {"row": "app-starter 2 of 4", "key": "app-starter-2", "repo": "app-starter", "blocking": true, "pw": "project", "emulators": "firestore,auth", "cmd": "npx playwright test --shard=2/4"},
+         {"row": "app-starter 3 of 4", "key": "app-starter-3", "repo": "app-starter", "blocking": true, "pw": "project", "emulators": "firestore,auth", "cmd": "npx playwright test --shard=3/4"},
+         {"row": "app-starter 4 of 4", "key": "app-starter-4", "repo": "app-starter", "blocking": true, "pw": "project", "emulators": "firestore,auth", "cmd": "npx playwright test --shard=4/4", "mixed": true}]
 
   full:
     # the repo variable FULL_CHECKS_ON_PRS=true runs Full checks on PRs as well

@@ -40,7 +40,7 @@ only the one you are fixing (`npm run test:emulator` needs Java).
 
 Checks also runs app-starter's browser tests on the candidate engine (`consumer.yml`, app-devkit
 `serve-candidate`: each app's pinned engine and update URLs serve this checkout, and every row checks the VERSION each
-page really ran). The app-starter rows (2 shards) block (with `test/consumer/mixed.spec.mjs`: a phone on the starter's pinned
+page really ran). The app-starter rows (4 shards) block (with `test/consumer/mixed.spec.mjs`: a phone on the starter's pinned
 version and one on this commit); a red app-starter row is a break for every app: fix it here first. The other apps' rows
 are in Full checks (`full-checks.yml`: nightly with the soak, by hand with a PR number or ref, and on PRs when the repo
 variable `FULL_CHECKS_ON_PRS=true`); they only report (job summary): red there is that app's migration to-do, not a
