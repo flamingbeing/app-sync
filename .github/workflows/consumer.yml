@@ -20,24 +20,7 @@ on:
 permissions:
   contents: read
 jobs:
-  plan:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    outputs:
-      ref: ${{ steps.ref.outputs.ref }}
-    steps:
-      - id: ref
-        env:
-          REF: ${{ inputs.ref }}
-        run: |
-          case "$REF" in
-            '') echo "ref=" >> "$GITHUB_OUTPUT" ;;
-            *[!0-9]*) echo "ref=$REF" >> "$GITHUB_OUTPUT" ;;
-            *) echo "ref=refs/pull/$REF/head" >> "$GITHUB_OUTPUT" ;;
-          esac
-
   consumer:
-    needs: plan
     name: consumer (${{ matrix.row }})
     runs-on: ubuntu-24.04
     # report-only rows pass in <= 5 min or fail fast; the ones that hang used to hold the whole run to the 20 min cap
@@ -53,7 +36,7 @@ jobs:
     steps:
       # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
       # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
-      # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
+      # (API error, 3000+ files) runs everything.
       - name: Only .md files changed?
         id: docs
         env:
@@ -68,10 +51,21 @@ jobs:
           fi
           echo "docs=$docs" >> "$GITHUB_OUTPUT"
           echo "docs-only: $docs"
+      - name: This repo's commit to test
+        if: steps.docs.outputs.docs != 'true'
+        id: ref
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          case "$REF" in
+            '') echo "ref=" >> "$GITHUB_OUTPUT" ;;
+            *[!0-9]*) echo "ref=$REF" >> "$GITHUB_OUTPUT" ;;
+            *) echo "ref=refs/pull/$REF/head" >> "$GITHUB_OUTPUT" ;;
+          esac
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         if: steps.docs.outputs.docs != 'true'
         with:
-          ref: ${{ needs.plan.outputs.ref }}
+          ref: ${{ steps.ref.outputs.ref }}
           path: candidate
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         if: steps.docs.outputs.docs != 'true'

@@ -12,6 +12,10 @@ Lasting rules, owner preferences and lessons (never task chatter), and how to te
 
 - Update module: `node --test update/test/*.test.mjs` (fake worker world in `update/test/fake-sw.mjs`) and
   `node update/test/e2e.mjs` (fixture app + real Chromium; Playwright is installed with `--no-save` in CI).
+- CI: quick Checks on every PR (unit, types, emulator, update module in Chromium, Vite builds, app-starter's browser
+  tests on this engine in 2 shards); the other apps' report-only consumer rows are Full checks (`full-checks.yml`,
+  nightly with the soak, by hand, or on PRs with the repo variable `FULL_CHECKS_ON_PRS=true`). Decided 30 Oct 2026:
+  PRs stay about 2 min; those rows only report and were red by design.
 
 ## Lessons
 
