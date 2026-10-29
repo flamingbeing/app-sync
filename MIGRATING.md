@@ -135,8 +135,9 @@ mechanical in every app; the rest of the effort is the app's own screens moving 
 | apmes ccc | 0.7.3 / 0.2.0 | `commit`, `outbox`, `watchEvery: 0`, `nav`, `storage`, `queue`; anonymous rater page: `sync` only, queue parts directly | rater page | **S-M** | no |
 | hand-log, hand-babies, cmcj, owner-tools | none | none (browser-only or static) | optional | not a move | no |
 
-The consumer matrix (Checks) runs each app's own tests on this engine in place of its pin: until an app has moved,
-its row is red on 1.4 by design (report only); the app-starter row blocks.
+The consumer matrix runs each app's own tests on this engine in place of its pin: the app-starter rows block in every
+PR's Checks; the other apps' rows run in Full checks (nightly, or by hand: Actions, "Full checks", Run workflow) and
+until an app has moved, its row is red on 1.4 by design (report only).
 
 ## From 0.x to 1.0: the one-object `createApp` to the modules
 

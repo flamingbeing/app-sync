@@ -1,6 +1,7 @@
 # Nightly soak (app-devkit README, "soak.yml"): the unit tests 50 times and a fresh range of 10k model seeds, no retries,
 # at 02:30 SGT. A failure opens or updates ONE issue titled "Nightly soak"; it closes after 7 clean nights. Not a
-# required check, never blocks a PR. Also runs by hand (Actions, "Nightly soak", Run workflow).
+# required check, never blocks a PR. Also runs by hand (Actions, "Nightly soak", Run workflow). The `full` job runs
+# Full checks (full-checks.yml: the report-only consumer rows) on main each night too.
 name: Nightly soak
 on:
   schedule:
@@ -18,3 +19,8 @@ jobs:
       unit-command: bash tools/soak-unit.sh
       unit-repeat: 50
       model-command: bash tools/soak-model.sh
+  full:
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/full-checks.yml

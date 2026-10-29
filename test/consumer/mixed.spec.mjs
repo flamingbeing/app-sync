@@ -2,7 +2,7 @@
 // on the engine the starter pins (PINNED_SYNC_DIR, a checkout of that tag), one on the candidate (serve-candidate's
 // preload), one emulator. Adds, edits and deletes cross both ways, so stored formats written by either version read
 // on the other. Each phone checks the engine VERSION it really ran.
-import { test, expect, signIn, signInAgain, add, uniq } from './fixtures.mjs';
+import { test, expect, signIn, signInAgain, add, uniq, clickOpens } from './fixtures.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -25,17 +25,15 @@ const ran = page => page.evaluate(async () => {
   const url = performance.getEntriesByType('resource').map(e => e.name).find(n => /^https:\/\/core\.anawj\.com\/sync\/[^/]+\/(index|app)\.js$/.test(n));
   return url ? (await import(url)).VERSION : null;
 });
+// the starter's Tasks sample (app-starter #96): today's tasks in #today, a task opens #task-sheet
 async function edit(page, from, to) {
-  await page.getByRole('button', { name: from }).click();
-  await page.fill('#edit-text', to);
-  await page.click('#edit-save');
+  await clickOpens(page.getByRole('button', { name: from }), page.locator('#task-sheet'));
+  await page.fill('#task-text', to);
+  await page.click('#task-save');
 }
 async function remove(page, text) {
-  await page.getByRole('button', { name: text }).click();
-  await page.click('#edit-delete');
-  // the starter's confirm (app-starter #14) until it became delete-with-undo: click it only if it shows
-  const confirm = page.locator('dialog.modal').getByRole('button', { name: 'Delete', exact: true });
-  if (await confirm.isVisible({ timeout: 1000 }).catch(() => false)) await confirm.click();
+  await clickOpens(page.getByRole('button', { name: text }), page.locator('#task-sheet'));
+  await page.click('#task-delete');
 }
 
 test('a phone on the pinned engine and a phone on the candidate share one account', async ({ browser }) => {
@@ -49,19 +47,19 @@ test('a phone on the pinned engine and a phone on the candidate share one accoun
 
     const a = uniq('old'), b = uniq('new');
     await add(old.page, a);
-    await expect(cand.page.locator('#items')).toContainText(a, { timeout: 15_000 });
+    await expect(cand.page.locator('#today')).toContainText(a, { timeout: 15_000 });
     await add(cand.page, b);
-    await expect(old.page.locator('#items')).toContainText(b, { timeout: 15_000 });
+    await expect(old.page.locator('#today')).toContainText(b, { timeout: 15_000 });
 
     await edit(cand.page, a, a + ' edited');
-    await expect(old.page.locator('#items')).toContainText(a + ' edited', { timeout: 15_000 });
+    await expect(old.page.locator('#today')).toContainText(a + ' edited', { timeout: 15_000 });
     await edit(old.page, b, b + ' edited');
-    await expect(cand.page.locator('#items')).toContainText(b + ' edited', { timeout: 15_000 });
+    await expect(cand.page.locator('#today')).toContainText(b + ' edited', { timeout: 15_000 });
 
     await remove(old.page, a + ' edited');
-    await expect(cand.page.locator('#items')).not.toContainText(a, { timeout: 15_000 });
+    await expect(cand.page.locator('#today')).not.toContainText(a, { timeout: 15_000 });
     await remove(cand.page, b + ' edited');
-    await expect(old.page.locator('#items')).not.toContainText(b, { timeout: 15_000 });
+    await expect(old.page.locator('#today')).not.toContainText(b, { timeout: 15_000 });
   } finally {
     await old.context.close();
     await cand.context.close();

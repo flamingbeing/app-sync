@@ -18,7 +18,7 @@ repo; never copy anything from there into this repo, a PR or an issue (neutral p
 - **A released tag never changes.** Fixes go in a new version with a CHANGELOG entry; breaking API = new major.
 - **Every bug fix starts with a failing test** (`test/fixes.test.mjs` or the module's test), then the fix.
 - Never weaken a data-loss gate (outbox, sign-out check, conflict check) to make a test pass.
-- Use Opus for changes to `src/`; run the full unit and emulator tests before merging.
+- Use Opus for changes to `src/`; run the unit tests before pushing (the emulator and browser tests run in Checks).
 - **Core admission rule:** a new engine option or method only if 2+ apps (or the reference app) need it, or it is a
   correctness guarantee; otherwise the app adapts (a thin adapter in the app, never engine code copied). Each
   addition lands with a reference-app or model test. Size budget in `tools/check.mjs`; raising it is a CHANGELOG line.
@@ -31,15 +31,20 @@ repo; never copy anything from there into this repo, a PR or an issue (neutral p
 ```
 node tools/check.mjs          # repo checks + Worker tests
 node --test test/*.test.mjs   # unit tests
-npm run test:emulator         # Firestore adapter on the local emulator (Java)
+npm run typecheck             # types (tsc --checkJs)
 node tools/proofread.mjs      # page and doc mistakes
 ```
 
-CI also runs the apps' own browser tests on the candidate engine (the `consumer` matrix, app-devkit
+The Firestore adapter on the emulator and every browser test run on GitHub (Checks), not locally first; locally run
+only the one you are fixing (`npm run test:emulator` needs Java).
+
+Checks also runs app-starter's browser tests on the candidate engine (`consumer.yml`, app-devkit
 `serve-candidate`: each app's pinned engine and update URLs serve this checkout, and every row checks the VERSION each
-page really ran). The app-starter row blocks (with `test/consumer/mixed.spec.mjs`: a phone on the starter's pinned
-version and one on this commit); a red app-starter row is a break for every app: fix it here first. The other rows only
-report (job summary): red there is that app's migration to-do, not a reason to bend the engine. Locally: in an app
+page really ran). The app-starter rows (4 shards) block (with `test/consumer/mixed.spec.mjs`: a phone on the starter's pinned
+version and one on this commit); a red app-starter row is a break for every app: fix it here first. The other apps' rows
+are in Full checks (`full-checks.yml`: nightly with the soak, by hand with a PR number or ref, and on PRs when the repo
+variable `FULL_CHECKS_ON_PRS=true`); they only report (job summary): red there is that app's migration to-do, not a
+reason to bend the engine. Locally: in an app
 checkout, `SERVE_CANDIDATE_ORIGIN=https://core.anawj.com SERVE_CANDIDATE_SYNC=<this checkout>
 NODE_OPTIONS="--import <app-devkit>/serve-candidate/patch.mjs" npx playwright test`.
 
