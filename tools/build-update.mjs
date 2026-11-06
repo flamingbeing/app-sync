@@ -3,6 +3,9 @@
 // 1.0.0-rc.1 it has the engine's (package.json): the sync tag vX.Y.Z serves /update/X.Y.Z/ too, and update-v tags
 // stop (the old ones are still built). Every version is checked against update.lock.json (hashes), so a moved tag or an
 // edited released file stops the deploy. Run after tools/build-sync.mjs (it leaves the rest of dist/ alone).
+// Frozen at 1.5.5 (6 Nov 2026): app-update moved to app-ui (core.anawj.com/ui/<x.y.z>/update/). Every version up to
+// 1.5.5 stays served as is, for good; later engine tags carry no update core, and the working tree's update/ is the
+// frozen 1.5.5 copy (still in the npm package, deprecated).
 //   node tools/build-update.mjs           build dist/update/ from the tags and verify against the lock
 //   node tools/build-update.mjs --lock    add the update core's version (from the working tree) to the lock; a release step
 //   node tools/build-update.mjs --check   only check that that version is locked and matches the working tree
@@ -20,6 +23,8 @@ const sha = buf => crypto.createHash('sha256').update(buf).digest('hex');
 const readLock = () => (fs.existsSync(LOCK) ? JSON.parse(fs.readFileSync(LOCK, 'utf8')) : {});
 // the first engine version that carries the update core (one version for both)
 const ONE_VERSION = '1.0.0-rc.1';
+// the last version served here; newer ones ship with app-ui
+const LAST = '1.5.5';
 const hashes = files => Object.fromEntries(FILES.map(n => [n, sha(files[n])]));
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -33,7 +38,12 @@ function treeVersion() {
 }
 
 function lockVersion({ write }) {
-  const v = treeVersion(), files = treeFiles();
+  const files = treeFiles();
+  let v = treeVersion();
+  if (VERSION_RE.test(v) && byVersion(v, LAST) > 0) {
+    if (write) throw new Error(`update is frozen at ${LAST}: new versions ship with app-ui (core.anawj.com/ui/<x.y.z>/update/)`);
+    v = LAST;   // the engine moved on; update/ must stay the frozen copy
+  }
   if (!VERSION_RE.test(v)) throw new Error(`the update core's version '${v}' is not x.y.z`);
   if (!fs.existsSync(path.join(ROOT, 'update/VERSION')) && byVersion(v, ONE_VERSION) < 0) throw new Error(`update/VERSION is gone, but ${v} is before ${ONE_VERSION}`);
   for (const n of FILES) {
@@ -56,7 +66,7 @@ function build() {
   // [tag, version]: the update core's own tags (until 0.9.x), and the engine's tags from 1.0.0-rc.1 on
   const tags = [
     ...list('update-v*').map(t => [t, t.slice('update-v'.length)]).filter(([, v]) => /^\d+\.\d+\.\d+$/.test(v)),
-    ...list('v*').map(t => [t, t.slice(1)]).filter(([, v]) => VERSION_RE.test(v) && byVersion(v, ONE_VERSION) >= 0),
+    ...list('v*').map(t => [t, t.slice(1)]).filter(([, v]) => VERSION_RE.test(v) && byVersion(v, ONE_VERSION) >= 0 && byVersion(v, LAST) <= 0),
   ];
   const out = path.join(ROOT, 'dist', 'update');
   fs.rmSync(out, { recursive: true, force: true });

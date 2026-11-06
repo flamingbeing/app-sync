@@ -58,13 +58,13 @@ NODE_OPTIONS="--import <app-devkit>/serve-candidate/patch.mjs" npx playwright te
    `update.lock.json` (checks fail without them).
 3. Merge with Checks green: `release.yml` then tags that commit `vX.Y.Z` (only if the tag doesn't exist yet).
 
-## The update module (`update/`)
+## The update module (`update/`, frozen)
 
-`update/` holds the service worker core and page module the apps share (README inside). From 1.0.0-rc.1 it has the
-engine's version: the tag `vX.Y.Z` serves it at `core.anawj.com/update/<x.y.z>/` too, its bytes locked in
-`update.lock.json` (`node tools/build-update.mjs --lock`). Until 0.9.x it was released on its own (`update/VERSION`, tags
-`update-vX.Y.Z`; those stay served). Same rules: a released version never changes, no app-specific names. Tests:
-`node --test update/test/*.test.mjs`, and `node update/test/e2e.mjs` (needs Playwright with Chromium).
+app-update moved to app-ui on 6 Nov 2026: new versions ship at `core.anawj.com/ui/<x.y.z>/update/` (app-ui's
+`docs/app-update.md`). Here every released `core.anawj.com/update/<x.y.z>/` (0.1.0, 0.2.0, 1.0.0-rc.1 to 1.5.5) stays
+served for good, built from the tags and `update.lock.json`; later tags carry no update core. `update/` is the frozen
+1.5.5 copy, still in the npm package (`./update/register`, `./update/sw-core`, deprecated, until 2.0): never edit it
+(`node tools/build-update.mjs --check` fails). Its tests and the stamp tool live in app-ui now.
 
 ## Working with the owner
 

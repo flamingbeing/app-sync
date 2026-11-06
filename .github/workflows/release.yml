@@ -34,7 +34,7 @@ jobs:
           v="v$(node -p "require('./package.json').version")"
           code="$(node -p "require('fs').readFileSync('index.js','utf8').match(/VERSION = '([^']+)'/)[1]")"
           if [ "$v" != "v$code" ]; then echo "::error::package.json ($v) and index.js (v$code) disagree"; exit 1; fi
-          for f in app.js update/sw-core.js update/register.js; do
+          for f in app.js; do   # update/ is frozen at 1.5.5 (tools/build-update.mjs --check)
             if ! grep -Eq "(VERSION|CORE_VERSION) = '${v#v}'" "$f"; then echo "::error::$f and package.json ($v) disagree"; exit 1; fi
           done
           if git ls-remote --exit-code --tags origin "refs/tags/$v" >/dev/null; then echo "$v exists; nothing to do"; exit 0; fi

@@ -37,7 +37,7 @@ import { createApp } from 'https://core.anawj.com/sync/1.0.0-rc.1/app.js';
 import { auth } from 'https://core.anawj.com/sync/1.0.0-rc.1/auth.js';
 import { sync } from 'https://core.anawj.com/sync/1.0.0-rc.1/sync.js';
 import { update } from 'https://core.anawj.com/sync/1.0.0-rc.1/update.js';
-import * as register from 'https://core.anawj.com/update/1.0.0-rc.1/register.js';
+import * as register from 'https://core.anawj.com/ui/1.0.0-rc.108/update/register.js';   // app-update ships with app-ui
 
 const app = createApp({ config: { name: 'myapp', sdk: async () => ({ A, F, auth, db }) }, modules: [
   auth(),
