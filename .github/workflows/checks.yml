@@ -1,5 +1,5 @@
 # Quick checks on every PR and push to main: the repo checks and unit tests, the Firestore adapter against the local
-# emulator (demo project, nothing reaches a real Firebase project), the update module in a browser, the Vite builds,
+# emulator (demo project, nothing reaches a real Firebase project), the Vite builds,
 # and app-starter's browser tests on this engine (consumer.yml, 4 shards; blocks). Jobs side by side.
 # The report-only consumer rows (the other apps on this engine) are in full-checks.yml ("Full checks": nightly with
 # the soak, and by hand with a PR number or ref). Repo variable FULL_CHECKS_ON_PRS=true (Settings, Secrets and
@@ -43,7 +43,7 @@ jobs:
       - name: Repo check (with the Worker tests)
         run: node tools/check.mjs
       - name: Unit tests
-        run: node --test test/*.test.mjs update/test/*.test.mjs
+        run: node --test test/*.test.mjs
       - name: Proof-read (pages and documents)
         run: node tools/proofread.mjs
 
@@ -134,43 +134,6 @@ jobs:
       - name: Firestore adapter (local emulator)
         if: steps.docs.outputs.docs != 'true'
         run: npm run test:emulator
-
-  update-browser:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      # A PR that changes only .md files skips this job's steps (the job still runs and reports success, so a required
-      # check cannot hang). Compares the event's base and head commits (a re-run judges the same commits); renames count by both names. Pushes, tags and manual runs always run everything; any doubt
-      # (API error, 3000+ files) runs everything. The unit job (proof-read, repo checks) always runs.
-      - name: Only .md files changed?
-        id: docs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          docs=false
-          if [ "$GITHUB_EVENT_NAME" = pull_request ] && files="$(gh api --paginate "repos/$GITHUB_REPOSITORY/compare/$BASE...$HEAD" --jq '.files[] | .filename, (.previous_filename // empty)')" && [ -n "$files" ]; then
-            n="$(printf '%s\n' "$files" | wc -l)"
-            if [ "$n" -lt 3000 ] && ! printf '%s\n' "$files" | grep -qv '\.md$'; then docs=true; fi
-          fi
-          echo "docs=$docs" >> "$GITHUB_OUTPUT"
-          echo "docs-only: $docs"
-      - uses: actions/checkout@v4
-        if: steps.docs.outputs.docs != 'true'
-      - uses: flamingbeing/app-devkit/setup-node@v1.11.0
-        if: steps.docs.outputs.docs != 'true'
-        with:
-          install: 'false'
-      - name: Playwright with Chromium (not saved in package.json)
-        if: steps.docs.outputs.docs != 'true'
-        run: npm install --no-save --no-package-lock playwright@1.63.0 && npx playwright install chromium
-      - name: Update module in a real browser
-        if: steps.docs.outputs.docs != 'true'
-        run: node update/test/e2e.mjs
 
   # app-starter (the reference app) on this engine, split so no shard runs much over a minute; it blocks
   consumer:

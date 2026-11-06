@@ -86,3 +86,24 @@ test('from 1.0: the version constants must say package.json\'s version; an edite
   oneVersion(t, '1.0.0-rc.1', ' // edited'); t.git('add', '-A'); t.git('commit', '-qm', 'edit'); t.git('tag', '-f', 'v1.0.0-rc.1');
   assert.match(t.run().stderr, /must never change/);
 });
+
+// 6 Nov 2026: frozen at 1.5.5 (app-update moved to app-ui). Later engine tags carry no update core, --lock refuses, and
+// --check wants the working tree's update/ to stay the 1.5.5 copy.
+test('frozen at 1.5.5: a later tag serves no update core, --lock refuses, --check wants the 1.5.5 copy', () => {
+  const t = mk(); t.release('0.2.0');
+  oneVersion(t, '1.5.5');
+  assert.equal(t.run('--lock').status, 0);
+  t.git('add', '-A'); t.git('commit', '-qm', '1.5.5'); t.git('tag', 'v1.5.5');
+  t.put('package.json', JSON.stringify({ version: '1.6.0' }));
+  assert.equal(t.run('--check').status, 0, 'the frozen copy matches');
+  assert.match(t.run('--lock').stderr, /frozen at 1\.5\.5/);
+  t.put('update/sw-core.js', "const CORE_VERSION = '1.6.0';");
+  assert.notEqual(t.run('--check').status, 0, 'an edited frozen copy fails');
+  oneVersion(t, '1.5.5'); t.put('package.json', JSON.stringify({ version: '1.6.0' }));
+  t.git('add', '-A'); t.git('commit', '-qm', '1.6.0'); t.git('tag', 'v1.6.0');
+  const r = t.run();
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(fs.existsSync(path.join(t.dir, 'dist/update/1.5.5/sw-core.js')));
+  assert.ok(!fs.existsSync(path.join(t.dir, 'dist/update/1.6.0')));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.dir, 'dist/update/versions.json'), 'utf8')).versions, ['0.2.0', '1.5.5']);
+});

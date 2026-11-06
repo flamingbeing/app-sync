@@ -150,7 +150,8 @@ unsent saves, and sends them after the move. An app pinned to 0.x keeps working 
 1. **Pins: one version.** Load the entries from `https://core.anawj.com/sync/1.4.0/` (the 1.0 steps are the same on any 1.x) (`app.js`, `auth.js`,
    `sync.js`, `update.js`; an import map with `@core/app`, `@core/auth`, `@core/sync`, `@core/update` is the
    recommended way) and the update core from `https://core.anawj.com/update/1.4.0/` (`sw-core.js`,
-   `register.js`): the same version for both. In `sw.js`, precache the files of the entries the page uses
+   `register.js`): the same version for both. (From 6 Nov 2026 the update core ships with app-ui instead:
+   `https://core.anawj.com/ui/<x.y.z>/update/`, see `update/README.md`.) In `sw.js`, precache the files of the entries the page uses
    (`/sync/<v>/entries.json`), not `files.json` (that is `index.js`'s list only).
 2. **One call becomes a list of modules.** Split the old options three ways:
 
